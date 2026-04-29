@@ -1,7 +1,8 @@
 {
-  "name": "flow-annotator",
+  "name": "@figma-flow-annotator/flow-annotator",
   "version": "1.0.0",
-  "description": "Your Figma Plugin",
+  "private": true,
+  "description": "Figma Flow Annotator plugin",
   "main": "code.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
