@@ -1,0 +1,3 @@
+# Defer agent skill authoring from the first demo
+
+The first demo implements the Figma plugin and shared core only; it does not implement the agent skill. The shared data contract and core rules should still preserve a future path for an agent skill to create and update **Annotation Cards**, **Annotation Badges**, **Flow Connector** visual nodes, shared-plugin-data records, reverse indexes, and refreshed connector routes. When that later skill is implemented, it must use the same schema, numbering rules, endpoint uniqueness rules, validation rules, routing behavior, and visual node conventions so a file authored by one surface remains editable and extractable by the other.

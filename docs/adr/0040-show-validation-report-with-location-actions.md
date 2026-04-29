@@ -1,0 +1,3 @@
+# Show validation report with location actions
+
+The first demo's **Validate Bindings** command scans the current page and shows a runtime report in the **Validate** tab without writing the report to shared plugin data. The report includes counts for errors, warnings, and info, filter chips for each severity, issue rows with a title, affected object count, and short description, and a location action that selects the related Figma nodes and brings them into view. **Clean Stale Indexes** is the only automatic cleanup action in the first demo; other validation issues are reported for explicit human correction rather than auto-fixed.

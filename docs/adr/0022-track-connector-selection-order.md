@@ -1,0 +1,3 @@
+# Track connector selection order during plugin runtime
+
+Connector creation uses the designer's multi-selection gesture while the plugin panel is open: the first valid endpoint selected in the current runtime window is the start endpoint and the next valid endpoint is the end endpoint. Selections that existed before the plugin opened are ignored because Figma's `page.selection` array order is unspecified. The plugin keeps a rolling window of the two most recent valid endpoints, so if the designer selects endpoints 1 and 2, then selects endpoint 3, the pending connector preview becomes 2 -> 3. The connect UI should always provide a swap control for the pending connector.

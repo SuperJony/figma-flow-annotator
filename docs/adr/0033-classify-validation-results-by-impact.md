@@ -1,0 +1,3 @@
+# Classify validation results by impact
+
+Validation results are classified by impact. **Errors** block reliable extraction or violate hard visual standards, such as orphaned annotations, orphaned flow connectors, duplicate flow connectors for the same ordered endpoints, invalid flow endpoints, missing required annotation fields, routing failures, or connector routes crossing connector obstacles. **Warnings** remain extractable but need designer or plugin cleanup, such as missing badges, duplicate badges, stale reverse indexes, empty flow actions, overlapping labels, or annotation cards outside the design notes area. **Info** reports layout hygiene items, such as unsorted cards, unarranged badges, or routes that can be refreshed.

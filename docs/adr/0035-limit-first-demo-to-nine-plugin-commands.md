@@ -1,0 +1,3 @@
+# Limit first demo to nine plugin commands
+
+The first demo exposes nine plugin commands: **Create Annotation**, **Add Subject Nodes**, **Create Flow Connector**, **Edit Flow Action**, **Refresh Connectors**, **Arrange Badges**, **Arrange Cards**, **Validate Bindings**, and **Clean Stale Indexes**. This scope is enough to prove the end-to-end loop for structured annotations, flow connectors, explicit route refresh, layout hygiene, and extraction safety without building a full editor. The first demo does not include manual connector route editing, complex node pickers, component library sync, automatic repair, or batch multi-endpoint connector creation.
