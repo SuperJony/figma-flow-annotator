@@ -631,7 +631,11 @@ function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNode): Re
 }
 
 function isConnectorObstacle(node: SceneNode, startNode: SceneNode, endNode: SceneNode): boolean {
-  if (node === startNode || node === endNode || isAncestor(node, startNode) || isAncestor(node, endNode)) {
+  const nodeIsEndpoint = node === startNode || node === endNode;
+  const nodeContainsEndpoint = isAncestor(node, startNode) || isAncestor(node, endNode);
+  const endpointContainsNode = isAncestor(startNode, node) || isAncestor(endNode, node);
+
+  if (nodeIsEndpoint || nodeContainsEndpoint || endpointContainsNode) {
     return false;
   }
 
