@@ -12,6 +12,7 @@ const CONNECTOR_ENDPOINT_GAP = 32;
 const CONNECTOR_ARROW_LENGTH = 18;
 const CONNECTOR_ARROW_WIDTH = 16;
 const CONNECTOR_COLOR = '#1F3A5A';
+const ROUTE_EPSILON = 0.001;
 
 type PluginMessage =
   | { type: 'create-annotation'; body: string }
@@ -25,6 +26,8 @@ interface Point {
   x: number;
   y: number;
 }
+
+type RouteDirection = -1 | 1;
 
 interface AnnotationCreationResult {
   annotationNumber: number;
@@ -398,12 +401,30 @@ function buildOrthogonalRoute(start: Rect, end: Rect, obstacles: Rect[]): Point[
   const deltaX = endCenter.x - startCenter.x;
   const deltaY = endCenter.y - startCenter.y;
   const expandedObstacles = obstacles.map((obstacle) => expandRect(obstacle, CONNECTOR_ROUTE_PADDING));
-  const candidates = Math.abs(deltaX) >= Math.abs(deltaY)
-    ? buildHorizontalRouteCandidates(start, end, expandedObstacles)
-    : buildVerticalRouteCandidates(start, end, expandedObstacles);
+  const horizontalDirection = deltaX >= 0 ? 1 : -1;
+  const verticalDirection = deltaY >= 0 ? 1 : -1;
+  const dominantAxisCandidates = Math.abs(deltaX) >= Math.abs(deltaY)
+    ? buildHorizontalRouteCandidates(start, end, expandedObstacles, horizontalDirection)
+    : buildVerticalRouteCandidates(start, end, expandedObstacles, verticalDirection);
+  const alternateAxisCandidates = Math.abs(deltaX) >= Math.abs(deltaY)
+    ? buildVerticalRouteCandidates(start, end, expandedObstacles, verticalDirection)
+    : buildHorizontalRouteCandidates(start, end, expandedObstacles, horizontalDirection);
+  const fallbackSideCandidates = [
+    ...buildHorizontalRouteCandidates(start, end, expandedObstacles, oppositeDirection(horizontalDirection)),
+    ...buildVerticalRouteCandidates(start, end, expandedObstacles, oppositeDirection(verticalDirection)),
+  ];
+  const candidates = [
+    ...dominantAxisCandidates,
+    ...alternateAxisCandidates,
+    ...fallbackSideCandidates,
+  ];
   const legalCandidates = candidates
     .map(compactPoints)
-    .filter((candidate) => !routeIntersectsObstacles(candidate, expandedObstacles));
+    .filter(
+      (candidate) =>
+        !routeIntersectsObstacles(candidate, expandedObstacles) &&
+        !routeIntersectsEndpointInteriors(candidate, [start, end]),
+    );
 
   if (legalCandidates.length === 0) {
     throw new Error('No orthogonal route avoids Context Frames and Annotation Cards.');
@@ -413,10 +434,9 @@ function buildOrthogonalRoute(start: Rect, end: Rect, obstacles: Rect[]): Point[
   return legalCandidates[0];
 }
 
-function buildHorizontalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[]): Point[][] {
+function buildHorizontalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[], direction: RouteDirection): Point[][] {
   const startCenter = centerOf(start);
   const endCenter = centerOf(end);
-  const direction = endCenter.x >= startCenter.x ? 1 : -1;
   const startPoint = {
     x: direction > 0 ? start.x + start.width : start.x,
     y: startCenter.y,
@@ -447,10 +467,9 @@ function buildHorizontalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[
   return [directRoute, ...laneRoutes];
 }
 
-function buildVerticalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[]): Point[][] {
+function buildVerticalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[], direction: RouteDirection): Point[][] {
   const startCenter = centerOf(start);
   const endCenter = centerOf(end);
-  const direction = endCenter.y >= startCenter.y ? 1 : -1;
   const startPoint = {
     x: startCenter.x,
     y: direction > 0 ? start.y + start.height : start.y,
@@ -479,6 +498,10 @@ function buildVerticalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[])
     endPoint,
   ]);
   return [directRoute, ...laneRoutes];
+}
+
+function oppositeDirection(direction: RouteDirection): RouteDirection {
+  return direction > 0 ? -1 : 1;
 }
 
 function getHorizontalLaneValues(start: Rect, end: Rect, startY: number, endY: number, obstacles: Rect[]): number[] {
@@ -526,17 +549,52 @@ function routeIntersectsObstacles(points: Point[], obstacles: Rect[]): boolean {
   return false;
 }
 
+function routeIntersectsEndpointInteriors(points: Point[], endpoints: Rect[]): boolean {
+  for (let index = 0; index < points.length - 1; index += 1) {
+    if (endpoints.some((endpoint) => segmentIntersectsRectInterior(points[index], points[index + 1], endpoint))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function segmentIntersectsRect(start: Point, end: Point, rect: Rect): boolean {
-  if (Math.abs(start.y - end.y) < 0.001) {
+  if (Math.abs(start.y - end.y) < ROUTE_EPSILON) {
     const minX = Math.min(start.x, end.x);
     const maxX = Math.max(start.x, end.x);
     return start.y >= rect.y && start.y <= rect.y + rect.height && maxX >= rect.x && minX <= rect.x + rect.width;
   }
 
-  if (Math.abs(start.x - end.x) < 0.001) {
+  if (Math.abs(start.x - end.x) < ROUTE_EPSILON) {
     const minY = Math.min(start.y, end.y);
     const maxY = Math.max(start.y, end.y);
     return start.x >= rect.x && start.x <= rect.x + rect.width && maxY >= rect.y && minY <= rect.y + rect.height;
+  }
+
+  return true;
+}
+
+function segmentIntersectsRectInterior(start: Point, end: Point, rect: Rect): boolean {
+  if (Math.abs(start.y - end.y) < ROUTE_EPSILON) {
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    return (
+      start.y > rect.y + ROUTE_EPSILON &&
+      start.y < rect.y + rect.height - ROUTE_EPSILON &&
+      maxX > rect.x + ROUTE_EPSILON &&
+      minX < rect.x + rect.width - ROUTE_EPSILON
+    );
+  }
+
+  if (Math.abs(start.x - end.x) < ROUTE_EPSILON) {
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    return (
+      start.x > rect.x + ROUTE_EPSILON &&
+      start.x < rect.x + rect.width - ROUTE_EPSILON &&
+      maxY > rect.y + ROUTE_EPSILON &&
+      minY < rect.y + rect.height - ROUTE_EPSILON
+    );
   }
 
   return true;
