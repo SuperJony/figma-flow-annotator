@@ -82,6 +82,12 @@ interface ContextRecord {
 
 type ContextDataNode = FrameNode | PageNode;
 
+interface ConnectorObstacleTraversalItem {
+  node: SceneNode;
+  generatedAncestor: boolean;
+  coveringObstacles: Rect[];
+}
+
 let loadedFonts = false;
 let observedSelectedEndpointIds = new Set<string>();
 let connectorEndpointWindowIds: string[] = [];
@@ -621,34 +627,63 @@ function scoreRoute(points: Point[]): number {
 
 function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNode): Rect[] {
   const obstacles: Rect[] = [];
-  walkPageNodes((node) => {
-    if (!isConnectorObstacle(node, startNode, endNode) || node.absoluteBoundingBox === null) {
-      return;
+  const startAncestorIds = getAncestorIds(startNode);
+  const endAncestorIds = getAncestorIds(endNode);
+  const pending: ConnectorObstacleTraversalItem[] = figma.currentPage.children.map((node) => ({
+    node,
+    generatedAncestor: false,
+    coveringObstacles: [],
+  }));
+
+  for (let index = 0; index < pending.length; index += 1) {
+    const item = pending[index];
+    const node = item.node;
+    if (node === startNode || node === endNode) {
+      continue;
     }
-    obstacles.push(node.absoluteBoundingBox);
-  });
+
+    const kind = node.getSharedPluginData(NAMESPACE, 'kind');
+    const nodeContainsEndpoint = startAncestorIds.has(node.id) || endAncestorIds.has(node.id);
+    let generatedAncestor = item.generatedAncestor;
+    let coveringObstacles = item.coveringObstacles;
+
+    if (kind === 'annotation-card' && !nodeContainsEndpoint && node.absoluteBoundingBox !== null) {
+      generatedAncestor = true;
+      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, node.absoluteBoundingBox);
+    } else if (kind !== '' || generatedAncestor) {
+      generatedAncestor = true;
+    } else if (node.type === 'FRAME' && !nodeContainsEndpoint && node.absoluteBoundingBox !== null) {
+      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, node.absoluteBoundingBox);
+    }
+
+    if (generatedAncestor || !('children' in node)) {
+      continue;
+    }
+
+    node.children.forEach((child) => {
+      pending.push({
+        node: child,
+        generatedAncestor,
+        coveringObstacles,
+      });
+    });
+  }
+
   return obstacles;
 }
 
-function isConnectorObstacle(node: SceneNode, startNode: SceneNode, endNode: SceneNode): boolean {
-  const nodeIsEndpoint = node === startNode || node === endNode;
-  const nodeContainsEndpoint = isAncestor(node, startNode) || isAncestor(node, endNode);
-  const endpointContainsNode = isAncestor(startNode, node) || isAncestor(endNode, node);
-
-  if (nodeIsEndpoint || nodeContainsEndpoint || endpointContainsNode) {
-    return false;
+function appendUncoveredObstacle(obstacles: Rect[], coveringObstacles: Rect[], candidate: Rect): Rect[] {
+  // Descendant obstacles fully inside an ancestor cannot add routing constraints.
+  if (isCoveredByObstacle(candidate, coveringObstacles)) {
+    return coveringObstacles;
   }
 
-  const kind = node.getSharedPluginData(NAMESPACE, 'kind');
-  if (kind === 'annotation-card') {
-    return true;
-  }
+  obstacles.push(candidate);
+  return [...coveringObstacles, candidate];
+}
 
-  if (kind !== '' || hasGeneratedAncestor(node)) {
-    return false;
-  }
-
-  return node.type === 'FRAME';
+function isCoveredByObstacle(candidate: Rect, coveringObstacles: Rect[]): boolean {
+  return coveringObstacles.some((obstacle) => rectContainsRect(obstacle, candidate));
 }
 
 function findOpenCardPosition(container: FrameNode, card: FrameNode, basePosition: Point): Point {
@@ -867,12 +902,8 @@ function isPositiveInteger(value: unknown): value is number {
 function walkPageNodes(visit: (node: SceneNode) => void): void {
   const pending: SceneNode[] = [...figma.currentPage.children];
 
-  while (pending.length > 0) {
-    const node = pending.shift();
-    if (node === undefined) {
-      continue;
-    }
-
+  for (let index = 0; index < pending.length; index += 1) {
+    const node = pending[index];
     visit(node);
     if ('children' in node) {
       pending.push(...node.children);
@@ -1003,6 +1034,15 @@ function rectsOverlap(first: Rect, second: Rect): boolean {
   );
 }
 
+function rectContainsRect(outer: Rect, inner: Rect): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
 function compactPoints(points: Point[]): Point[] {
   const compacted: Point[] = [];
   points.forEach((point) => {
@@ -1079,15 +1119,14 @@ function uniqueNumbers(values: number[]): number[] {
   return unique;
 }
 
-function isAncestor(candidate: BaseNode, node: BaseNode): boolean {
+function getAncestorIds(node: BaseNode): Set<string> {
+  const ids = new Set<string>();
   let current = node.parent;
-  while (current !== null) {
-    if (current === candidate) {
-      return true;
-    }
+  while (current !== null && current.type !== 'PAGE') {
+    ids.add(current.id);
     current = current.parent;
   }
-  return false;
+  return ids;
 }
 
 function findContextFrameId(node: SceneNode): string {
