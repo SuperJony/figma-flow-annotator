@@ -10,6 +10,6 @@ Keys:
 - `connector`: complete **Flow Connector** record, written only on a **Flow Connector** root. It includes semantic fields plus derived `routeCache`.
 - `annotationRefs`: reverse reference value on **Subject Nodes**, containing `schemaVersion` and `annotationIds`.
 - `connectorRefs`: reverse reference value on **Flow Endpoints**, containing `schemaVersion` and `connectorIds`.
-- `context`: context value on **Context Frames**, containing `schemaVersion`, `contextFrameId`, and `nextAnnotationNumber`.
+- `context`: context value on **Context Frames** or the current page when it acts as a **Temporary Page Context**, containing `schemaVersion`, `contextFrameId`, and `nextAnnotationNumber`.
 
 Complete `annotation` and `connector` records must include `schemaVersion: 1`, `id`, `createdAt`, and `updatedAt`. `routeCache` is derived visual data and may be overwritten by refresh without changing connector semantics. Validation reports, UI state, route diagnostics, and other large or runtime-only values are not written to shared plugin data.

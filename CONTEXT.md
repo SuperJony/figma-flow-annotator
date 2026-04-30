@@ -44,6 +44,10 @@ _Avoid_: Target, annotated node
 The UI frame that owns an **Annotation** as part of a design scene.
 _Avoid_: Parent frame, page frame
 
+**Temporary Page Context**:
+The current Figma page used as the owning **Annotation** context when selected **Subject Nodes** do not share a **Context Frame**.
+_Avoid_: Page frame, root frame
+
 **Owner Context Frame**:
 The **Context Frame** that owns a **Flow Connector** for extraction and grouping.
 _Avoid_: Connector frame, parent context
@@ -117,8 +121,8 @@ _Avoid_: Broken index, dangling id
 - A **Subject Node** should not have more than one **Annotation Badge** for the same **Annotation**.
 - By default, an **Annotation** with multiple **Subject Nodes** has one **Annotation Badge** for each **Subject Node**.
 - Multiple **Annotation Badges** may share the same **Annotation Number** when they refer to the same **Annotation**.
-- An **Annotation** belongs to exactly one **Context Frame**.
-- An **Annotation Number** is unique within its **Context Frame**.
+- An **Annotation** belongs to exactly one context: either one **Context Frame** or the current page as a **Temporary Page Context**.
+- An **Annotation Number** is unique within its owning context.
 - An **Annotation Number** remains stable after other **Annotations** are deleted.
 - A **Subject Node** and its **Context Frame** may be the same Figma frame.
 - A **Flow Endpoint** may be a **Subject Node** or a **Context Frame**.

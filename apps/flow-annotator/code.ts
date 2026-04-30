@@ -80,7 +80,7 @@ interface ContextRecord {
   nextAnnotationNumber: number;
 }
 
-type ContextDataNode = FrameNode;
+type ContextDataNode = FrameNode | PageNode;
 
 let loadedFonts = false;
 let observedSelectedEndpointIds = new Set<string>();
@@ -682,7 +682,7 @@ function findOpenCardPosition(container: FrameNode, card: FrameNode, basePositio
 function findAnnotationContextFrameId(subjects: SceneNode[]): string {
   const commonFrame = findNearestCommonFrame(subjects);
   if (commonFrame === null) {
-    throw new Error('Selected Subject Nodes must share one Context Frame.');
+    return figma.currentPage.id;
   }
   return commonFrame.id;
 }
@@ -792,6 +792,10 @@ function allocateNextAnnotationNumber(contextFrameId: string): number {
 }
 
 function findContextDataNode(contextFrameId: string): ContextDataNode {
+  if (contextFrameId === figma.currentPage.id) {
+    return figma.currentPage;
+  }
+
   let contextNode: FrameNode | null = null;
   walkPageNodes((node) => {
     if (node.type === 'FRAME' && node.id === contextFrameId) {
@@ -800,7 +804,7 @@ function findContextDataNode(contextFrameId: string): ContextDataNode {
   });
 
   if (contextNode === null) {
-    throw new Error('Context Frame not found for Annotation Number allocation.');
+    throw new Error('Context not found for Annotation Number allocation.');
   }
 
   return contextNode;
