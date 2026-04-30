@@ -80,7 +80,7 @@ interface ContextRecord {
   nextAnnotationNumber: number;
 }
 
-type ContextDataNode = PageNode | FrameNode;
+type ContextDataNode = FrameNode;
 
 let loadedFonts = false;
 
@@ -145,11 +145,11 @@ function createAnnotations(bodyValue: string): AnnotationCreationResult {
     throw new Error('Select one or more non-generated Subject Nodes.');
   }
 
-  const container = ensureContainer(ANNOTATIONS_CONTAINER_NAME);
+  const contextFrameId = findAnnotationContextFrameId(subjects);
   const subjectBounds = subjects.map(getVisibleBounds);
   const annotationBounds = unionRects(subjectBounds);
-  const contextFrameId = findAnnotationContextFrameId(subjects);
   const annotationNumber = allocateNextAnnotationNumber(contextFrameId);
+  const container = ensureContainer(ANNOTATIONS_CONTAINER_NAME);
   const now = new Date().toISOString();
   const annotationId = createId('annotation');
   const record: AnnotationRecord = {
@@ -173,7 +173,7 @@ function createAnnotations(bodyValue: string): AnnotationCreationResult {
       annotationId,
       annotationNumber,
       subjectNodeId: subject.id,
-      contextFrameId: findContextFrameId(subject),
+      contextFrameId,
     };
     const badge = createAnnotationBadge(container, subjectBounds[index], subject, record);
     badge.setSharedPluginData(NAMESPACE, 'kind', 'annotation-badge');
@@ -678,7 +678,10 @@ function findOpenCardPosition(container: FrameNode, card: FrameNode, basePositio
 
 function findAnnotationContextFrameId(subjects: SceneNode[]): string {
   const commonFrame = findNearestCommonFrame(subjects);
-  return commonFrame?.id ?? figma.currentPage.id;
+  if (commonFrame === null) {
+    throw new Error('Selected Subject Nodes must share one Context Frame.');
+  }
+  return commonFrame.id;
 }
 
 function findNearestCommonFrame(subjects: SceneNode[]): FrameNode | null {
@@ -786,10 +789,6 @@ function allocateNextAnnotationNumber(contextFrameId: string): number {
 }
 
 function findContextDataNode(contextFrameId: string): ContextDataNode {
-  if (figma.currentPage.id === contextFrameId) {
-    return figma.currentPage;
-  }
-
   let contextNode: FrameNode | null = null;
   walkPageNodes((node) => {
     if (node.type === 'FRAME' && node.id === contextFrameId) {
