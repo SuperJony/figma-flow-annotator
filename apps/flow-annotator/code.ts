@@ -74,6 +74,14 @@ interface ConnectorRecord {
   updatedAt: string;
 }
 
+interface ContextRecord {
+  schemaVersion: 1;
+  contextFrameId: string;
+  nextAnnotationNumber: number;
+}
+
+type ContextDataNode = PageNode | FrameNode;
+
 let loadedFonts = false;
 
 figma.showUI(__html__, {
@@ -141,7 +149,7 @@ function createAnnotations(bodyValue: string): AnnotationCreationResult {
   const subjectBounds = subjects.map(getVisibleBounds);
   const annotationBounds = unionRects(subjectBounds);
   const contextFrameId = findAnnotationContextFrameId(subjects);
-  const annotationNumber = getNextAnnotationNumber(contextFrameId);
+  const annotationNumber = allocateNextAnnotationNumber(contextFrameId);
   const now = new Date().toISOString();
   const annotationId = createId('annotation');
   const record: AnnotationRecord = {
@@ -768,7 +776,62 @@ function bringBadgesToFront(container: FrameNode): void {
   });
 }
 
-function getNextAnnotationNumber(contextFrameId: string): number {
+function allocateNextAnnotationNumber(contextFrameId: string): number {
+  const contextNode = findContextDataNode(contextFrameId);
+  const contextRecord = readContextRecord(contextNode, contextFrameId);
+  const seededNextAnnotationNumber = getSeededNextAnnotationNumber(contextFrameId);
+  const annotationNumber = Math.max(contextRecord?.nextAnnotationNumber ?? 1, seededNextAnnotationNumber);
+  writeContextRecord(contextNode, contextFrameId, annotationNumber + 1);
+  return annotationNumber;
+}
+
+function findContextDataNode(contextFrameId: string): ContextDataNode {
+  if (figma.currentPage.id === contextFrameId) {
+    return figma.currentPage;
+  }
+
+  let contextNode: FrameNode | null = null;
+  walkPageNodes((node) => {
+    if (node.type === 'FRAME' && node.id === contextFrameId) {
+      contextNode = node;
+    }
+  });
+
+  if (contextNode === null) {
+    throw new Error('Context Frame not found for Annotation Number allocation.');
+  }
+
+  return contextNode;
+}
+
+function readContextRecord(contextNode: ContextDataNode, contextFrameId: string): ContextRecord | null {
+  const parsed = parseJson(contextNode.getSharedPluginData(NAMESPACE, 'context'));
+  if (
+    !isRecord(parsed) ||
+    parsed.schemaVersion !== 1 ||
+    parsed.contextFrameId !== contextFrameId ||
+    !isPositiveInteger(parsed.nextAnnotationNumber)
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    contextFrameId,
+    nextAnnotationNumber: parsed.nextAnnotationNumber,
+  };
+}
+
+function writeContextRecord(contextNode: ContextDataNode, contextFrameId: string, nextAnnotationNumber: number): void {
+  const record: ContextRecord = {
+    schemaVersion: 1,
+    contextFrameId,
+    nextAnnotationNumber,
+  };
+  contextNode.setSharedPluginData(NAMESPACE, 'context', JSON.stringify(record));
+}
+
+function getSeededNextAnnotationNumber(contextFrameId: string): number {
   let maxNumber = 0;
   walkPageNodes((node) => {
     if (node.getSharedPluginData(NAMESPACE, 'kind') !== 'annotation-card') {
@@ -779,12 +842,16 @@ function getNextAnnotationNumber(contextFrameId: string): number {
     if (
       isRecord(annotation) &&
       annotation.contextFrameId === contextFrameId &&
-      typeof annotation.annotationNumber === 'number'
+      isPositiveInteger(annotation.annotationNumber)
     ) {
       maxNumber = Math.max(maxNumber, annotation.annotationNumber);
     }
   });
   return maxNumber + 1;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
 }
 
 function walkPageNodes(visit: (node: SceneNode) => void): void {
