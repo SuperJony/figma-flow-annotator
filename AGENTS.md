@@ -11,3 +11,7 @@ Use the default Matt Pocock skills triage labels. See `docs/agents/triage-labels
 ### Domain docs
 
 Single-context layout: read `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+
+### Code-change verification
+
+For any code modification, automatically invoke the Codex `@verification` subagent for an independent audit before reporting completion. Address actionable findings before final delivery, or report any unresolved risk explicitly.
