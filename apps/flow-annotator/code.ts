@@ -83,6 +83,8 @@ interface ContextRecord {
 type ContextDataNode = FrameNode;
 
 let loadedFonts = false;
+let observedSelectedEndpointIds = new Set<string>();
+let connectorEndpointWindowIds: string[] = [];
 
 figma.showUI(__html__, {
   title: 'Flow Annotator',
@@ -91,8 +93,9 @@ figma.showUI(__html__, {
   themeColors: true,
 });
 
+observedSelectedEndpointIds = new Set(getSelectedConnectorEndpointIds());
 postSelectionState();
-figma.on('selectionchange', postSelectionState);
+figma.on('selectionchange', handleSelectionChange);
 
 figma.ui.onmessage = (message: PluginMessage) => {
   void handleMessage(message);
@@ -192,12 +195,12 @@ function createAnnotations(bodyValue: string): AnnotationCreationResult {
 }
 
 function createFlowConnector(flowActionValue: string): GroupNode {
-  const selected = figma.currentPage.selection;
-  if (selected.length !== 2) {
-    throw new Error('Create Flow Connector requires exactly two selected Flow Endpoints.');
+  const endpoints = getPendingConnectorEndpointNodes();
+  if (endpoints.length !== 2) {
+    throw new Error('Create Flow Connector requires exactly two runtime-selected Flow Endpoints.');
   }
 
-  const [startNode, endNode] = selected;
+  const [startNode, endNode] = endpoints;
   if (hasGeneratedAncestor(startNode) || hasGeneratedAncestor(endNode)) {
     throw new Error('Flow Endpoints must be non-generated Figma nodes.');
   }
@@ -1133,8 +1136,67 @@ function readableName(name: string): string {
   return trimmed.length > 0 ? trimmed.slice(0, 48) : 'Untitled';
 }
 
+function handleSelectionChange(): void {
+  recordRuntimeConnectorEndpointSelection();
+  postSelectionState();
+}
+
+function recordRuntimeConnectorEndpointSelection(): void {
+  const selectedEndpointIds = getSelectedConnectorEndpointIds();
+  const nextObservedSelectedEndpointIds = new Set(selectedEndpointIds);
+  const newlySelectedEndpointIds = selectedEndpointIds.filter(
+    (nodeId) => !observedSelectedEndpointIds.has(nodeId),
+  );
+
+  // Multiple additions in one event have no reliable relative order from Figma.
+  if (newlySelectedEndpointIds.length === 1) {
+    pushConnectorEndpointId(newlySelectedEndpointIds[0]);
+  }
+
+  observedSelectedEndpointIds = nextObservedSelectedEndpointIds;
+  pruneConnectorEndpointWindow();
+}
+
+function pushConnectorEndpointId(nodeId: string): void {
+  connectorEndpointWindowIds = [
+    ...connectorEndpointWindowIds.filter((existingId) => existingId !== nodeId),
+    nodeId,
+  ].slice(-2);
+}
+
+function getSelectedConnectorEndpointIds(): string[] {
+  return figma.currentPage.selection.filter(isConnectorEndpoint).map((node) => node.id);
+}
+
+function getPendingConnectorEndpointNodes(): SceneNode[] {
+  const endpoints = connectorEndpointWindowIds
+    .map(findSceneNodeById)
+    .filter((node): node is SceneNode => node !== null && isConnectorEndpoint(node));
+  connectorEndpointWindowIds = endpoints.map((node) => node.id);
+  return endpoints;
+}
+
+function pruneConnectorEndpointWindow(): void {
+  void getPendingConnectorEndpointNodes();
+}
+
+function findSceneNodeById(nodeId: string): SceneNode | null {
+  let found: SceneNode | null = null;
+  walkPageNodes((node) => {
+    if (found === null && node.id === nodeId) {
+      found = node;
+    }
+  });
+  return found;
+}
+
+function isConnectorEndpoint(node: SceneNode): boolean {
+  return !hasGeneratedAncestor(node);
+}
+
 function selectAndZoom(nodes: SceneNode[]): void {
   figma.currentPage.selection = nodes;
+  observedSelectedEndpointIds = new Set(getSelectedConnectorEndpointIds());
   figma.viewport.scrollAndZoomIntoView(nodes);
 }
 
@@ -1152,9 +1214,10 @@ function postStatus(tone: StatusTone, message: string): void {
 function postSelectionState(): void {
   const selected = figma.currentPage.selection;
   const eligibleCount = selected.filter((node) => !hasGeneratedAncestor(node)).length;
+  const pendingConnectorEndpointCount = getPendingConnectorEndpointNodes().length;
   figma.ui.postMessage({
     type: 'selection-state',
-    totalCount: selected.length,
+    totalCount: pendingConnectorEndpointCount,
     eligibleCount,
   });
 }
