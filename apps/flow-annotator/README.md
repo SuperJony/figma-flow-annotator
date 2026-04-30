@@ -47,6 +47,7 @@ Annotation proof:
 3. Click **Create Annotation**.
 4. Inspect the page for `FFA Annotations`, one `FFA Annotation Card #<number>`,
    and one `FFA Annotation Badge #<number>` per selected **Subject Node**.
+   Multi-node annotations share the same **Annotation Number** and card.
 5. Inspect shared plugin data in namespace `figma_flow_annotator`:
    - the card root has `kind = annotation-card` and `annotation`;
    - each badge root has `kind = annotation-badge` and `badgeRef`;
@@ -57,14 +58,14 @@ Connector proof:
 1. Select exactly two normal Figma Design nodes.
 2. Optionally enter a **Flow Action**.
 3. Click **Create Flow Connector**.
-4. Inspect the page for `FFA Connectors` and one readable native connector visual
+4. Inspect the page for `FFA Connectors` and one readable SVG/vector connector visual
    named `FFA Connector <startName> -> <endName>`.
 5. Inspect shared plugin data in namespace `figma_flow_annotator`:
    - the connector root has `kind = flow-connector` and `connector`;
    - both selected endpoints have `connectorRefs`.
 
-The connector visual is built from native Figma Design shapes and does not use a
-FigJam native connector.
+The connector visual is built from a custom Figma Design SVG/vector node and
+does not use a FigJam native connector.
 
 ## References
 

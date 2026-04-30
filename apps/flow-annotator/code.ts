@@ -5,6 +5,13 @@ const FONT: FontName = { family: 'Inter', style: 'Regular' };
 const CARD_WIDTH = 280;
 const BADGE_SIZE = 28;
 const CONNECTOR_THICKNESS = 4;
+const CARD_OFFSET_Y = 40;
+const CARD_GAP = 16;
+const CONNECTOR_ROUTE_PADDING = 24;
+const CONNECTOR_ENDPOINT_GAP = 32;
+const CONNECTOR_ARROW_LENGTH = 18;
+const CONNECTOR_ARROW_WIDTH = 16;
+const CONNECTOR_COLOR = '#1F3A5A';
 
 type PluginMessage =
   | { type: 'create-annotation'; body: string }
@@ -17,6 +24,12 @@ type StatusTone = 'success' | 'error';
 interface Point {
   x: number;
   y: number;
+}
+
+interface AnnotationCreationResult {
+  annotationNumber: number;
+  badgeCount: number;
+  nodes: SceneNode[];
 }
 
 interface EndpointRecord {
@@ -90,8 +103,11 @@ async function handleMessage(message: PluginMessage): Promise<void> {
 
     if (message.type === 'create-annotation') {
       const created = createAnnotations(message.body);
-      selectAndZoom(created);
-      postStatus('success', `Created ${created.length / 2} annotation visual set(s).`);
+      selectAndZoom(created.nodes);
+      postStatus(
+        'success',
+        `Created annotation #${created.annotationNumber} with ${created.badgeCount} badge(s).`,
+      );
       return;
     }
 
@@ -107,7 +123,7 @@ async function handleMessage(message: PluginMessage): Promise<void> {
   }
 }
 
-function createAnnotations(bodyValue: string): SceneNode[] {
+function createAnnotations(bodyValue: string): AnnotationCreationResult {
   const body = bodyValue.trim();
   if (body.length === 0) {
     throw new Error('Annotation Body is required.');
@@ -119,51 +135,49 @@ function createAnnotations(bodyValue: string): SceneNode[] {
   }
 
   const container = ensureContainer(ANNOTATIONS_CONTAINER_NAME);
-  const createdNodes: SceneNode[] = [];
-  let nextNumber = getNextAnnotationNumber();
+  const subjectBounds = subjects.map(getVisibleBounds);
+  const annotationBounds = unionRects(subjectBounds);
+  const contextFrameId = findAnnotationContextFrameId(subjects);
+  const annotationNumber = getNextAnnotationNumber(contextFrameId);
+  const now = new Date().toISOString();
+  const annotationId = createId('annotation');
+  const record: AnnotationRecord = {
+    schemaVersion: 1,
+    id: annotationId,
+    annotationNumber,
+    body,
+    contextFrameId,
+    subjectNodeIds: subjects.map((subject) => subject.id),
+    createdAt: now,
+    updatedAt: now,
+  };
 
-  subjects.forEach((subject, index) => {
-    const bounds = getVisibleBounds(subject);
-    const contextFrameId = findContextFrameId(subject);
-    const annotationNumber = nextNumber;
-    nextNumber += 1;
+  const card = createAnnotationCard(container, subjects, annotationBounds, record);
+  card.setSharedPluginData(NAMESPACE, 'kind', 'annotation-card');
+  card.setSharedPluginData(NAMESPACE, 'annotation', JSON.stringify(record));
 
-    const now = new Date().toISOString();
-    const annotationId = createId('annotation');
-    const record: AnnotationRecord = {
-      schemaVersion: 1,
-      id: annotationId,
-      annotationNumber,
-      body,
-      contextFrameId,
-      subjectNodeIds: [subject.id],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const card = createAnnotationCard(container, subject, bounds, index, record);
-    const badge = createAnnotationBadge(container, bounds, subject, record);
-
-    card.setSharedPluginData(NAMESPACE, 'kind', 'annotation-card');
-    card.setSharedPluginData(NAMESPACE, 'annotation', JSON.stringify(record));
-
+  const badges = subjects.map((subject, index) => {
     const badgeRef: BadgeRefRecord = {
       schemaVersion: 1,
       annotationId,
       annotationNumber,
       subjectNodeId: subject.id,
-      contextFrameId,
+      contextFrameId: findContextFrameId(subject),
     };
+    const badge = createAnnotationBadge(container, subjectBounds[index], subject, record);
     badge.setSharedPluginData(NAMESPACE, 'kind', 'annotation-badge');
     badge.setSharedPluginData(NAMESPACE, 'badgeRef', JSON.stringify(badgeRef));
     appendSharedReference(subject, 'annotationRefs', 'annotationIds', annotationId);
-
-    createdNodes.push(card, badge);
+    return badge;
   });
 
   bringBadgesToFront(container);
   ensureLayerOrder();
-  return createdNodes;
+  return {
+    annotationNumber,
+    badgeCount: badges.length,
+    nodes: [card, ...badges],
+  };
 }
 
 function createFlowConnector(flowActionValue: string): GroupNode {
@@ -181,7 +195,7 @@ function createFlowConnector(flowActionValue: string): GroupNode {
   const endBounds = getVisibleBounds(endNode);
   const startContextFrameId = findContextFrameId(startNode);
   const endContextFrameId = findContextFrameId(endNode);
-  const routePoints = buildOrthogonalRoute(startBounds, endBounds);
+  const routePoints = buildOrthogonalRoute(startBounds, endBounds, collectConnectorObstacles(startNode, endNode));
   const connectorId = createId('connector');
   const flowAction = flowActionValue.trim();
   const now = new Date().toISOString();
@@ -223,9 +237,8 @@ function createFlowConnector(flowActionValue: string): GroupNode {
 
 function createAnnotationCard(
   container: FrameNode,
-  subject: SceneNode,
+  subjects: SceneNode[],
   bounds: Rect,
-  index: number,
   record: AnnotationRecord,
 ): FrameNode {
   const card = figma.createFrame();
@@ -237,15 +250,13 @@ function createAnnotationCard(
   card.clipsContent = false;
   card.resize(CARD_WIDTH, 128);
   container.appendChild(card);
-  card.x = bounds.x;
-  card.y = bounds.y + bounds.height + 40 + index * 28;
 
   const title = createText(`Annotation Number ${record.annotationNumber}`, `Annotation #${record.annotationNumber}`, 13, solidPaint(0.07, 0.12, 0.2), CARD_WIDTH - 32);
   card.appendChild(title);
   title.x = 16;
   title.y = 14;
 
-  const subjectLabel = createText('Subject Node', `Subject: ${readableName(subject.name)}`, 11, solidPaint(0.34, 0.4, 0.49), CARD_WIDTH - 32);
+  const subjectLabel = createText('Subject Nodes', `Subjects: ${readableSubjectNames(subjects)}`, 11, solidPaint(0.34, 0.4, 0.49), CARD_WIDTH - 32);
   card.appendChild(subjectLabel);
   subjectLabel.x = 16;
   subjectLabel.y = 38;
@@ -255,6 +266,13 @@ function createAnnotationCard(
   body.x = 16;
   body.y = 64;
   card.resize(CARD_WIDTH, Math.max(112, body.y + body.height + 18));
+
+  const position = findOpenCardPosition(container, card, {
+    x: bounds.x,
+    y: bounds.y + bounds.height + CARD_OFFSET_Y,
+  });
+  card.x = position.x;
+  card.y = position.y;
 
   return card;
 }
@@ -288,17 +306,7 @@ function createAnnotationBadge(
 }
 
 function createConnectorVisualNodes(points: Point[], flowAction: string): SceneNode[] {
-  const nodes: SceneNode[] = [];
-
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const segment = createSegment(points[index], points[index + 1]);
-    if (segment !== null) {
-      nodes.push(segment);
-    }
-  }
-
-  const arrow = createArrowHead(points);
-  nodes.push(arrow);
+  const nodes: SceneNode[] = [createConnectorRouteSvg(points)];
 
   if (flowAction.length > 0) {
     nodes.push(createFlowActionLabel(points, flowAction));
@@ -307,48 +315,63 @@ function createConnectorVisualNodes(points: Point[], flowAction: string): SceneN
   return nodes;
 }
 
-function createSegment(start: Point, end: Point): RectangleNode | null {
-  const width = Math.abs(end.x - start.x);
-  const height = Math.abs(end.y - start.y);
-  if (width < 1 && height < 1) {
-    return null;
+function createConnectorRouteSvg(points: Point[]): FrameNode {
+  const distinctPoints = compactPoints(points);
+  if (distinctPoints.length < 2) {
+    throw new Error('Connector route requires at least two points.');
   }
 
-  const segment = figma.createRectangle();
-  segment.name = 'FFA Connector Segment';
-  segment.fills = [solidPaint(0.12, 0.24, 0.38)];
-  segment.cornerRadius = CONNECTOR_THICKNESS / 2;
-
-  if (width >= height) {
-    segment.resize(Math.max(width, CONNECTOR_THICKNESS), CONNECTOR_THICKNESS);
-    segment.x = Math.min(start.x, end.x);
-    segment.y = start.y - CONNECTOR_THICKNESS / 2;
-  } else {
-    segment.resize(CONNECTOR_THICKNESS, Math.max(height, CONNECTOR_THICKNESS));
-    segment.x = start.x - CONNECTOR_THICKNESS / 2;
-    segment.y = Math.min(start.y, end.y);
-  }
-
-  return segment;
+  const drawing = buildConnectorDrawing(distinctPoints);
+  const allPoints = [...drawing.pathPoints, ...drawing.arrowPoints];
+  const bounds = expandRect(unionRects(pointsToRects(allPoints)), CONNECTOR_THICKNESS + 2);
+  const width = Math.max(1, bounds.width);
+  const height = Math.max(1, bounds.height);
+  const pathData = toSvgPathData(drawing.pathPoints, bounds);
+  const arrowData = toSvgPolygonData(drawing.arrowPoints, bounds);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${pathData}" fill="none" stroke="${CONNECTOR_COLOR}" stroke-width="${CONNECTOR_THICKNESS}" stroke-linecap="round" stroke-linejoin="round"/><path d="${arrowData}" fill="${CONNECTOR_COLOR}"/></svg>`;
+  const route = figma.createNodeFromSvg(svg);
+  route.name = 'FFA Connector Route';
+  route.x = bounds.x;
+  route.y = bounds.y;
+  route.clipsContent = false;
+  return route;
 }
 
-function createArrowHead(points: Point[]): PolygonNode {
-  const end = points[points.length - 1];
+function buildConnectorDrawing(points: Point[]): { pathPoints: Point[]; arrowPoints: Point[] } {
+  const tip = points[points.length - 1];
   const previous = points[points.length - 2];
-  const arrow = figma.createPolygon();
-  arrow.name = 'FFA Connector Direction';
-  arrow.pointCount = 3;
-  arrow.fills = [solidPaint(0.12, 0.24, 0.38)];
-  arrow.resize(16, 16);
-  arrow.x = end.x - 8;
-  arrow.y = end.y - 8;
-  arrow.rotation = getArrowRotation(previous, end);
-  return arrow;
+  const direction = normalize({
+    x: tip.x - previous.x,
+    y: tip.y - previous.y,
+  });
+  const baseCenter = {
+    x: tip.x - direction.x * CONNECTOR_ARROW_LENGTH,
+    y: tip.y - direction.y * CONNECTOR_ARROW_LENGTH,
+  };
+  const perpendicular = {
+    x: -direction.y,
+    y: direction.x,
+  };
+  const arrowHalfWidth = CONNECTOR_ARROW_WIDTH / 2;
+  return {
+    pathPoints: [...points.slice(0, -1), baseCenter],
+    arrowPoints: [
+      tip,
+      {
+        x: baseCenter.x + perpendicular.x * arrowHalfWidth,
+        y: baseCenter.y + perpendicular.y * arrowHalfWidth,
+      },
+      {
+        x: baseCenter.x - perpendicular.x * arrowHalfWidth,
+        y: baseCenter.y - perpendicular.y * arrowHalfWidth,
+      },
+    ],
+  };
 }
 
 function createFlowActionLabel(points: Point[], flowAction: string): FrameNode {
   const label = figma.createFrame();
-  const midpoint = points[Math.floor(points.length / 2)];
+  const midpoint = getLongestSegmentMidpoint(points);
   const text = createText('Flow Action', flowAction, 11, solidPaint(0.09, 0.14, 0.22), 160);
   text.textAutoResize = 'WIDTH_AND_HEIGHT';
 
@@ -369,37 +392,264 @@ function createFlowActionLabel(points: Point[], flowAction: string): FrameNode {
   return label;
 }
 
-function buildOrthogonalRoute(start: Rect, end: Rect): Point[] {
+function buildOrthogonalRoute(start: Rect, end: Rect, obstacles: Rect[]): Point[] {
   const startCenter = centerOf(start);
   const endCenter = centerOf(end);
   const deltaX = endCenter.x - startCenter.x;
   const deltaY = endCenter.y - startCenter.y;
+  const expandedObstacles = obstacles.map((obstacle) => expandRect(obstacle, CONNECTOR_ROUTE_PADDING));
+  const candidates = Math.abs(deltaX) >= Math.abs(deltaY)
+    ? buildHorizontalRouteCandidates(start, end, expandedObstacles)
+    : buildVerticalRouteCandidates(start, end, expandedObstacles);
+  const legalCandidates = candidates
+    .map(compactPoints)
+    .filter((candidate) => !routeIntersectsObstacles(candidate, expandedObstacles));
 
-  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
-    const leavesRight = deltaX >= 0;
-    const startPoint = {
-      x: leavesRight ? start.x + start.width : start.x,
-      y: startCenter.y,
-    };
-    const endPoint = {
-      x: leavesRight ? end.x : end.x + end.width,
-      y: endCenter.y,
-    };
-    const middleX = startPoint.x + (endPoint.x - startPoint.x) / 2;
-    return [startPoint, { x: middleX, y: startPoint.y }, { x: middleX, y: endPoint.y }, endPoint];
+  if (legalCandidates.length === 0) {
+    throw new Error('No orthogonal route avoids Context Frames and Annotation Cards.');
   }
 
-  const leavesDown = deltaY >= 0;
+  legalCandidates.sort((first, second) => scoreRoute(first) - scoreRoute(second));
+  return legalCandidates[0];
+}
+
+function buildHorizontalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[]): Point[][] {
+  const startCenter = centerOf(start);
+  const endCenter = centerOf(end);
+  const direction = endCenter.x >= startCenter.x ? 1 : -1;
+  const startPoint = {
+    x: direction > 0 ? start.x + start.width : start.x,
+    y: startCenter.y,
+  };
+  const endPoint = {
+    x: direction > 0 ? end.x : end.x + end.width,
+    y: endCenter.y,
+  };
+  const startLead = {
+    x: startPoint.x + direction * CONNECTOR_ENDPOINT_GAP,
+    y: startPoint.y,
+  };
+  const endLead = {
+    x: endPoint.x - direction * CONNECTOR_ENDPOINT_GAP,
+    y: endPoint.y,
+  };
+  const middleX = startLead.x + (endLead.x - startLead.x) / 2;
+  const directRoute = [startPoint, startLead, { x: middleX, y: startLead.y }, { x: middleX, y: endLead.y }, endLead, endPoint];
+  const laneValues = getHorizontalLaneValues(start, end, startPoint.y, endPoint.y, obstacles);
+  const laneRoutes = laneValues.map((laneY) => [
+    startPoint,
+    startLead,
+    { x: startLead.x, y: laneY },
+    { x: endLead.x, y: laneY },
+    endLead,
+    endPoint,
+  ]);
+  return [directRoute, ...laneRoutes];
+}
+
+function buildVerticalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[]): Point[][] {
+  const startCenter = centerOf(start);
+  const endCenter = centerOf(end);
+  const direction = endCenter.y >= startCenter.y ? 1 : -1;
   const startPoint = {
     x: startCenter.x,
-    y: leavesDown ? start.y + start.height : start.y,
+    y: direction > 0 ? start.y + start.height : start.y,
   };
   const endPoint = {
     x: endCenter.x,
-    y: leavesDown ? end.y : end.y + end.height,
+    y: direction > 0 ? end.y : end.y + end.height,
   };
-  const middleY = startPoint.y + (endPoint.y - startPoint.y) / 2;
-  return [startPoint, { x: startPoint.x, y: middleY }, { x: endPoint.x, y: middleY }, endPoint];
+  const startLead = {
+    x: startPoint.x,
+    y: startPoint.y + direction * CONNECTOR_ENDPOINT_GAP,
+  };
+  const endLead = {
+    x: endPoint.x,
+    y: endPoint.y - direction * CONNECTOR_ENDPOINT_GAP,
+  };
+  const middleY = startLead.y + (endLead.y - startLead.y) / 2;
+  const directRoute = [startPoint, startLead, { x: startLead.x, y: middleY }, { x: endLead.x, y: middleY }, endLead, endPoint];
+  const laneValues = getVerticalLaneValues(start, end, startPoint.x, endPoint.x, obstacles);
+  const laneRoutes = laneValues.map((laneX) => [
+    startPoint,
+    startLead,
+    { x: laneX, y: startLead.y },
+    { x: laneX, y: endLead.y },
+    endLead,
+    endPoint,
+  ]);
+  return [directRoute, ...laneRoutes];
+}
+
+function getHorizontalLaneValues(start: Rect, end: Rect, startY: number, endY: number, obstacles: Rect[]): number[] {
+  const relevantBounds = unionRects([start, end, ...obstacles]);
+  return uniqueNumbers([
+    startY,
+    endY,
+    start.y - CONNECTOR_ROUTE_PADDING,
+    start.y + start.height + CONNECTOR_ROUTE_PADDING,
+    end.y - CONNECTOR_ROUTE_PADDING,
+    end.y + end.height + CONNECTOR_ROUTE_PADDING,
+    relevantBounds.y - CONNECTOR_ROUTE_PADDING,
+    relevantBounds.y + relevantBounds.height + CONNECTOR_ROUTE_PADDING,
+    ...obstacles.flatMap((obstacle) => [
+      obstacle.y - CONNECTOR_ROUTE_PADDING,
+      obstacle.y + obstacle.height + CONNECTOR_ROUTE_PADDING,
+    ]),
+  ]);
+}
+
+function getVerticalLaneValues(start: Rect, end: Rect, startX: number, endX: number, obstacles: Rect[]): number[] {
+  const relevantBounds = unionRects([start, end, ...obstacles]);
+  return uniqueNumbers([
+    startX,
+    endX,
+    start.x - CONNECTOR_ROUTE_PADDING,
+    start.x + start.width + CONNECTOR_ROUTE_PADDING,
+    end.x - CONNECTOR_ROUTE_PADDING,
+    end.x + end.width + CONNECTOR_ROUTE_PADDING,
+    relevantBounds.x - CONNECTOR_ROUTE_PADDING,
+    relevantBounds.x + relevantBounds.width + CONNECTOR_ROUTE_PADDING,
+    ...obstacles.flatMap((obstacle) => [
+      obstacle.x - CONNECTOR_ROUTE_PADDING,
+      obstacle.x + obstacle.width + CONNECTOR_ROUTE_PADDING,
+    ]),
+  ]);
+}
+
+function routeIntersectsObstacles(points: Point[], obstacles: Rect[]): boolean {
+  for (let index = 0; index < points.length - 1; index += 1) {
+    if (obstacles.some((obstacle) => segmentIntersectsRect(points[index], points[index + 1], obstacle))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function segmentIntersectsRect(start: Point, end: Point, rect: Rect): boolean {
+  if (Math.abs(start.y - end.y) < 0.001) {
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    return start.y >= rect.y && start.y <= rect.y + rect.height && maxX >= rect.x && minX <= rect.x + rect.width;
+  }
+
+  if (Math.abs(start.x - end.x) < 0.001) {
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    return start.x >= rect.x && start.x <= rect.x + rect.width && maxY >= rect.y && minY <= rect.y + rect.height;
+  }
+
+  return true;
+}
+
+function scoreRoute(points: Point[]): number {
+  let length = 0;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    length += distance(points[index], points[index + 1]);
+  }
+  return length + Math.max(0, points.length - 2) * 8;
+}
+
+function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNode): Rect[] {
+  const obstacles: Rect[] = [];
+  walkPageNodes((node) => {
+    if (!isConnectorObstacle(node, startNode, endNode) || node.absoluteBoundingBox === null) {
+      return;
+    }
+    obstacles.push(node.absoluteBoundingBox);
+  });
+  return obstacles;
+}
+
+function isConnectorObstacle(node: SceneNode, startNode: SceneNode, endNode: SceneNode): boolean {
+  if (node === startNode || node === endNode || isAncestor(node, startNode) || isAncestor(node, endNode)) {
+    return false;
+  }
+
+  const kind = node.getSharedPluginData(NAMESPACE, 'kind');
+  if (kind === 'annotation-card') {
+    return true;
+  }
+
+  if (kind !== '' || hasGeneratedAncestor(node)) {
+    return false;
+  }
+
+  return node.type === 'FRAME';
+}
+
+function findOpenCardPosition(container: FrameNode, card: FrameNode, basePosition: Point): Point {
+  let candidate = {
+    x: basePosition.x,
+    y: basePosition.y,
+  };
+  const existingCards = container.children.filter(
+    (child): child is FrameNode =>
+      child !== card &&
+      child.type === 'FRAME' &&
+      child.getSharedPluginData(NAMESPACE, 'kind') === 'annotation-card',
+  );
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const candidateRect = {
+      x: candidate.x,
+      y: candidate.y,
+      width: card.width,
+      height: card.height,
+    };
+    const conflict = existingCards.find((existingCard) => rectsOverlap(candidateRect, localRect(existingCard)));
+    if (conflict === undefined) {
+      return candidate;
+    }
+    candidate = {
+      x: candidate.x,
+      y: localRect(conflict).y + localRect(conflict).height + CARD_GAP,
+    };
+  }
+
+  return candidate;
+}
+
+function findAnnotationContextFrameId(subjects: SceneNode[]): string {
+  const commonFrame = findNearestCommonFrame(subjects);
+  return commonFrame?.id ?? figma.currentPage.id;
+}
+
+function findNearestCommonFrame(subjects: SceneNode[]): FrameNode | null {
+  const chains = subjects.map(frameAncestorChain);
+  const firstChain = chains[0] ?? [];
+  let commonFrame: FrameNode | null = null;
+
+  for (let index = 0; index < firstChain.length; index += 1) {
+    const candidate = firstChain[index];
+    if (chains.every((chain) => chain[index]?.id === candidate.id)) {
+      commonFrame = candidate;
+      continue;
+    }
+    break;
+  }
+
+  return commonFrame;
+}
+
+function frameAncestorChain(node: SceneNode): FrameNode[] {
+  const chain: FrameNode[] = [];
+  let current: BaseNode | null = node;
+  while (current !== null && current.type !== 'PAGE') {
+    if (current.type === 'FRAME') {
+      chain.unshift(current);
+    }
+    current = current.parent;
+  }
+  return chain;
+}
+
+function readableSubjectNames(subjects: SceneNode[]): string {
+  const names = subjects.map((subject) => readableName(subject.name));
+  if (names.length <= 3) {
+    return names.join(', ');
+  }
+  return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
 }
 
 function ensureContainer(name: string): FrameNode {
@@ -460,7 +710,7 @@ function bringBadgesToFront(container: FrameNode): void {
   });
 }
 
-function getNextAnnotationNumber(): number {
+function getNextAnnotationNumber(contextFrameId: string): number {
   let maxNumber = 0;
   walkPageNodes((node) => {
     if (node.getSharedPluginData(NAMESPACE, 'kind') !== 'annotation-card') {
@@ -468,7 +718,11 @@ function getNextAnnotationNumber(): number {
     }
 
     const annotation = parseJson(node.getSharedPluginData(NAMESPACE, 'annotation'));
-    if (isRecord(annotation) && typeof annotation.annotationNumber === 'number') {
+    if (
+      isRecord(annotation) &&
+      annotation.contextFrameId === contextFrameId &&
+      typeof annotation.annotationNumber === 'number'
+    ) {
       maxNumber = Math.max(maxNumber, annotation.annotationNumber);
     }
   });
@@ -561,15 +815,144 @@ function centerOf(rect: Rect): Point {
   };
 }
 
-function getArrowRotation(previous: Point, end: Point): number {
-  const deltaX = end.x - previous.x;
-  const deltaY = end.y - previous.y;
-
-  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
-    return deltaX >= 0 ? 90 : -90;
+function unionRects(rects: Rect[]): Rect {
+  if (rects.length === 0) {
+    return { x: 0, y: 0, width: 0, height: 0 };
   }
 
-  return deltaY >= 0 ? 180 : 0;
+  const left = Math.min(...rects.map((rect) => rect.x));
+  const top = Math.min(...rects.map((rect) => rect.y));
+  const right = Math.max(...rects.map((rect) => rect.x + rect.width));
+  const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function pointsToRects(points: Point[]): Rect[] {
+  return points.map((point) => ({
+    x: point.x,
+    y: point.y,
+    width: 0,
+    height: 0,
+  }));
+}
+
+function expandRect(rect: Rect, padding: number): Rect {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
+}
+
+function localRect(node: SceneNode): Rect {
+  return {
+    x: node.x,
+    y: node.y,
+    width: node.width,
+    height: node.height,
+  };
+}
+
+function rectsOverlap(first: Rect, second: Rect): boolean {
+  return (
+    first.x < second.x + second.width &&
+    first.x + first.width > second.x &&
+    first.y < second.y + second.height &&
+    first.y + first.height > second.y
+  );
+}
+
+function compactPoints(points: Point[]): Point[] {
+  const compacted: Point[] = [];
+  points.forEach((point) => {
+    const previous = compacted[compacted.length - 1];
+    if (previous === undefined || distance(previous, point) >= 0.001) {
+      compacted.push(point);
+    }
+  });
+  return compacted;
+}
+
+function distance(start: Point, end: Point): number {
+  return Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
+}
+
+function normalize(vector: Point): Point {
+  const length = Math.sqrt(vector.x * vector.x + vector.y * vector.y);
+  if (length < 0.001) {
+    return { x: 1, y: 0 };
+  }
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+  };
+}
+
+function getLongestSegmentMidpoint(points: Point[]): Point {
+  let bestStart = points[0];
+  let bestEnd = points[points.length - 1];
+  let bestLength = -1;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const length = distance(points[index], points[index + 1]);
+    if (length > bestLength) {
+      bestStart = points[index];
+      bestEnd = points[index + 1];
+      bestLength = length;
+    }
+  }
+
+  return {
+    x: bestStart.x + (bestEnd.x - bestStart.x) / 2,
+    y: bestStart.y + (bestEnd.y - bestStart.y) / 2,
+  };
+}
+
+function toSvgPathData(points: Point[], bounds: Rect): string {
+  return points
+    .map((point, index) => {
+      const command = index === 0 ? 'M' : 'L';
+      return `${command} ${formatNumber(point.x - bounds.x)} ${formatNumber(point.y - bounds.y)}`;
+    })
+    .join(' ');
+}
+
+function toSvgPolygonData(points: Point[], bounds: Rect): string {
+  return `${toSvgPathData(points, bounds)} Z`;
+}
+
+function formatNumber(value: number): string {
+  return Number(value.toFixed(2)).toString();
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  const seen = new Set<number>();
+  const unique: number[] = [];
+  values.forEach((value) => {
+    const rounded = Number(value.toFixed(2));
+    if (!seen.has(rounded)) {
+      seen.add(rounded);
+      unique.push(rounded);
+    }
+  });
+  return unique;
+}
+
+function isAncestor(candidate: BaseNode, node: BaseNode): boolean {
+  let current = node.parent;
+  while (current !== null) {
+    if (current === candidate) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 function findContextFrameId(node: SceneNode): string {
