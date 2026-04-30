@@ -1,6 +1,6 @@
 # Use versioned shared plugin data keys
 
-The first demo uses Figma shared plugin data namespace `figma-flow-annotator` with stable, versioned JSON values. Because Figma already separates namespace from key, keys should not include an extra `ffa.` prefix. Complete semantic records live only on their visual roots, while bound Figma nodes store small reverse-reference values that validation can clean when stale.
+The first demo uses Figma shared plugin data namespace `figma_flow_annotator` with stable, versioned JSON values. Figma shared plugin data namespaces only allow alphanumeric characters, `_`, or `.`, so the repository name `figma-flow-annotator` cannot be used as the runtime namespace. Because Figma already separates namespace from key, keys should not include an extra `ffa.` prefix. Complete semantic records live only on their visual roots, while bound Figma nodes store small reverse-reference values that validation can clean when stale.
 
 Keys:
 

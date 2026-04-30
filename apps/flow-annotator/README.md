@@ -15,7 +15,13 @@ pnpm install
 Build the plugin from the repository root:
 
 ```sh
-pnpm --filter @figma-flow-annotator/flow-annotator build
+pnpm build
+```
+
+Run static checks from the repository root:
+
+```sh
+pnpm lint
 ```
 
 Watch TypeScript changes while developing:
@@ -24,8 +30,41 @@ Watch TypeScript changes while developing:
 pnpm --filter @figma-flow-annotator/flow-annotator watch
 ```
 
-Load `manifest.json` in Figma after building so Figma can run the generated
-`code.js` file.
+## Local Figma loading
+
+1. Run `pnpm build` from the repository root.
+2. In Figma Design, open the Plugins development menu.
+3. Import the local manifest at `apps/flow-annotator/manifest.json`.
+4. Run the local `flow-annotator` plugin. It opens a persistent **Flow Annotator**
+   panel and reads the current page selection.
+
+## Manual proof notes
+
+Annotation proof:
+
+1. Select one or more normal Figma Design nodes.
+2. Enter a non-empty **Annotation Body**.
+3. Click **Create Annotation**.
+4. Inspect the page for `FFA Annotations`, one `FFA Annotation Card #<number>`,
+   and one `FFA Annotation Badge #<number>` per selected **Subject Node**.
+5. Inspect shared plugin data in namespace `figma_flow_annotator`:
+   - the card root has `kind = annotation-card` and `annotation`;
+   - each badge root has `kind = annotation-badge` and `badgeRef`;
+   - each selected subject has `annotationRefs`.
+
+Connector proof:
+
+1. Select exactly two normal Figma Design nodes.
+2. Optionally enter a **Flow Action**.
+3. Click **Create Flow Connector**.
+4. Inspect the page for `FFA Connectors` and one readable native connector visual
+   named `FFA Connector <startName> -> <endName>`.
+5. Inspect shared plugin data in namespace `figma_flow_annotator`:
+   - the connector root has `kind = flow-connector` and `connector`;
+   - both selected endpoints have `connectorRefs`.
+
+The connector visual is built from native Figma Design shapes and does not use a
+FigJam native connector.
 
 ## References
 
