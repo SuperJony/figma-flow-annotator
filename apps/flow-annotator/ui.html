@@ -1,17 +1,298 @@
-<h2>Rectangle Creator</h2>
-<p>Count: <input id="count" type="number" value="5"></p>
-<button id="create">Create</button>
-<button id="cancel">Cancel</button>
-<script>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      color: #18212f;
+      background: #f7f8f9;
+    }
 
-document.getElementById('create').onclick = () => {
-  const textbox = document.getElementById('count');
-  const count = parseInt(textbox.value, 10);
-  parent.postMessage({ pluginMessage: { type: 'create-shapes', count } }, '*')
-}
+    * {
+      box-sizing: border-box;
+    }
 
-document.getElementById('cancel').onclick = () => {
-  parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*')
-}
+    body {
+      margin: 0;
+      min-height: 100vh;
+    }
 
-</script>
+    .shell {
+      display: flex;
+      min-height: 100vh;
+      flex-direction: column;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid #d9dee7;
+      background: #ffffff;
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: 15px;
+    }
+
+    h2 {
+      font-size: 12px;
+      color: #263548;
+    }
+
+    main {
+      display: grid;
+      gap: 12px;
+      padding: 12px 16px 16px;
+    }
+
+    section {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid #d9dee7;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: #3b4656;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    textarea,
+    input {
+      width: 100%;
+      border: 1px solid #c9d0dc;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #18212f;
+      font: inherit;
+      font-weight: 400;
+      outline: none;
+    }
+
+    textarea {
+      min-height: 92px;
+      max-height: 160px;
+      resize: vertical;
+      padding: 8px;
+      line-height: 1.45;
+    }
+
+    input {
+      height: 32px;
+      padding: 0 8px;
+    }
+
+    textarea:focus,
+    input:focus {
+      border-color: #2b6cb0;
+      box-shadow: 0 0 0 2px rgba(43, 108, 176, 0.14);
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .selection {
+      min-width: 92px;
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #eef2f7;
+      color: #3b4656;
+      text-align: center;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    button {
+      height: 32px;
+      border: 1px solid #b8c1ce;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #172033;
+      font: inherit;
+      font-weight: 650;
+      padding: 0 10px;
+      cursor: pointer;
+    }
+
+    button.primary {
+      border-color: #174f8f;
+      background: #174f8f;
+      color: #ffffff;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
+
+    footer {
+      margin-top: auto;
+      display: grid;
+      gap: 10px;
+      padding: 0 16px 14px;
+    }
+
+    #status {
+      min-height: 28px;
+      border: 1px solid #d9dee7;
+      border-radius: 6px;
+      padding: 7px 8px;
+      background: #ffffff;
+      color: #3b4656;
+      line-height: 1.25;
+    }
+
+    #status.success {
+      border-color: #9ac3a7;
+      background: #edf8f0;
+      color: #1f6b36;
+    }
+
+    #status.error {
+      border-color: #d99b9b;
+      background: #fff1f1;
+      color: #8f2020;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <h1>Flow Annotator</h1>
+      <button id="close" type="button">Close</button>
+    </header>
+
+    <main>
+      <section>
+        <div class="row">
+          <h2>Annotate</h2>
+          <div id="selection" class="selection">0 selected</div>
+        </div>
+        <label>
+          Annotation Body
+          <textarea id="annotationBody" placeholder="Design note, interaction rule, or state detail"></textarea>
+        </label>
+        <div class="actions">
+          <button id="createAnnotation" class="primary" type="button">Create Annotation</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="row">
+          <h2>Connect</h2>
+          <div id="connectorState" class="selection">2 endpoints</div>
+        </div>
+        <label>
+          Flow Action
+          <input id="flowAction" type="text" placeholder="click, choose, input">
+        </label>
+        <div class="actions">
+          <button id="createConnector" class="primary" type="button">Create Flow Connector</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div id="status">Ready.</div>
+    </footer>
+  </div>
+
+  <script>
+    const annotationBody = document.getElementById('annotationBody');
+    const flowAction = document.getElementById('flowAction');
+    const createAnnotation = document.getElementById('createAnnotation');
+    const createConnector = document.getElementById('createConnector');
+    const closeButton = document.getElementById('close');
+    const status = document.getElementById('status');
+    const selection = document.getElementById('selection');
+    const connectorState = document.getElementById('connectorState');
+
+    let totalSelection = 0;
+    let eligibleSelection = 0;
+
+    createAnnotation.addEventListener('click', () => {
+      const body = annotationBody.value.trim();
+      if (body.length === 0) {
+        setStatus('error', 'Annotation Body is required.');
+        return;
+      }
+      post({ type: 'create-annotation', body });
+    });
+
+    createConnector.addEventListener('click', () => {
+      post({ type: 'create-connector', flowAction: flowAction.value.trim() });
+    });
+
+    closeButton.addEventListener('click', () => {
+      post({ type: 'close' });
+    });
+
+    window.addEventListener('message', (event) => {
+      const message = event.data.pluginMessage;
+      if (!message) {
+        return;
+      }
+
+      if (message.type === 'selection-state') {
+        totalSelection = message.totalCount;
+        eligibleSelection = message.eligibleCount;
+        renderSelectionState();
+        return;
+      }
+
+      if (message.type === 'status') {
+        setStatus(message.tone, message.message);
+      }
+    });
+
+    annotationBody.addEventListener('input', renderSelectionState);
+
+    function post(pluginMessage) {
+      parent.postMessage({ pluginMessage }, '*');
+    }
+
+    function renderSelectionState() {
+      selection.textContent = `${eligibleSelection} subject${eligibleSelection === 1 ? '' : 's'}`;
+      connectorState.textContent = `${totalSelection} selected`;
+      createAnnotation.disabled = eligibleSelection === 0 || annotationBody.value.trim().length === 0;
+      createConnector.disabled = totalSelection !== 2;
+    }
+
+    function setStatus(tone, message) {
+      status.className = tone === 'success' || tone === 'error' ? tone : '';
+      status.textContent = message;
+    }
+
+    post({ type: 'request-selection-state' });
+    renderSelectionState();
+  </script>
+</body>
+</html>

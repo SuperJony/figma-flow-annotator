@@ -1,0 +1,3 @@
+# Use shared plugin data for bindings
+
+The first-demo plugin writes **Annotation** and **Flow Connector** bindings with Figma `sharedPluginData`, not private `pluginData`, because later agent skills and other tools must be able to read the same metadata outside the plugin runtime. This makes the binding layer intentionally public to other plugins and agents while keeping the stored values minimal: stable annotation or connector IDs, node roles, subject node references, and start/end node references. Future authoring surfaces must reuse the same shared data contract instead of creating a second binding model.
