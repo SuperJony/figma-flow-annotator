@@ -10,3 +10,6 @@ node_modules/
 dist/
 out/
 code.js
+
+# Agent artifacts
+.harness/
