@@ -96,6 +96,111 @@ test('keeps simultaneous two-endpoint selection ignored without a prior endpoint
   }
 });
 
+test('posts selection state after endpoint selection without walking the page', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const endpoint = createNode(page, 'endpoint', 0);
+    const largeFrame = createNode(page, 'large-frame', 160);
+    const runtime = createRuntime(page);
+    let pageWalks = 0;
+    let postedEndpointIds = [];
+
+    page.children = [endpoint, largeFrame];
+    globalThis.figma = { currentPage: page };
+    runtime.walkPageNodes = () => {
+      pageWalks += 1;
+      throw new Error('Connector selection must not walk the page.');
+    };
+    runtime.postSelectionState = () => {
+      postedEndpointIds = getPendingEndpointIds(connect, runtime);
+    };
+
+    connect.resetObservedEndpointSelection(runtime);
+
+    page.selection = [endpoint];
+    connect.handleSelectionChange(runtime);
+
+    assert.equal(pageWalks, 0);
+    assert.deepEqual(postedEndpointIds, ['endpoint']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('prunes removed pending endpoints before endpoint eligibility checks', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const removedEndpoint = createNode(page, 'removed-endpoint', 0);
+    const liveEndpoint = createNode(page, 'live-endpoint', 160);
+    const runtime = createRuntime(page);
+    const checkedEndpointIds = [];
+    let assertRemovedNodeSkipped = false;
+
+    page.children = [removedEndpoint, liveEndpoint];
+    globalThis.figma = { currentPage: page };
+    runtime.hasGeneratedAncestor = (node) => {
+      checkedEndpointIds.push(node.id);
+      if (assertRemovedNodeSkipped) {
+        assert.notEqual(node.id, 'removed-endpoint');
+      }
+      return false;
+    };
+
+    connect.resetObservedEndpointSelection(runtime);
+
+    page.selection = [removedEndpoint];
+    connect.handleSelectionChange(runtime);
+    page.selection = [removedEndpoint, liveEndpoint];
+    connect.handleSelectionChange(runtime);
+    assert.deepEqual(getPendingEndpointIds(connect, runtime), ['removed-endpoint', 'live-endpoint']);
+
+    removedEndpoint.removed = true;
+    assertRemovedNodeSkipped = true;
+
+    assert.deepEqual(getPendingEndpointIds(connect, runtime), ['live-endpoint']);
+    assert.ok(checkedEndpointIds.includes('live-endpoint'));
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('creates a Flow Connector without scanning children of unrelated frame obstacles', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const start = createNode(page, 'start', 0);
+    const end = createNode(page, 'end', 400);
+    const unrelatedFrame = createNode(page, 'unrelated-frame', 1000);
+    const nestedChild = createNode(page, 'nested-child', 1040);
+    const connectorGroups = [];
+    const runtime = createRuntime(page, connectorGroups);
+
+    nestedChild.parent = unrelatedFrame;
+    nestedChild.getSharedPluginData = () => {
+      throw new Error('Unrelated frame obstacle descendants must not be scanned.');
+    };
+    unrelatedFrame.children = [nestedChild];
+    page.children = [start, end, unrelatedFrame];
+    globalThis.figma = createFigmaStub(page, connectorGroups);
+
+    connect.resetObservedEndpointSelection(runtime);
+
+    page.selection = [start];
+    connect.handleSelectionChange(runtime);
+    page.selection = [start, end];
+    connect.handleSelectionChange(runtime);
+
+    connect.createFlowConnector('', runtime);
+
+    assert.equal(connectorGroups.length, 1);
+    assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ['start', 'end']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 async function importConnectModule() {
   await mkdir(buildDir, { recursive: true });
   const outfile = resolve(buildDir, `connect-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
@@ -119,6 +224,7 @@ function createNode(page, id, x) {
     id,
     name: id,
     parent: page,
+    removed: false,
     setSharedPluginData: (_namespace, key, value) => {
       sharedPluginData.set(key, value);
     },
@@ -152,9 +258,6 @@ function createRuntime(page, connectorGroups = []) {
     postSelectionState: () => {},
     readableName: (name) => name,
     solidPaint: (r, g, b) => ({ type: 'SOLID', color: { r, g, b } }),
-    walkPageNodes: (visit) => {
-      page.children.forEach(visit);
-    },
   };
 }
 

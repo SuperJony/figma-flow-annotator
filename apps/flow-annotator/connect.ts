@@ -51,11 +51,10 @@ export interface ConnectRuntime {
   postSelectionState(): void;
   readableName(name: string): string;
   solidPaint(r: number, g: number, b: number): SolidPaint;
-  walkPageNodes(visit: (node: SceneNode) => void): void;
 }
 
 let observedSelectedEndpointIds = new Set<string>();
-let connectorEndpointWindowIds: string[] = [];
+let connectorEndpointWindowNodes: SceneNode[] = [];
 
 export function createFlowConnector(flowActionValue: string, runtime: ConnectRuntime): GroupNode {
   const endpoints = getPendingConnectorEndpointNodes(runtime);
@@ -433,6 +432,7 @@ export function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNo
     const nodeContainsEndpoint = startAncestorIds.has(node.id) || endAncestorIds.has(node.id);
     let generatedAncestor = item.generatedAncestor;
     let coveringObstacles = item.coveringObstacles;
+    let wholeFrameObstacle = false;
 
     if (kind === 'annotation-card' && !nodeContainsEndpoint && node.absoluteBoundingBox !== null) {
       generatedAncestor = true;
@@ -440,10 +440,11 @@ export function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNo
     } else if (kind !== '' || generatedAncestor) {
       generatedAncestor = true;
     } else if (node.type === 'FRAME' && !nodeContainsEndpoint && node.absoluteBoundingBox !== null) {
+      wholeFrameObstacle = true;
       coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, node.absoluteBoundingBox);
     }
 
-    if (generatedAncestor || !('children' in node)) {
+    if (generatedAncestor || wholeFrameObstacle || !('children' in node)) {
       continue;
     }
 
@@ -599,60 +600,54 @@ export function handleSelectionChange(runtime: ConnectRuntime): void {
 }
 
 function recordRuntimeConnectorEndpointSelection(runtime: ConnectRuntime): void {
-  const selectedEndpointIds = getSelectedConnectorEndpointIds(runtime);
+  const selectedEndpoints = getSelectedConnectorEndpoints(runtime);
+  const selectedEndpointIds = selectedEndpoints.map((node) => node.id);
   const nextObservedSelectedEndpointIds = new Set(selectedEndpointIds);
-  const newlySelectedEndpointIds = selectedEndpointIds.filter(
-    (nodeId) => !observedSelectedEndpointIds.has(nodeId),
+  const newlySelectedEndpoints = selectedEndpoints.filter(
+    (node) => !observedSelectedEndpointIds.has(node.id),
   );
 
   // Multiple additions in one event have no reliable relative order from Figma.
-  if (newlySelectedEndpointIds.length === 1) {
-    pushConnectorEndpointId(newlySelectedEndpointIds[0]);
+  if (newlySelectedEndpoints.length === 1) {
+    pushConnectorEndpointNode(newlySelectedEndpoints[0]);
   } else if (
-    connectorEndpointWindowIds.length === 2 &&
-    newlySelectedEndpointIds.length > 1 &&
-    selectedEndpointIds.length === 2
+    connectorEndpointWindowNodes.length === 2 &&
+    newlySelectedEndpoints.length > 1 &&
+    selectedEndpoints.length === 2
   ) {
     // Figma duplicate replaces the selection with multiple new nodes in one event.
     // Keeping the old window would connect unselected endpoints.
-    connectorEndpointWindowIds = selectedEndpointIds;
+    connectorEndpointWindowNodes = selectedEndpoints;
   }
 
   observedSelectedEndpointIds = nextObservedSelectedEndpointIds;
   pruneConnectorEndpointWindow(runtime);
 }
 
-function pushConnectorEndpointId(nodeId: string): void {
-  connectorEndpointWindowIds = [
-    ...connectorEndpointWindowIds.filter((existingId) => existingId !== nodeId),
-    nodeId,
+function pushConnectorEndpointNode(node: SceneNode): void {
+  connectorEndpointWindowNodes = [
+    ...connectorEndpointWindowNodes.filter((existingNode) => existingNode.id !== node.id),
+    node,
   ].slice(-2);
 }
 
 function getSelectedConnectorEndpointIds(runtime: ConnectRuntime): string[] {
-  return figma.currentPage.selection.filter((node) => isConnectorEndpoint(node, runtime)).map((node) => node.id);
+  return getSelectedConnectorEndpoints(runtime).map((node) => node.id);
 }
 
 export function getPendingConnectorEndpointNodes(runtime: ConnectRuntime): SceneNode[] {
-  const endpoints = connectorEndpointWindowIds
-    .map((nodeId) => findSceneNodeById(nodeId, runtime))
-    .filter((node): node is SceneNode => node !== null && isConnectorEndpoint(node, runtime));
-  connectorEndpointWindowIds = endpoints.map((node) => node.id);
-  return endpoints;
+  return pruneConnectorEndpointWindow(runtime);
 }
 
-function pruneConnectorEndpointWindow(runtime: ConnectRuntime): void {
-  void getPendingConnectorEndpointNodes(runtime);
+function pruneConnectorEndpointWindow(runtime: ConnectRuntime): SceneNode[] {
+  connectorEndpointWindowNodes = connectorEndpointWindowNodes.filter(
+    (node) => !node.removed && isConnectorEndpoint(node, runtime),
+  );
+  return [...connectorEndpointWindowNodes];
 }
 
-function findSceneNodeById(nodeId: string, runtime: ConnectRuntime): SceneNode | null {
-  let found: SceneNode | null = null;
-  runtime.walkPageNodes((node) => {
-    if (found === null && node.id === nodeId) {
-      found = node;
-    }
-  });
-  return found;
+function getSelectedConnectorEndpoints(runtime: ConnectRuntime): SceneNode[] {
+  return figma.currentPage.selection.filter((node) => !node.removed && isConnectorEndpoint(node, runtime));
 }
 
 function isConnectorEndpoint(node: SceneNode, runtime: ConnectRuntime): boolean {

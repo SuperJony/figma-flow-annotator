@@ -74,7 +74,6 @@ const connectRuntime: ConnectRuntime = {
   postSelectionState,
   readableName,
   solidPaint,
-  walkPageNodes,
 };
 
 figma.showUI(__html__, {
@@ -141,10 +140,11 @@ function createAnnotations(bodyValue: string): AnnotationCreationResult {
     throw new Error('Select one or more non-generated Subject Nodes.');
   }
 
-  const contextFrameId = findAnnotationContextFrameId(subjects);
+  const contextNode = findAnnotationContextNode(subjects);
+  const contextFrameId = contextNode.id;
   const subjectBounds = subjects.map(getVisibleBounds);
   const annotationBounds = unionRects(subjectBounds);
-  const annotationNumber = allocateNextAnnotationNumber(contextFrameId);
+  const annotationNumber = allocateNextAnnotationNumber(contextNode);
   const container = ensureContainer(ANNOTATIONS_CONTAINER_NAME);
   const now = new Date().toISOString();
   const annotationId = createId('annotation');
@@ -289,12 +289,12 @@ function findOpenCardPosition(container: FrameNode, card: FrameNode, basePositio
   return candidate;
 }
 
-function findAnnotationContextFrameId(subjects: SceneNode[]): string {
+function findAnnotationContextNode(subjects: SceneNode[]): ContextDataNode {
   const commonFrame = findNearestCommonFrame(subjects);
   if (commonFrame === null) {
-    return figma.currentPage.id;
+    return figma.currentPage;
   }
-  return commonFrame.id;
+  return commonFrame;
 }
 
 function findNearestCommonFrame(subjects: SceneNode[]): FrameNode | null {
@@ -392,32 +392,12 @@ function bringBadgesToFront(container: FrameNode): void {
   });
 }
 
-function allocateNextAnnotationNumber(contextFrameId: string): number {
-  const contextNode = findContextDataNode(contextFrameId);
+function allocateNextAnnotationNumber(contextNode: ContextDataNode): number {
+  const contextFrameId = contextNode.id;
   const contextRecord = readContextRecord(contextNode, contextFrameId);
-  const seededNextAnnotationNumber = getSeededNextAnnotationNumber(contextFrameId);
-  const annotationNumber = Math.max(contextRecord?.nextAnnotationNumber ?? 1, seededNextAnnotationNumber);
+  const annotationNumber = contextRecord?.nextAnnotationNumber ?? getSeededNextAnnotationNumber(contextFrameId);
   writeContextRecord(contextNode, contextFrameId, annotationNumber + 1);
   return annotationNumber;
-}
-
-function findContextDataNode(contextFrameId: string): ContextDataNode {
-  if (contextFrameId === figma.currentPage.id) {
-    return figma.currentPage;
-  }
-
-  let contextNode: FrameNode | null = null;
-  walkPageNodes((node) => {
-    if (node.type === 'FRAME' && node.id === contextFrameId) {
-      contextNode = node;
-    }
-  });
-
-  if (contextNode === null) {
-    throw new Error('Context not found for Annotation Number allocation.');
-  }
-
-  return contextNode;
 }
 
 function readContextRecord(contextNode: ContextDataNode, contextFrameId: string): ContextRecord | null {
@@ -448,8 +428,13 @@ function writeContextRecord(contextNode: ContextDataNode, contextFrameId: string
 }
 
 function getSeededNextAnnotationNumber(contextFrameId: string): number {
+  const container = findContainer(ANNOTATIONS_CONTAINER_NAME);
+  if (container === null) {
+    return 1;
+  }
+
   let maxNumber = 0;
-  walkPageNodes((node) => {
+  container.children.forEach((node) => {
     if (node.getSharedPluginData(NAMESPACE, 'kind') !== 'annotation-card') {
       return;
     }
@@ -468,18 +453,6 @@ function getSeededNextAnnotationNumber(contextFrameId: string): number {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1;
-}
-
-function walkPageNodes(visit: (node: SceneNode) => void): void {
-  const pending: SceneNode[] = [...figma.currentPage.children];
-
-  for (let index = 0; index < pending.length; index += 1) {
-    const node = pending[index];
-    visit(node);
-    if ('children' in node) {
-      pending.push(...node.children);
-    }
-  }
 }
 
 function appendSharedReference(
