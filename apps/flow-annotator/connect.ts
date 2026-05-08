@@ -8,6 +8,16 @@ const CONNECTOR_ENDPOINT_GAP = 32;
 const CONNECTOR_ARROW_LENGTH = 18;
 const CONNECTOR_ARROW_WIDTH = 16;
 const CONNECTOR_COLOR = '#1F3A5A';
+const FLOW_ACTION_LABEL_FILL = '#FAF2C7';
+const FLOW_ACTION_LABEL_STROKE = '#B88A21';
+const FLOW_ACTION_LABEL_TEXT = '#172438';
+const FLOW_ACTION_LABEL_FONT_SIZE = 11;
+const FLOW_ACTION_LABEL_PADDING_X = 10;
+const FLOW_ACTION_LABEL_PADDING_Y = 6;
+const FLOW_ACTION_LABEL_MIN_WIDTH = 56;
+const FLOW_ACTION_LABEL_MIN_HEIGHT = 28;
+const FLOW_ACTION_LABEL_MAX_BROWSER_TEXT_WIDTH = 160;
+const FLOW_ACTION_LABEL_RADIUS = 6;
 const ROUTE_EPSILON = 0.001;
 
 type RouteDirection = -1 | 1;
@@ -36,6 +46,33 @@ interface ConnectorObstacleTraversalItem {
   node: SceneNode;
   generatedAncestor: boolean;
   coveringObstacles: Rect[];
+}
+
+export interface ConnectorRouteVisual {
+  bounds: Rect;
+  height: number;
+  svg: string;
+  width: number;
+}
+
+export interface FlowActionLabelVisual {
+  center: Point;
+  fill: string;
+  fontSize: number;
+  maxTextWidth: number;
+  minHeight: number;
+  minWidth: number;
+  paddingX: number;
+  paddingY: number;
+  radius: number;
+  stroke: string;
+  text: string;
+  textColor: string;
+}
+
+export interface ConnectorVisualModel {
+  label: FlowActionLabelVisual | null;
+  route: ConnectorRouteVisual;
 }
 
 export interface ConnectRuntime {
@@ -112,16 +149,17 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
 }
 
 function createConnectorVisualNodes(points: Point[], flowAction: string, runtime: ConnectRuntime): SceneNode[] {
-  const nodes: SceneNode[] = [createConnectorRouteSvg(points)];
+  const visual = buildConnectorVisualModel(points, flowAction);
+  const nodes: SceneNode[] = [createConnectorRouteSvg(visual.route)];
 
-  if (flowAction.length > 0) {
-    nodes.push(createFlowActionLabel(points, flowAction, runtime));
+  if (visual.label !== null) {
+    nodes.push(createFlowActionLabel(visual.label, runtime));
   }
 
   return nodes;
 }
 
-function createConnectorRouteSvg(points: Point[]): FrameNode {
+export function buildConnectorVisualModel(points: Point[], flowAction: string): ConnectorVisualModel {
   const distinctPoints = compactPoints(points);
   if (distinctPoints.length < 2) {
     throw new Error('Connector route requires at least two points.');
@@ -135,10 +173,23 @@ function createConnectorRouteSvg(points: Point[]): FrameNode {
   const pathData = toSvgPathData(drawing.pathPoints, bounds);
   const arrowData = toSvgPolygonData(drawing.arrowPoints, bounds);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${pathData}" fill="none" stroke="${CONNECTOR_COLOR}" stroke-width="${CONNECTOR_THICKNESS}" stroke-linecap="round" stroke-linejoin="round"/><path d="${arrowData}" fill="${CONNECTOR_COLOR}"/></svg>`;
-  const route = figma.createNodeFromSvg(svg);
+  const trimmedFlowAction = flowAction.trim();
+  return {
+    label: trimmedFlowAction.length > 0 ? buildFlowActionLabelVisual(distinctPoints, trimmedFlowAction) : null,
+    route: {
+      bounds,
+      height,
+      svg,
+      width,
+    },
+  };
+}
+
+function createConnectorRouteSvg(visual: ConnectorRouteVisual): FrameNode {
+  const route = figma.createNodeFromSvg(visual.svg);
   route.name = 'FFA Connector Route';
-  route.x = bounds.x;
-  route.y = bounds.y;
+  route.x = visual.bounds.x;
+  route.y = visual.bounds.y;
   route.clipsContent = false;
   return route;
 }
@@ -175,25 +226,50 @@ function buildConnectorDrawing(points: Point[]): { pathPoints: Point[]; arrowPoi
   };
 }
 
-function createFlowActionLabel(points: Point[], flowAction: string, runtime: ConnectRuntime): FrameNode {
+function buildFlowActionLabelVisual(points: Point[], flowAction: string): FlowActionLabelVisual {
+  return {
+    center: getLongestSegmentMidpoint(points),
+    fill: FLOW_ACTION_LABEL_FILL,
+    fontSize: FLOW_ACTION_LABEL_FONT_SIZE,
+    maxTextWidth: FLOW_ACTION_LABEL_MAX_BROWSER_TEXT_WIDTH,
+    minHeight: FLOW_ACTION_LABEL_MIN_HEIGHT,
+    minWidth: FLOW_ACTION_LABEL_MIN_WIDTH,
+    paddingX: FLOW_ACTION_LABEL_PADDING_X,
+    paddingY: FLOW_ACTION_LABEL_PADDING_Y,
+    radius: FLOW_ACTION_LABEL_RADIUS,
+    stroke: FLOW_ACTION_LABEL_STROKE,
+    text: flowAction,
+    textColor: FLOW_ACTION_LABEL_TEXT,
+  };
+}
+
+function createFlowActionLabel(visual: FlowActionLabelVisual, runtime: ConnectRuntime): FrameNode {
   const label = figma.createFrame();
-  const midpoint = getLongestSegmentMidpoint(points);
-  const text = runtime.createText('Flow Action', flowAction, 11, runtime.solidPaint(0.09, 0.14, 0.22), 160);
+  const text = runtime.createText(
+    'Flow Action',
+    visual.text,
+    visual.fontSize,
+    hexToSolidPaint(visual.textColor),
+    visual.maxTextWidth,
+  );
   text.textAutoResize = 'WIDTH_AND_HEIGHT';
 
   label.name = 'FFA Flow Action Label';
-  label.fills = [runtime.solidPaint(0.98, 0.95, 0.78)];
-  label.strokes = [runtime.solidPaint(0.72, 0.54, 0.13)];
+  label.fills = [hexToSolidPaint(visual.fill)];
+  label.strokes = [hexToSolidPaint(visual.stroke)];
   label.strokeWeight = 1;
-  label.cornerRadius = 6;
+  label.cornerRadius = visual.radius;
   label.clipsContent = false;
-  label.resize(Math.max(56, text.width + 20), Math.max(28, text.height + 12));
-  label.x = midpoint.x - label.width / 2;
-  label.y = midpoint.y - label.height / 2;
+  label.resize(
+    Math.max(visual.minWidth, text.width + visual.paddingX * 2),
+    Math.max(visual.minHeight, text.height + visual.paddingY * 2),
+  );
+  label.x = visual.center.x - label.width / 2;
+  label.y = visual.center.y - label.height / 2;
 
   label.appendChild(text);
-  text.x = 10;
-  text.y = 6;
+  text.x = visual.paddingX;
+  text.y = visual.paddingY;
 
   return label;
 }
@@ -569,6 +645,21 @@ function toSvgPolygonData(points: Point[], bounds: Rect): string {
 
 function formatNumber(value: number): string {
   return Number(value.toFixed(2)).toString();
+}
+
+function hexToSolidPaint(hex: string): SolidPaint {
+  const normalized = hex.replace('#', '');
+  const red = Number.parseInt(normalized.slice(0, 2), 16) / 255;
+  const green = Number.parseInt(normalized.slice(2, 4), 16) / 255;
+  const blue = Number.parseInt(normalized.slice(4, 6), 16) / 255;
+  return {
+    type: 'SOLID',
+    color: {
+      r: red,
+      g: green,
+      b: blue,
+    },
+  };
 }
 
 function uniqueNumbers(values: number[]): number[] {

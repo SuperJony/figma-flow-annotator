@@ -5,10 +5,11 @@
   "description": "Figma Flow Annotator plugin",
   "main": "code.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && esbuild code.ts --bundle --target=es2019 --outfile=code.js",
+    "build": "tsc --noEmit --target es2019 --module esnext --moduleResolution bundler --lib es2020 --strict --typeRoots ./node_modules/@types,./node_modules/@figma code.ts connect.ts geometry.ts && esbuild code.ts --bundle --target=es2019 --outfile=code.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node --test tests/*.test.mjs",
+    "test:visual:connect": "playwright test -c playwright.config.ts connector-visual.spec.ts",
     "watch": "esbuild code.ts --bundle --target=es2019 --outfile=code.js --watch"
   },
   "author": "",
@@ -17,6 +18,7 @@
     "@eslint/js": "^9.39.4",
     "@figma/eslint-plugin-figma-plugins": "*",
     "@figma/plugin-typings": "*",
+    "@playwright/test": "^1.59.1",
     "esbuild": "^0.28.0",
     "eslint": "^9.39.4",
     "typescript": "^5.9.3",
