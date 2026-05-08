@@ -44,8 +44,10 @@ pnpm --filter @figma-flow-annotator/flow-annotator watch
 The routine visual surface is Playwright Chromium, configured in
 `playwright.config.ts` and run from `apps/flow-annotator` through package
 scripts. This browser surface is authoritative for routine regression checks:
-it covers **Flow Connector** visuals through the plugin-owned route/SVG model and
-the plugin panel states through the real `ui.html` message protocol.
+it covers **Annotation Card** and **Annotation Badge** visuals through the real
+plugin annotation creation path, **Flow Connector** visuals through the
+plugin-owned route/SVG model, and plugin panel states through the real `ui.html`
+message protocol.
 
 Run all browser visual checks:
 
@@ -56,6 +58,7 @@ pnpm --filter @figma-flow-annotator/flow-annotator test:visual
 Run one visual domain while developing:
 
 ```sh
+pnpm --filter @figma-flow-annotator/flow-annotator test:visual:annotate
 pnpm --filter @figma-flow-annotator/flow-annotator test:visual:connect
 pnpm --filter @figma-flow-annotator/flow-annotator test:visual:panel
 ```
@@ -69,9 +72,10 @@ pnpm --filter @figma-flow-annotator/flow-annotator test:visual --update-snapshot
 
 The checked-in baselines are platform-specific Chromium snapshots under
 `tests/visual/*-snapshots/`. Do not accept a baseline update that only hides a
-layout regression, unreadable connector route, misplaced arrowhead, incorrect
-**Flow Action** label, or broken panel state. When a failure is unexpected,
-inspect Playwright's actual and diff artifacts before changing snapshots.
+layout regression, unreadable **Annotation Card**, misplaced **Annotation
+Badge**, unreadable connector route, misplaced arrowhead, incorrect **Flow
+Action** label, or broken panel state. When a failure is unexpected, inspect
+Playwright's actual and diff artifacts before changing snapshots.
 
 ADR 0047 keeps real Figma desktop checks out of routine verification. Use local
 Figma loading as a low-frequency smoke check before demos or releases, or when
