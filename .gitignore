@@ -10,6 +10,7 @@ node_modules/
 dist/
 out/
 code.js
+test-results/
 
 # Agent artifacts
 .harness/
