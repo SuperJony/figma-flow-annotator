@@ -9,8 +9,10 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node --test tests/*.test.mjs",
+    "test:visual": "playwright test -c playwright.config.ts",
     "test:visual:connect": "playwright test -c playwright.config.ts connector-visual.spec.ts",
     "test:visual:panel": "playwright test -c playwright.config.ts panel-ui.spec.ts",
+    "verify": "pnpm run test && pnpm run test:visual && pnpm run lint && pnpm run build",
     "watch": "esbuild code.ts --bundle --target=es2019 --outfile=code.js --watch"
   },
   "author": "",

@@ -6,6 +6,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
+    "verify": "pnpm --filter @figma-flow-annotator/flow-annotator verify",
     "watch": "pnpm --filter @figma-flow-annotator/flow-annotator watch"
   }
 }

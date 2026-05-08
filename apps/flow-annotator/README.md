@@ -24,11 +24,64 @@ Run static checks from the repository root:
 pnpm lint
 ```
 
+Run the routine package verification surface from the repository root:
+
+```sh
+pnpm verify
+```
+
+This runs the package semantic tests, browser visual screenshots, lint, and
+production plugin build in that order.
+
 Watch TypeScript changes while developing:
 
 ```sh
 pnpm --filter @figma-flow-annotator/flow-annotator watch
 ```
+
+## Visual regression checks
+
+The routine visual surface is Playwright Chromium, configured in
+`playwright.config.ts` and run from `apps/flow-annotator` through package
+scripts. This browser surface is authoritative for routine regression checks:
+it covers **Flow Connector** visuals through the plugin-owned route/SVG model and
+the plugin panel states through the real `ui.html` message protocol.
+
+Run all browser visual checks:
+
+```sh
+pnpm --filter @figma-flow-annotator/flow-annotator test:visual
+```
+
+Run one visual domain while developing:
+
+```sh
+pnpm --filter @figma-flow-annotator/flow-annotator test:visual:connect
+pnpm --filter @figma-flow-annotator/flow-annotator test:visual:panel
+```
+
+Update baselines only after an intentional visual change and after reviewing the
+generated screenshot output:
+
+```sh
+pnpm --filter @figma-flow-annotator/flow-annotator test:visual --update-snapshots
+```
+
+The checked-in baselines are platform-specific Chromium snapshots under
+`tests/visual/*-snapshots/`. Do not accept a baseline update that only hides a
+layout regression, unreadable connector route, misplaced arrowhead, incorrect
+**Flow Action** label, or broken panel state. When a failure is unexpected,
+inspect Playwright's actual and diff artifacts before changing snapshots.
+
+ADR 0047 keeps real Figma desktop checks out of routine verification. Use local
+Figma loading as a low-frequency smoke check before demos or releases, or when
+plugin manifest/loading behavior changes.
+
+The current panel baselines intentionally capture the existing two-section
+`ui.html` panel. ADR 0037 describes the future first-demo panel as three tabs:
+**Annotate**, **Connect**, and **Validate**. Until that UI is implemented, visual
+snapshot failures should be judged against the current two-section panel, while
+the gap remains documented here.
 
 ## Local Figma loading
 
