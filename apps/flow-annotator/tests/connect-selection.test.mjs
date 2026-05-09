@@ -275,6 +275,7 @@ function createFigmaStub(page, connectorGroups) {
       const group = createNode(page, '', 0);
       group.children = nodes;
       group.parent = parent;
+      group.type = 'GROUP';
       connectorGroups.push(group);
       return group;
     },

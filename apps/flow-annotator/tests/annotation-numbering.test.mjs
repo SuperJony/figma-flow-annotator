@@ -52,11 +52,21 @@ test('creates an Annotation without scanning unrelated frame descendants for num
     const createdCard = annotationsContainer.children.find(
       (child) => child.getSharedPluginData(namespace, 'kind') === 'annotation-card' && child !== existingCard,
     );
+    const createdRecord = JSON.parse(createdCard.getSharedPluginData(namespace, 'annotation'));
+    const createdBadges = annotationsContainer.children.filter(
+      (child) => child.getSharedPluginData(namespace, 'kind') === 'annotation-badge',
+    );
     const contextRecord = JSON.parse(page.getSharedPluginData(namespace, 'context'));
     const status = messages.find((message) => message.type === 'status' && message.tone === 'success');
 
     assert.ok(createdCard);
     assert.equal(createdCard.name, 'FFA Annotation Card #5');
+    assert.equal(createdRecord.schemaVersion, 1);
+    assert.equal(createdRecord.annotationNumber, 5);
+    assert.deepEqual(createdRecord.subjectNodeIds, ['subject-a', 'subject-b']);
+    assert.equal(createdBadges.length, 2);
+    assert.deepEqual(readAnnotationRefs(subjectA), [createdRecord.id]);
+    assert.deepEqual(readAnnotationRefs(subjectB), [createdRecord.id]);
     assert.equal(contextRecord.nextAnnotationNumber, 6);
     assert.equal(status.message, 'Created annotation #5 with 2 badge(s).');
   } finally {
@@ -155,6 +165,11 @@ function appendChild(parent, child) {
   }
   child.parent = parent;
   parent.children.push(child);
+}
+
+function readAnnotationRefs(node) {
+  const data = node.getSharedPluginData(namespace, 'annotationRefs');
+  return data.length === 0 ? [] : JSON.parse(data).annotationIds;
 }
 
 function createFigmaStub(page, messages) {
