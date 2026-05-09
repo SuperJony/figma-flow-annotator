@@ -1,4 +1,5 @@
 import {
+  collectConnectorObstacles,
   createFlowConnector,
   getConnectSelectionState,
   handleSelectionChange,
@@ -39,15 +40,18 @@ import {
   type CreateAnnotationPlan,
   type DocumentNodeTarget,
   type FlowConnectorRecord,
+  type FlowConnectorRouteValidationConnectorInput,
   type FlowConnectorValidationConnectorInput,
   type FlowConnectorValidationEndpointInput,
   type MoveNodeOperation,
   type Point,
   type SetSharedPluginDataOperation,
+  type ValidateFlowConnectorRouteGeometryInput,
   type ValidateFlowConnectorReferencesInput,
   type ValidationReport,
   validateAnnotationBindings,
   validateFlowConnectorReferences,
+  validateFlowConnectorRouteGeometry,
 } from '../../packages/core/src/index';
 
 const NAMESPACE = SHARED_PLUGIN_DATA.namespace;
@@ -254,8 +258,13 @@ function validateCurrentPageBindings(): ValidationReport {
     contexts,
     subjects,
   });
-  const connectorReport = validateFlowConnectorReferences(getFlowConnectorReferenceValidationInput(pageNodes));
-  const report = mergeValidationReports([annotationReport, connectorReport]);
+  const connectorRecords = getFlowConnectorValidationRecords();
+  const connectorReferenceInput = getFlowConnectorReferenceValidationInput(pageNodes, connectorRecords);
+  const connectorReport = validateFlowConnectorReferences(connectorReferenceInput);
+  const routeReport = validateFlowConnectorRouteGeometry(
+    getFlowConnectorRouteValidationInput(pageNodes, connectorRecords),
+  );
+  const report = mergeValidationReports([annotationReport, connectorReport, routeReport]);
 
   validationTargetsByIssueId = new Map(report.issues.map((issue) => [issue.id, issue.locationNodeIds]));
   return report;
@@ -263,7 +272,7 @@ function validateCurrentPageBindings(): ValidationReport {
 
 function cleanStaleIndexes(): CleanStaleIndexesResult {
   const pageNodes = collectCurrentPageNodes();
-  const connectorInput = getFlowConnectorReferenceValidationInput(pageNodes);
+  const connectorInput = getFlowConnectorReferenceValidationInput(pageNodes, getFlowConnectorValidationRecords());
   const plan = buildCleanStaleIndexesPlan({
     endpoints: connectorInput.endpoints,
     liveConnectorIds: connectorInput.connectors.map((connector) => connector.record.id),
@@ -701,9 +710,9 @@ function readAnnotationValidationRecord(node: BaseNode): AnnotationValidationRec
   };
 }
 
-function getFlowConnectorReferenceValidationInput(pageNodes: SceneNode[]): ValidateFlowConnectorReferencesInput {
+function getFlowConnectorValidationRecords(): { node: GroupNode; record: FlowConnectorRecord }[] {
   const connectorsContainer = findContainer(CONNECTORS_CONTAINER_NAME);
-  const connectors: FlowConnectorValidationConnectorInput[] = connectorsContainer === null
+  return connectorsContainer === null
     ? []
     : connectorsContainer.children.flatMap((child) => {
         if (
@@ -714,8 +723,18 @@ function getFlowConnectorReferenceValidationInput(pageNodes: SceneNode[]): Valid
         }
 
         const record = readFlowConnectorValidationRecord(child);
-        return record === null ? [] : [{ nodeId: child.id, record }];
+        return record === null ? [] : [{ node: child, record }];
       });
+}
+
+function getFlowConnectorReferenceValidationInput(
+  pageNodes: SceneNode[],
+  connectorRecords: { node: GroupNode; record: FlowConnectorRecord }[] = getFlowConnectorValidationRecords(),
+): ValidateFlowConnectorReferencesInput {
+  const connectors: FlowConnectorValidationConnectorInput[] = connectorRecords.map((connector) => ({
+    nodeId: connector.node.id,
+    record: connector.record,
+  }));
   const endpoints: FlowConnectorValidationEndpointInput[] = pageNodes.map((node) => ({
     connectorIds: readReferenceIds(node, SHARED_PLUGIN_DATA.keys.connectorRefs, 'connectorIds'),
     isEligibleFlowEndpoint: isFlowEndpointEligibleNode(node),
@@ -723,6 +742,56 @@ function getFlowConnectorReferenceValidationInput(pageNodes: SceneNode[]): Valid
   }));
 
   return { connectors, endpoints };
+}
+
+function getFlowConnectorRouteValidationInput(
+  pageNodes: SceneNode[],
+  connectorRecords: { node: GroupNode; record: FlowConnectorRecord }[],
+): ValidateFlowConnectorRouteGeometryInput {
+  const nodesById = new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node]));
+  const connectors: FlowConnectorRouteValidationConnectorInput[] = connectorRecords.map((connector) => {
+    const startNode = nodesById.get(connector.record.start.nodeId);
+    const endNode = nodesById.get(connector.record.end.nodeId);
+    const labelRect = getFlowActionLabelRect(connector.node);
+    const baseInput = {
+      nodeId: connector.node.id,
+      record: connector.record,
+      ...(labelRect === undefined ? {} : { labelRect }),
+    };
+
+    if (
+      startNode === undefined ||
+      endNode === undefined ||
+      startNode.absoluteBoundingBox === null ||
+      endNode.absoluteBoundingBox === null
+    ) {
+      return {
+        ...baseInput,
+        obstacles: [],
+      };
+    }
+
+    return {
+      ...baseInput,
+      endRect: getVisibleBounds(endNode),
+      obstacles: collectConnectorObstacles(startNode, endNode, connectRuntime),
+      startRect: getVisibleBounds(startNode),
+    };
+  });
+
+  return { connectors };
+}
+
+function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {
+  const label = connectorRoot.children.find((child) =>
+    child.name === 'FFA Flow Action Label' &&
+    child.visible !== false &&
+    'absoluteBoundingBox' in child &&
+    child.absoluteBoundingBox !== null,
+  );
+  return label === undefined || !('absoluteBoundingBox' in label) || label.absoluteBoundingBox === null
+    ? undefined
+    : label.absoluteBoundingBox;
 }
 
 function readFlowConnectorValidationRecord(node: BaseNode): FlowConnectorRecord | null {

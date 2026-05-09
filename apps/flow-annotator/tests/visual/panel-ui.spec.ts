@@ -63,6 +63,50 @@ test.describe('Plugin panel browser visuals', () => {
         await page.locator('[data-filter="all"]').click();
       }
 
+      if (definition.name === 'validate-route-label-trunk-report') {
+        await expect(page.locator('#summaryAll')).toHaveText('6');
+        await expect(page.locator('#summaryErrors')).toHaveText('3');
+        await expect(page.locator('#summaryWarnings')).toHaveText('2');
+        await expect(page.locator('#summaryInfo')).toHaveText('1');
+        await expect(page.locator('#cleanStaleIndexes')).toBeDisabled();
+        await expect(page.locator('.issue-title')).toHaveText([
+          'Connector Route Crosses Obstacle',
+          'Flow Action Label Overlap',
+          'Missing Connector Trunk',
+          'Connector Routing Failure',
+          'Connector Route Can Be Refreshed',
+          'Unexpected Connector Trunk',
+        ]);
+
+        const postedMessages: unknown[] = [];
+        await page.exposeFunction('capturePluginPostMessage', (message: unknown) => {
+          postedMessages.push(message);
+        });
+        await page.evaluate(() => {
+          const windowWithCapture = window as unknown as {
+            capturePluginPostMessage: (message: unknown) => void;
+          };
+          const originalPostMessage = window.parent.postMessage.bind(window.parent);
+          window.parent.postMessage = ((message: unknown, targetOrigin: string, transfer?: Transferable[]) => {
+            windowWithCapture.capturePluginPostMessage(message);
+            originalPostMessage(message, targetOrigin, transfer ?? []);
+          }) as typeof window.parent.postMessage;
+        });
+        await page.locator('[data-issue-id="flow-action-label-overlap-3"]').click();
+        expect(postedMessages).toContainEqual({
+          pluginMessage: {
+            type: 'locate-validation-issue',
+            issueId: 'flow-action-label-overlap-3',
+          },
+        });
+
+        await page.locator('[data-filter="warning"]').click();
+        await expect(page.locator('.issue-row')).toHaveCount(2);
+        await page.locator('[data-filter="info"]').click();
+        await expect(page.locator('.issue-title')).toHaveText('Connector Route Can Be Refreshed');
+        await page.locator('[data-filter="all"]').click();
+      }
+
       if (definition.name === 'validate-clean-complete') {
         await expect(page.locator('#summaryAll')).toHaveText('1');
         await expect(page.locator('#cleanStaleIndexes')).toBeDisabled();
