@@ -465,6 +465,53 @@ test('reports Connect preview and existing directed connector status from projec
   }
 });
 
+test('regenerates trunked connector labels on branch segments after shared-end create', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const startA = createNode(page, 'start-a', 0);
+    const startB = createNode(page, 'start-b', 0);
+    const end = createNode(page, 'end', 520);
+    const connectorGroups = [];
+    const runtime = createRuntime(page, connectorGroups);
+
+    moveNode(startA, { x: 0, y: 0, width: 100, height: 100 });
+    moveNode(startB, { x: 0, y: 220, width: 100, height: 100 });
+    moveNode(end, { x: 520, y: 110, width: 100, height: 100 });
+    page.children = [startA, startB, end];
+    globalThis.figma = createFigmaStub(page, connectorGroups);
+
+    connect.resetObservedEndpointSelection(runtime);
+    page.selection = [startA];
+    connect.handleSelectionChange(runtime);
+    page.selection = [startA, end];
+    connect.handleSelectionChange(runtime);
+    connect.createFlowConnector('from A', runtime);
+
+    page.selection = [];
+    connect.resetObservedEndpointSelection(runtime);
+    page.selection = [startB];
+    connect.handleSelectionChange(runtime);
+    page.selection = [startB, end];
+    connect.handleSelectionChange(runtime);
+    connect.createFlowConnector('from B', runtime);
+
+    assert.equal(connectorGroups.length, 2);
+    const firstRoute = readConnector(connectorGroups[0]).routeCache.points;
+    const secondRoute = readConnector(connectorGroups[1]).routeCache.points;
+    const sharedFinalSegment = finalSegment(firstRoute);
+    assert.deepEqual(finalSegment(secondRoute), sharedFinalSegment);
+
+    const firstLabelCenter = getLabelCenter(connectorGroups[0]);
+    const secondLabelCenter = getLabelCenter(connectorGroups[1]);
+    assert.equal(pointOnSegment(firstLabelCenter, sharedFinalSegment), false);
+    assert.equal(pointOnSegment(secondLabelCenter, sharedFinalSegment), false);
+    assert.notDeepEqual(firstLabelCenter, secondLabelCenter);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 test('refreshes current-page Flow Connectors and gives selected connector roots precedence', async () => {
   try {
     const connect = await importConnectModule();
@@ -776,6 +823,40 @@ function routeIntersectsRect(points, rect) {
     }
     return segmentIntersectsRect(point, points[index + 1], rect);
   });
+}
+
+function finalSegment(points) {
+  return {
+    start: points[points.length - 2],
+    end: points[points.length - 1],
+  };
+}
+
+function getLabelCenter(connectorGroup) {
+  const label = connectorGroup.children.find((child) => child.name === 'FFA Flow Action Label');
+  assert.ok(label, 'expected Flow Action label visual node');
+  return {
+    x: label.x + label.width / 2,
+    y: label.y + label.height / 2,
+  };
+}
+
+function pointOnSegment(point, segment) {
+  if (segment.start.y === segment.end.y) {
+    return (
+      point.y === segment.start.y &&
+      point.x >= Math.min(segment.start.x, segment.end.x) &&
+      point.x <= Math.max(segment.start.x, segment.end.x)
+    );
+  }
+  if (segment.start.x === segment.end.x) {
+    return (
+      point.x === segment.start.x &&
+      point.y >= Math.min(segment.start.y, segment.end.y) &&
+      point.y <= Math.max(segment.start.y, segment.end.y)
+    );
+  }
+  return false;
 }
 
 function segmentIntersectsRect(start, end, rect) {

@@ -481,6 +481,140 @@ test('routes around Annotation Cards and fails when no legal route exists', asyn
   );
 });
 
+test('places Flow Action labels on the longest readable segment near route center', async () => {
+  const core = await importCoreModule();
+  const routePoints = [
+    { x: 0, y: 0 },
+    { x: 80, y: 0 },
+    { x: 80, y: 40 },
+    { x: 240, y: 40 },
+    { x: 240, y: 90 },
+    { x: 360, y: 90 },
+  ];
+
+  const unrestricted = core.placeFlowActionLabel({
+    flowAction: 'Approve scope',
+    routePoints,
+  });
+  assert.deepEqual(unrestricted, {
+    center: { x: 160, y: 40 },
+    segmentIndex: 2,
+  });
+
+  const obstacleAware = core.placeFlowActionLabel({
+    flowAction: 'Approve scope',
+    obstacles: [
+      { id: 'card-1', kind: 'annotation-card', rect: { x: 120, y: 24, width: 80, height: 48 } },
+    ],
+    routePoints,
+  });
+  assert.deepEqual(obstacleAware, {
+    center: { x: 300, y: 90 },
+    segmentIndex: 4,
+  });
+});
+
+test('groups same-end same-incoming-side connectors into deterministic trunks', async () => {
+  const core = await importCoreModule();
+  const now = '2026-05-09T00:00:00.000Z';
+  const trunkSegment = {
+    end: { x: 400, y: 50 },
+    index: 3,
+    length: 32,
+    start: { x: 368, y: 50 },
+  };
+  const firstRecord = core.createFlowConnectorRecord({
+    connectorId: 'connector-a',
+    end: { contextFrameId: 'frame-end', nodeId: 'end' },
+    flowAction: 'choose A',
+    now,
+    ownerContextFrameId: 'frame-start-a',
+    routePoints: [
+      { x: 100, y: 20 },
+      { x: 200, y: 20 },
+      { x: 200, y: 50 },
+      trunkSegment.start,
+      trunkSegment.end,
+    ],
+    start: { contextFrameId: 'frame-start-a', nodeId: 'start-a' },
+  });
+  const secondRecord = core.createFlowConnectorRecord({
+    connectorId: 'connector-b',
+    end: { contextFrameId: 'frame-end', nodeId: 'end' },
+    flowAction: 'choose B',
+    now,
+    ownerContextFrameId: 'frame-start-b',
+    routePoints: [
+      { x: 100, y: 120 },
+      { x: 200, y: 120 },
+      { x: 200, y: 50 },
+      trunkSegment.start,
+      trunkSegment.end,
+    ],
+    start: { contextFrameId: 'frame-start-b', nodeId: 'start-b' },
+  });
+
+  const plan = core.planConnectorTrunks({
+    connectors: [
+      { record: secondRecord },
+      { record: firstRecord },
+    ],
+  });
+
+  assert.equal(plan.groups.length, 1);
+  assert.equal(plan.groups[0].endNodeId, 'end');
+  assert.equal(plan.groups[0].incomingSide, 'left');
+  assert.deepEqual(plan.groups[0].connectorIds, ['connector-a', 'connector-b']);
+  assert.deepEqual(plan.groups[0].segment, trunkSegment);
+
+  const placement = core.placeFlowActionLabel({
+    flowAction: 'choose B',
+    routePoints: secondRecord.routeCache.points,
+    sharedTrunkSegment: plan.groups[0].segment,
+  });
+  assert.notEqual(placement.segmentIndex, trunkSegment.index);
+  assert.notDeepEqual(placement.center, { x: 384, y: 50 });
+});
+
+test('does not group Connector Trunks across different ends or opposite directions', async () => {
+  const core = await importCoreModule();
+  const now = '2026-05-09T00:00:00.000Z';
+  const base = {
+    flowAction: 'choose',
+    now,
+    ownerContextFrameId: 'frame-start',
+  };
+  const first = core.createFlowConnectorRecord({
+    ...base,
+    connectorId: 'connector-a',
+    end: { contextFrameId: 'frame-end', nodeId: 'end-a' },
+    routePoints: [{ x: 0, y: 0 }, { x: 68, y: 0 }, { x: 100, y: 0 }],
+    start: { contextFrameId: 'frame-start', nodeId: 'start-a' },
+  });
+  const differentEnd = core.createFlowConnectorRecord({
+    ...base,
+    connectorId: 'connector-b',
+    end: { contextFrameId: 'frame-end', nodeId: 'end-b' },
+    routePoints: [{ x: 0, y: 20 }, { x: 68, y: 20 }, { x: 100, y: 20 }],
+    start: { contextFrameId: 'frame-start', nodeId: 'start-b' },
+  });
+  const oppositeDirection = core.createFlowConnectorRecord({
+    ...base,
+    connectorId: 'connector-c',
+    end: { contextFrameId: 'frame-start', nodeId: 'start-a' },
+    routePoints: [{ x: 100, y: 0 }, { x: 32, y: 0 }, { x: 0, y: 0 }],
+    start: { contextFrameId: 'frame-end', nodeId: 'end-a' },
+  });
+
+  assert.equal(core.planConnectorTrunks({
+    connectors: [
+      { record: first },
+      { record: differentEnd },
+      { record: oppositeDirection },
+    ],
+  }).groups.length, 0);
+});
+
 test('validates Annotation bindings by impact severity without repair plans', async () => {
   const core = await importCoreModule();
   const report = core.validateAnnotationBindings({

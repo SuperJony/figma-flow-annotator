@@ -7,9 +7,12 @@ import {
   flowConnectorMatchesDirectedPair,
   isFlowEndpointEligibleVisualKind,
   mergeConnectorReferenceIds,
+  placeFlowActionLabel,
+  planConnectorTrunks,
   routeOrthogonalConnector,
   serializeSharedPluginDataValue,
   type AppendSharedReferenceOperation,
+  type ConnectorRouteSegment,
   type ConnectorObstacle,
   type CreateFlowConnectorOperation,
   type CreateFlowConnectorPlan,
@@ -69,6 +72,12 @@ export interface FlowActionLabelVisual {
 export interface ConnectorVisualModel {
   label: FlowActionLabelVisual | null;
   route: ConnectorRouteVisual;
+  trunkSegment: ConnectorRouteSegment | null;
+}
+
+export interface ConnectorVisualModelOptions {
+  obstacles?: ConnectorObstacle[];
+  sharedTrunkSegment?: ConnectorRouteSegment;
 }
 
 export interface ConnectEndpointPreview {
@@ -165,6 +174,7 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
     [endNode.id, endNode],
     ...(existingConnector === null ? [] : [[existingConnector.node.id, existingConnector.node] as [string, BaseNode]]),
   ]));
+  regenerateConnectorVisuals(runtime);
   runtime.ensureLayerOrder();
   return connectorRoot;
 }
@@ -200,6 +210,7 @@ export async function refreshFlowConnectors(runtime: ConnectRuntime): Promise<Re
   }
 
   if (refreshedNodes.length > 0) {
+    regenerateConnectorVisuals(runtime);
     runtime.ensureLayerOrder();
   }
 
@@ -337,13 +348,44 @@ function updateFlowConnectorRoot(
   runtime: ConnectRuntime,
 ): void {
   const nextVisualNodes = createConnectorVisualNodes(operation.routePoints, operation.flowAction ?? '', runtime);
+  replaceConnectorVisualNodes(connectorRoot, nextVisualNodes);
+  connectorRoot.name = operation.name;
+}
+
+function regenerateConnectorVisuals(runtime: ConnectRuntime): void {
+  const connectors = getFlowConnectorRecords(runtime).filter((connector) => connector.record.routeCache !== undefined);
+  const trunkPlan = planConnectorTrunks({
+    connectors: connectors.map((connector) => ({
+      record: connector.record,
+    })),
+  });
+  const assignmentByConnectorId = new Map(
+    trunkPlan.assignments.map((assignment) => [assignment.connectorId, assignment]),
+  );
+
+  connectors.forEach((connector) => {
+    const routePoints = connector.record.routeCache?.points;
+    if (routePoints === undefined) {
+      return;
+    }
+    const assignment = assignmentByConnectorId.get(connector.record.id);
+    const nextVisualNodes = createConnectorVisualNodes(
+      routePoints,
+      connector.record.flowAction ?? '',
+      runtime,
+      assignment === undefined ? {} : { sharedTrunkSegment: assignment.segment },
+    );
+    replaceConnectorVisualNodes(connector.node, nextVisualNodes);
+  });
+}
+
+function replaceConnectorVisualNodes(connectorRoot: GroupNode, nextVisualNodes: SceneNode[]): void {
   [...connectorRoot.children].forEach((child) => {
     child.remove();
   });
   nextVisualNodes.forEach((node) => {
     connectorRoot.appendChild(node);
   });
-  connectorRoot.name = operation.name;
 }
 
 function resolveExistingConnectorRoot(nodeId: string, existingNodes: Map<string, BaseNode>): GroupNode {
@@ -572,8 +614,13 @@ function isRouteCacheRecord(value: unknown): value is { schemaVersion: 1; points
   );
 }
 
-function createConnectorVisualNodes(points: Point[], flowAction: string, runtime: ConnectRuntime): SceneNode[] {
-  const visual = buildConnectorVisualModel(points, flowAction);
+function createConnectorVisualNodes(
+  points: Point[],
+  flowAction: string,
+  runtime: ConnectRuntime,
+  options: ConnectorVisualModelOptions = {},
+): SceneNode[] {
+  const visual = buildConnectorVisualModel(points, flowAction, options);
   const nodes: SceneNode[] = [createConnectorRouteSvg(visual.route)];
 
   if (visual.label !== null) {
@@ -583,7 +630,11 @@ function createConnectorVisualNodes(points: Point[], flowAction: string, runtime
   return nodes;
 }
 
-export function buildConnectorVisualModel(points: Point[], flowAction: string): ConnectorVisualModel {
+export function buildConnectorVisualModel(
+  points: Point[],
+  flowAction: string,
+  options: ConnectorVisualModelOptions = {},
+): ConnectorVisualModel {
   const distinctPoints = compactPoints(points);
   if (distinctPoints.length < 2) {
     throw new Error('Connector route requires at least two points.');
@@ -599,13 +650,16 @@ export function buildConnectorVisualModel(points: Point[], flowAction: string): 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${pathData}" fill="none" stroke="${CONNECTOR_COLOR}" stroke-width="${CONNECTOR_THICKNESS}" stroke-linecap="round" stroke-linejoin="round"/><path d="${arrowData}" fill="${CONNECTOR_COLOR}"/></svg>`;
   const trimmedFlowAction = flowAction.trim();
   return {
-    label: trimmedFlowAction.length > 0 ? buildFlowActionLabelVisual(distinctPoints, trimmedFlowAction) : null,
+    label: trimmedFlowAction.length > 0
+      ? buildFlowActionLabelVisual(distinctPoints, trimmedFlowAction, options)
+      : null,
     route: {
       bounds,
       height,
       svg,
       width,
     },
+    trunkSegment: options.sharedTrunkSegment ?? null,
   };
 }
 
@@ -650,9 +704,23 @@ function buildConnectorDrawing(points: Point[]): { pathPoints: Point[]; arrowPoi
   };
 }
 
-function buildFlowActionLabelVisual(points: Point[], flowAction: string): FlowActionLabelVisual {
+function buildFlowActionLabelVisual(
+  points: Point[],
+  flowAction: string,
+  options: ConnectorVisualModelOptions,
+): FlowActionLabelVisual | null {
+  const placement = placeFlowActionLabel({
+    flowAction,
+    obstacles: options.obstacles,
+    routePoints: points,
+    sharedTrunkSegment: options.sharedTrunkSegment,
+  });
+  if (placement === null) {
+    return null;
+  }
+
   return {
-    center: getLongestSegmentMidpoint(points),
+    center: placement.center,
     fill: FLOW_ACTION_LABEL_FILL,
     fontSize: FLOW_ACTION_LABEL_FONT_SIZE,
     maxTextWidth: FLOW_ACTION_LABEL_MAX_BROWSER_TEXT_WIDTH,
@@ -823,26 +891,6 @@ function normalize(vector: Point): Point {
   return {
     x: vector.x / length,
     y: vector.y / length,
-  };
-}
-
-function getLongestSegmentMidpoint(points: Point[]): Point {
-  let bestStart = points[0];
-  let bestEnd = points[points.length - 1];
-  let bestLength = -1;
-
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const length = distance(points[index], points[index + 1]);
-    if (length > bestLength) {
-      bestStart = points[index];
-      bestEnd = points[index + 1];
-      bestLength = length;
-    }
-  }
-
-  return {
-    x: bestStart.x + (bestEnd.x - bestStart.x) / 2,
-    y: bestStart.y + (bestEnd.y - bestStart.y) / 2,
   };
 }
 
