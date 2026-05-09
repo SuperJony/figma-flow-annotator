@@ -30,8 +30,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: 14px 16px 10px;
+      gap: 8px;
+      padding: 10px 12px 6px;
       border-bottom: 1px solid #d9dee7;
       background: #ffffff;
     }
@@ -44,7 +44,7 @@
     }
 
     h1 {
-      font-size: 15px;
+      font-size: 14px;
     }
 
     h2 {
@@ -54,14 +54,14 @@
 
     main {
       display: grid;
-      gap: 12px;
-      padding: 12px 16px 16px;
+      gap: 6px;
+      padding: 6px 10px 8px;
     }
 
     section {
       display: grid;
-      gap: 10px;
-      padding: 12px;
+      gap: 6px;
+      padding: 8px;
       border: 1px solid #d9dee7;
       border-radius: 8px;
       background: #ffffff;
@@ -69,7 +69,7 @@
 
     label {
       display: grid;
-      gap: 6px;
+      gap: 4px;
       color: #3b4656;
       font-size: 11px;
       font-weight: 600;
@@ -88,15 +88,15 @@
     }
 
     textarea {
-      min-height: 92px;
+      min-height: 50px;
       max-height: 160px;
       resize: vertical;
-      padding: 8px;
-      line-height: 1.45;
+      padding: 6px 8px;
+      line-height: 1.35;
     }
 
     input {
-      height: 32px;
+      height: 28px;
       padding: 0 8px;
     }
 
@@ -128,18 +128,61 @@
       display: flex;
       flex-wrap: wrap;
       justify-content: flex-end;
-      gap: 8px;
+      gap: 6px;
+    }
+
+    .endpoint-preview {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      border: 1px solid #d9dee7;
+      border-radius: 6px;
+      padding: 6px;
+      background: #f7f8f9;
+    }
+
+    .endpoint-row {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .endpoint-label {
+      color: #657286;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .endpoint-value {
+      overflow: hidden;
+      color: #172033;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .connect-status {
+      min-height: 16px;
+      border-radius: 6px;
+      padding: 0;
+      background: transparent;
+      color: #3b4656;
+      font-size: 11px;
+      line-height: 1.25;
+    }
+
+    .connect-status.strong {
+      color: #1f6b36;
     }
 
     button {
-      height: 32px;
+      height: 28px;
       border: 1px solid #b8c1ce;
       border-radius: 6px;
       background: #ffffff;
       color: #172033;
       font: inherit;
       font-weight: 650;
-      padding: 0 10px;
+      padding: 0 8px;
       cursor: pointer;
     }
 
@@ -157,15 +200,15 @@
     footer {
       margin-top: auto;
       display: grid;
-      gap: 10px;
-      padding: 0 16px 14px;
+      gap: 6px;
+      padding: 0 10px 6px;
     }
 
     #status {
-      min-height: 28px;
+      min-height: 24px;
       border: 1px solid #d9dee7;
       border-radius: 6px;
-      padding: 7px 8px;
+      padding: 5px 8px;
       background: #ffffff;
       color: #3b4656;
       line-height: 1.25;
@@ -220,7 +263,20 @@
           Flow Action
           <input id="flowAction" type="text" placeholder="click, choose, input">
         </label>
+        <div class="endpoint-preview" aria-label="Pending Flow Endpoints">
+          <div class="endpoint-row">
+            <div class="endpoint-label">Start</div>
+            <div id="startEndpoint" class="endpoint-value">None</div>
+          </div>
+          <div class="endpoint-row">
+            <div class="endpoint-label">End</div>
+            <div id="endEndpoint" class="endpoint-value">None</div>
+          </div>
+        </div>
+        <div id="routingStatus" class="connect-status">Select two Flow Endpoints to preview a Connector Route.</div>
+        <div id="existingConnectorStatus" class="connect-status">No existing Flow Connector.</div>
         <div class="actions">
+          <button id="swapConnector" type="button">Swap</button>
           <button id="createConnector" class="primary" type="button">Create Flow Connector</button>
         </div>
       </section>
@@ -239,14 +295,22 @@
     const arrangeBadges = document.getElementById('arrangeBadges');
     const arrangeCards = document.getElementById('arrangeCards');
     const createConnector = document.getElementById('createConnector');
+    const swapConnector = document.getElementById('swapConnector');
     const closeButton = document.getElementById('close');
     const status = document.getElementById('status');
     const selection = document.getElementById('selection');
     const connectorState = document.getElementById('connectorState');
+    const startEndpoint = document.getElementById('startEndpoint');
+    const endEndpoint = document.getElementById('endEndpoint');
+    const routingStatus = document.getElementById('routingStatus');
+    const existingConnectorStatus = document.getElementById('existingConnectorStatus');
 
     let totalSelection = 0;
     let eligibleSelection = 0;
     let selectedAnnotationCardCount = 0;
+    let connectorEndpoints = [];
+    let existingConnector = null;
+    let currentRoutingStatus = 'Select two Flow Endpoints to preview a Connector Route.';
 
     createAnnotation.addEventListener('click', () => {
       const body = annotationBody.value.trim();
@@ -273,6 +337,10 @@
       post({ type: 'create-connector', flowAction: flowAction.value.trim() });
     });
 
+    swapConnector.addEventListener('click', () => {
+      post({ type: 'swap-connector-endpoints' });
+    });
+
     closeButton.addEventListener('click', () => {
       post({ type: 'close' });
     });
@@ -287,6 +355,9 @@
         totalSelection = message.totalCount;
         eligibleSelection = message.eligibleCount;
         selectedAnnotationCardCount = message.selectedAnnotationCardCount || 0;
+        connectorEndpoints = Array.isArray(message.connectorEndpoints) ? message.connectorEndpoints : [];
+        existingConnector = message.existingConnector || null;
+        currentRoutingStatus = message.routingStatus || 'Select two Flow Endpoints to preview a Connector Route.';
         renderSelectionState();
         return;
       }
@@ -304,12 +375,20 @@
 
     function renderSelectionState() {
       selection.textContent = `${eligibleSelection} subject${eligibleSelection === 1 ? '' : 's'}`;
-      connectorState.textContent = `${totalSelection} selected`;
+      connectorState.textContent = `${connectorEndpoints.length}/2 endpoints`;
+      startEndpoint.textContent = connectorEndpoints[0] ? connectorEndpoints[0].name : 'None';
+      endEndpoint.textContent = connectorEndpoints[1] ? connectorEndpoints[1].name : 'None';
+      routingStatus.textContent = currentRoutingStatus;
+      existingConnectorStatus.textContent = existingConnector
+        ? `Existing Flow Connector: ${existingConnector.flowAction || 'No Flow Action'}`
+        : 'No existing Flow Connector.';
+      existingConnectorStatus.className = existingConnector ? 'connect-status strong' : 'connect-status';
       createAnnotation.disabled = eligibleSelection === 0 || annotationBody.value.trim().length === 0;
       addSubjectNodes.disabled = eligibleSelection === 0 || selectedAnnotationCardCount !== 1;
       arrangeBadges.disabled = eligibleSelection === 0;
       arrangeCards.disabled = false;
-      createConnector.disabled = totalSelection !== 2;
+      swapConnector.disabled = connectorEndpoints.length !== 2;
+      createConnector.disabled = connectorEndpoints.length !== 2;
     }
 
     function setStatus(tone, message) {

@@ -25,7 +25,10 @@ test.describe('Plugin panel browser visuals', () => {
         await expect(page.locator('#addSubjectNodes')).toBeDisabled();
       }
 
-      if (definition.name === 'two-pending-connector-endpoints') {
+      if (
+        definition.name === 'two-pending-connector-endpoints' ||
+        definition.name === 'existing-connector-status'
+      ) {
         await expect(page.locator('#createConnector')).toBeEnabled();
       } else {
         await expect(page.locator('#createConnector')).toBeDisabled();

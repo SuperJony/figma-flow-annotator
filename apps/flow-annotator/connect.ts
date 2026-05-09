@@ -1,15 +1,20 @@
 import { type Point, unionRects } from './geometry';
 import {
   SHARED_PLUGIN_DATA,
+  CONNECTORS_CONTAINER_NAME,
   VISUAL_NODE_KINDS,
   buildCreateFlowConnectorPlan,
+  flowConnectorMatchesDirectedPair,
+  isFlowEndpointEligibleVisualKind,
   mergeConnectorReferenceIds,
   serializeSharedPluginDataValue,
   type AppendSharedReferenceOperation,
   type CreateFlowConnectorOperation,
   type CreateFlowConnectorPlan,
   type DocumentNodeTarget,
+  type FlowConnectorRecord,
   type SetSharedPluginDataOperation,
+  type UpdateFlowConnectorOperation,
 } from '../../packages/core/src/index';
 
 const CONNECTOR_THICKNESS = 4;
@@ -65,6 +70,23 @@ export interface ConnectorVisualModel {
   route: ConnectorRouteVisual;
 }
 
+export interface ConnectEndpointPreview {
+  id: string;
+  name: string;
+}
+
+export interface ExistingConnectorPreview {
+  flowAction: string | null;
+  id: string;
+  nodeId: string;
+}
+
+export interface ConnectSelectionState {
+  endpoints: ConnectEndpointPreview[];
+  existingConnector: ExistingConnectorPreview | null;
+  routingStatus: string;
+}
+
 export interface ConnectRuntime {
   namespace: string;
   createId(prefix: 'connector'): string;
@@ -97,10 +119,19 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
   const startContextFrameId = runtime.findContextFrameId(startNode);
   const endContextFrameId = runtime.findContextFrameId(endNode);
   const routePoints = buildOrthogonalRoute(startBounds, endBounds, collectConnectorObstacles(startNode, endNode, runtime));
-  const connectorId = runtime.createId('connector');
+  const existingConnector = findExistingDirectedConnector(startNode.id, endNode.id, runtime);
+  const connectorId = existingConnector?.record.id ?? runtime.createId('connector');
   const now = new Date().toISOString();
   const plan = buildCreateFlowConnectorPlan({
     connectorId,
+    ...(existingConnector === null
+      ? {}
+      : {
+          existingConnector: {
+            nodeId: existingConnector.node.id,
+            record: existingConnector.record,
+          },
+        }),
     start: {
       id: startNode.id,
       name: startNode.name,
@@ -119,6 +150,7 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
   const connectorRoot = applyCreateFlowConnectorPlan(plan, runtime, new Map([
     [startNode.id, startNode],
     [endNode.id, endNode],
+    ...(existingConnector === null ? [] : [[existingConnector.node.id, existingConnector.node] as [string, BaseNode]]),
   ]));
   runtime.ensureLayerOrder();
   return connectorRoot;
@@ -150,6 +182,11 @@ function applyCreateFlowConnectorPlan(
       return;
     }
 
+    if (operation.type === 'update-flow-connector') {
+      updateFlowConnectorRoot(resolveExistingConnectorRoot(operation.targetNodeId, existingNodes), operation, runtime);
+      return;
+    }
+
     if (operation.type === 'append-shared-reference') {
       appendConnectorReference(existingNodes, runtime, operation);
       return;
@@ -158,11 +195,15 @@ function applyCreateFlowConnectorPlan(
     throw new Error(`Flow Connector adapter cannot apply ${operation.type}.`);
   });
 
-  const connectorRoot = createdNodes.get(plan.createdNodeRefs[0]);
-  if (connectorRoot === undefined || connectorRoot.type !== 'GROUP') {
-    throw new Error('Flow Connector plan did not create a connector root.');
+  if (plan.mode === 'create') {
+    const connectorRoot = createdNodes.get(plan.createdNodeRefs[0]);
+    if (connectorRoot === undefined || connectorRoot.type !== 'GROUP') {
+      throw new Error('Flow Connector plan did not create a connector root.');
+    }
+    return connectorRoot;
   }
-  return connectorRoot;
+
+  return resolveExistingConnectorRoot(plan.existingNodeRefs[0], existingNodes);
 }
 
 function createFlowConnectorRoot(
@@ -174,6 +215,28 @@ function createFlowConnectorRoot(
   const connectorRoot = figma.group(visualNodes, container);
   connectorRoot.name = operation.name;
   return connectorRoot;
+}
+
+function updateFlowConnectorRoot(
+  connectorRoot: GroupNode,
+  operation: UpdateFlowConnectorOperation,
+  runtime: ConnectRuntime,
+): void {
+  [...connectorRoot.children].forEach((child) => {
+    child.remove();
+  });
+  createConnectorVisualNodes(operation.routePoints, operation.flowAction ?? '', runtime).forEach((node) => {
+    connectorRoot.appendChild(node);
+  });
+  connectorRoot.name = operation.name;
+}
+
+function resolveExistingConnectorRoot(nodeId: string, existingNodes: Map<string, BaseNode>): GroupNode {
+  const node = existingNodes.get(nodeId);
+  if (node === undefined || node.type !== 'GROUP') {
+    throw new Error(`Flow Connector plan references missing connector root ${nodeId}.`);
+  }
+  return node;
 }
 
 function resolveContainer(ref: string, containers: Map<string, FrameNode>): FrameNode {
@@ -248,6 +311,39 @@ function readConnectorReferenceIds(node: BaseNode, runtime: ConnectRuntime): str
   return parsed.connectorIds.filter((value): value is string => typeof value === 'string');
 }
 
+export function getConnectSelectionState(runtime: ConnectRuntime): ConnectSelectionState {
+  const endpoints = getPendingConnectorEndpointNodes(runtime);
+  const existingConnector = endpoints.length === 2
+    ? findExistingDirectedConnector(endpoints[0].id, endpoints[1].id, runtime)
+    : null;
+
+  return {
+    endpoints: endpoints.map((node) => ({
+      id: node.id,
+      name: node.name,
+    })),
+    existingConnector: existingConnector === null
+      ? null
+      : {
+          flowAction: existingConnector.record.flowAction,
+          id: existingConnector.record.id,
+          nodeId: existingConnector.node.id,
+        },
+    routingStatus: endpoints.length === 2
+      ? 'Route preview pending router validation.'
+      : 'Select two Flow Endpoints to preview a Connector Route.',
+  };
+}
+
+export function swapPendingConnectorEndpoints(runtime: ConnectRuntime): void {
+  const endpoints = getPendingConnectorEndpointNodes(runtime);
+  if (endpoints.length !== 2) {
+    throw new Error('Swap requires exactly two pending Flow Endpoints.');
+  }
+  connectorEndpointWindowNodes = [endpoints[1], endpoints[0]];
+  runtime.postSelectionState();
+}
+
 function parseJson(value: string): unknown {
   if (value.length === 0) {
     return null;
@@ -262,6 +358,90 @@ function parseJson(value: string): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function findExistingDirectedConnector(
+  startNodeId: string,
+  endNodeId: string,
+  runtime: ConnectRuntime,
+): { node: GroupNode; record: FlowConnectorRecord } | null {
+  return getFlowConnectorRecords(runtime).find((connector) =>
+    flowConnectorMatchesDirectedPair(connector.record, startNodeId, endNodeId),
+  ) ?? null;
+}
+
+function getFlowConnectorRecords(runtime: ConnectRuntime): { node: GroupNode; record: FlowConnectorRecord }[] {
+  const container = findConnectorsContainer(runtime);
+  if (container === null) {
+    return [];
+  }
+
+  return container.children.flatMap((child) => {
+    if (
+      child.type !== 'GROUP' ||
+      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.flowConnector
+    ) {
+      return [];
+    }
+
+    const record = readFlowConnectorRecord(child, runtime);
+    return record === null ? [] : [{ node: child, record }];
+  });
+}
+
+function findConnectorsContainer(runtime: ConnectRuntime): FrameNode | null {
+  for (const child of figma.currentPage.children) {
+    if (
+      child.type === 'FRAME' &&
+      child.name === CONNECTORS_CONTAINER_NAME &&
+      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) === VISUAL_NODE_KINDS.container
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function readFlowConnectorRecord(node: BaseNode, runtime: ConnectRuntime): FlowConnectorRecord | null {
+  const parsed = parseJson(node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.connector));
+  if (
+    !isRecord(parsed) ||
+    parsed.schemaVersion !== 1 ||
+    typeof parsed.id !== 'string' ||
+    !isFlowEndpointRecord(parsed.start) ||
+    !isFlowEndpointRecord(parsed.end) ||
+    typeof parsed.ownerContextFrameId !== 'string' ||
+    !(typeof parsed.flowAction === 'string' || parsed.flowAction === null) ||
+    typeof parsed.createdAt !== 'string' ||
+    typeof parsed.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    id: parsed.id,
+    start: parsed.start,
+    end: parsed.end,
+    ownerContextFrameId: parsed.ownerContextFrameId,
+    flowAction: parsed.flowAction,
+    ...(isRouteCacheRecord(parsed.routeCache) ? { routeCache: parsed.routeCache } : {}),
+    createdAt: parsed.createdAt,
+    updatedAt: parsed.updatedAt,
+  };
+}
+
+function isFlowEndpointRecord(value: unknown): value is { nodeId: string; contextFrameId: string } {
+  return isRecord(value) && typeof value.nodeId === 'string' && typeof value.contextFrameId === 'string';
+}
+
+function isRouteCacheRecord(value: unknown): value is { schemaVersion: 1; points: Point[] } {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    Array.isArray(value.points) &&
+    value.points.every((point) => isRecord(point) && typeof point.x === 'number' && typeof point.y === 'number')
+  );
 }
 
 function createConnectorVisualNodes(points: Point[], flowAction: string, runtime: ConnectRuntime): SceneNode[] {
@@ -858,9 +1038,13 @@ function getSelectedConnectorEndpoints(runtime: ConnectRuntime): SceneNode[] {
 }
 
 function isConnectorEndpoint(node: SceneNode, runtime: ConnectRuntime): boolean {
-  return !runtime.hasGeneratedAncestor(node);
+  return (
+    isFlowEndpointEligibleVisualKind(node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind)) &&
+    !runtime.hasGeneratedAncestor(node)
+  );
 }
 
 export function resetObservedEndpointSelection(runtime: ConnectRuntime): void {
+  connectorEndpointWindowNodes = [];
   observedSelectedEndpointIds = new Set(getSelectedConnectorEndpointIds(runtime));
 }

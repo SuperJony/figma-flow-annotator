@@ -96,6 +96,88 @@ test('keeps simultaneous two-endpoint selection ignored without a prior endpoint
   }
 });
 
+test('ignores pre-open selected endpoints and keeps a runtime rolling two-endpoint window', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const first = createNode(page, 'first', 0);
+    const second = createNode(page, 'second', 160);
+    const third = createNode(page, 'third', 320);
+    const runtime = createRuntime(page);
+
+    page.children = [first, second, third];
+    globalThis.figma = { currentPage: page };
+
+    page.selection = [first];
+    connect.resetObservedEndpointSelection(runtime);
+    assert.deepEqual(getPendingEndpointIds(connect, runtime), []);
+
+    page.selection = [first, second];
+    connect.handleSelectionChange(runtime);
+    assert.deepEqual(getPendingEndpointIds(connect, runtime), ['second']);
+
+    page.selection = [first, second, third];
+    connect.handleSelectionChange(runtime);
+    assert.deepEqual(getPendingEndpointIds(connect, runtime), ['second', 'third']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('excludes Annotation Cards and Annotation Badges from pending Flow Endpoints', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const subject = createNode(page, 'subject', 0);
+    const annotationCard = createNode(page, 'annotation-card', 160);
+    const annotationBadge = createNode(page, 'annotation-badge', 320);
+    const runtime = createRuntime(page);
+
+    annotationCard.setSharedPluginData('figma_flow_annotator', 'kind', 'annotation-card');
+    annotationBadge.setSharedPluginData('figma_flow_annotator', 'kind', 'annotation-badge');
+    page.children = [subject, annotationCard, annotationBadge];
+    globalThis.figma = { currentPage: page };
+
+    connect.resetObservedEndpointSelection(runtime);
+
+    page.selection = [subject];
+    connect.handleSelectionChange(runtime);
+    page.selection = [subject, annotationCard];
+    connect.handleSelectionChange(runtime);
+    page.selection = [subject, annotationCard, annotationBadge];
+    connect.handleSelectionChange(runtime);
+
+    assert.deepEqual(getPendingEndpointIds(connect, runtime), ['subject']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('swaps pending Flow Endpoint direction in runtime state', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const start = createNode(page, 'start', 0);
+    const end = createNode(page, 'end', 160);
+    const runtime = createRuntime(page);
+
+    page.children = [start, end];
+    globalThis.figma = { currentPage: page };
+
+    connect.resetObservedEndpointSelection(runtime);
+    page.selection = [start];
+    connect.handleSelectionChange(runtime);
+    page.selection = [start, end];
+    connect.handleSelectionChange(runtime);
+
+    connect.swapPendingConnectorEndpoints(runtime);
+
+    assert.deepEqual(getPendingEndpointIds(connect, runtime), ['end', 'start']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 test('posts selection state after endpoint selection without walking the page', async () => {
   try {
     const connect = await importConnectModule();
@@ -201,6 +283,79 @@ test('creates a Flow Connector without scanning children of unrelated frame obst
   }
 });
 
+test('upserts an existing directed Flow Connector and keeps reverse direction separate', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const start = createNode(page, 'start', 0);
+    const end = createNode(page, 'end', 400);
+    const connectorGroups = [];
+    const runtime = createRuntime(page, connectorGroups);
+
+    page.children = [start, end];
+    globalThis.figma = createFigmaStub(page, connectorGroups);
+
+    connect.resetObservedEndpointSelection(runtime);
+    page.selection = [start];
+    connect.handleSelectionChange(runtime);
+    page.selection = [start, end];
+    connect.handleSelectionChange(runtime);
+
+    connect.createFlowConnector('click', runtime);
+    assert.equal(connectorGroups.length, 1);
+    assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ['start', 'end']);
+    assert.equal(readConnector(connectorGroups[0]).flowAction, 'click');
+    const unchangedConnectorData = connectorGroups[0].getSharedPluginData('figma_flow_annotator', 'connector');
+
+    connect.createFlowConnector(' click ', runtime);
+    assert.equal(connectorGroups.length, 1);
+    assert.equal(connectorGroups[0].getSharedPluginData('figma_flow_annotator', 'connector'), unchangedConnectorData);
+
+    connect.createFlowConnector('', runtime);
+    assert.equal(connectorGroups.length, 1);
+    assert.equal(readConnector(connectorGroups[0]).flowAction, null);
+
+    connect.swapPendingConnectorEndpoints(runtime);
+    connect.createFlowConnector('', runtime);
+    assert.equal(connectorGroups.length, 2);
+    assert.deepEqual(readConnectorEndpointIds(connectorGroups[1]), ['end', 'start']);
+    assert.deepEqual(readConnectorRefs(start), ['connector-1', 'connector-2']);
+    assert.deepEqual(readConnectorRefs(end), ['connector-1', 'connector-2']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('reports Connect preview and existing directed connector status from project connector container only', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const start = createNode(page, 'start', 0);
+    const end = createNode(page, 'end', 400);
+    const connectorGroups = [];
+    const runtime = createRuntime(page, connectorGroups);
+
+    page.children = [start, end];
+    globalThis.figma = createFigmaStub(page, connectorGroups);
+
+    connect.resetObservedEndpointSelection(runtime);
+    page.selection = [start];
+    connect.handleSelectionChange(runtime);
+    page.selection = [start, end];
+    connect.handleSelectionChange(runtime);
+    connect.createFlowConnector('choose', runtime);
+
+    const state = connect.getConnectSelectionState(runtime);
+
+    assert.deepEqual(state.endpoints.map((endpoint) => endpoint.name), ['start', 'end']);
+    assert.equal(state.existingConnector.id, 'connector-1');
+    assert.equal(state.existingConnector.flowAction, 'choose');
+    assert.equal(state.routingStatus, 'Route preview pending router validation.');
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 async function importConnectModule() {
   await mkdir(buildDir, { recursive: true });
   const outfile = resolve(buildDir, `connect-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
@@ -217,22 +372,43 @@ async function importConnectModule() {
 
 function createNode(page, id, x) {
   const sharedPluginData = new Map();
-  return {
+  const node = {
     absoluteBoundingBox: { x, y: 0, width: 100, height: 100 },
+    appendChild: (child) => {
+      child.parent = node;
+      node.children.push(child);
+    },
     children: [],
     getSharedPluginData: (_namespace, key) => sharedPluginData.get(key) ?? '',
+    height: 100,
     id,
     name: id,
     parent: page,
     removed: false,
+    remove: () => {
+      node.removed = true;
+      if (node.parent && Array.isArray(node.parent.children)) {
+        node.parent.children = node.parent.children.filter((child) => child !== node);
+      }
+    },
+    resize: (width, height) => {
+      node.width = width;
+      node.height = height;
+      node.absoluteBoundingBox = { ...node.absoluteBoundingBox, width, height };
+    },
     setSharedPluginData: (_namespace, key, value) => {
       sharedPluginData.set(key, value);
     },
     type: 'FRAME',
+    width: 100,
+    x,
+    y: 0,
   };
+  return node;
 }
 
 function createRuntime(page, connectorGroups = []) {
+  let connectorId = 0;
   return {
     appendConnectorReference: (node, connectorId) => {
       const refs = readConnectorRefs(node);
@@ -241,13 +417,32 @@ function createRuntime(page, connectorGroups = []) {
         connectorIds: refs.includes(connectorId) ? refs : [...refs, connectorId],
       }));
     },
-    createId: () => 'connector-1',
-    createText: () => {
-      throw new Error('Flow Action labels are not used in this test.');
-    },
+    createId: () => `connector-${connectorId += 1}`,
+    createText: (name, characters, fontSize, fills, width) => ({
+      characters,
+      fills: [fills],
+      fontSize,
+      height: 16,
+      name,
+      resize: (nextWidth, _nextHeight) => {
+        width = nextWidth;
+      },
+      textAutoResize: 'NONE',
+      type: 'TEXT',
+      width: Math.min(width, Math.max(16, characters.length * 7)),
+      x: 0,
+      y: 0,
+    }),
     ensureContainer: () => {
-      const container = createNode(page, 'FFA Connectors', 0);
+      const existing = page.children.find((node) => node.name === 'FFA Connectors');
+      if (existing) {
+        return existing;
+      }
+      const container = createNode(page, 'connector-container', 0);
+      container.name = 'FFA Connectors';
       container.children = connectorGroups;
+      container.setSharedPluginData('figma_flow_annotator', 'kind', 'container');
+      page.children.push(container);
       return container;
     },
     ensureLayerOrder: () => {},
@@ -263,19 +458,32 @@ function createRuntime(page, connectorGroups = []) {
 
 function createFigmaStub(page, connectorGroups) {
   return {
-    createNodeFromSvg: () => ({
-      clipsContent: true,
-      name: '',
-      type: 'FRAME',
-      x: 0,
-      y: 0,
-    }),
+    createFrame: () => {
+      const frame = createNode(page, `frame-${Math.random().toString(36).slice(2)}`, 0);
+      frame.appendChild = (child) => {
+        child.parent = frame;
+        frame.children.push(child);
+      };
+      frame.resize = (width, height) => {
+        frame.width = width;
+        frame.height = height;
+      };
+      return frame;
+    },
+    createNodeFromSvg: () => createNode(page, `svg-${Math.random().toString(36).slice(2)}`, 0),
     currentPage: page,
     group: (nodes, parent) => {
-      const group = createNode(page, '', 0);
+      const group = createNode(page, `connector-node-${connectorGroups.length + 1}`, 0);
       group.children = nodes;
+      nodes.forEach((node) => {
+        node.parent = group;
+      });
       group.parent = parent;
       group.type = 'GROUP';
+      group.appendChild = (child) => {
+        child.parent = group;
+        group.children.push(child);
+      };
       connectorGroups.push(group);
       return group;
     },
@@ -287,8 +495,12 @@ function getPendingEndpointIds(connect, runtime) {
 }
 
 function readConnectorEndpointIds(connectorGroup) {
-  const connector = JSON.parse(connectorGroup.getSharedPluginData('figma_flow_annotator', 'connector'));
+  const connector = readConnector(connectorGroup);
   return [connector.start.nodeId, connector.end.nodeId];
+}
+
+function readConnector(connectorGroup) {
+  return JSON.parse(connectorGroup.getSharedPluginData('figma_flow_annotator', 'connector'));
 }
 
 function readConnectorRefs(node) {

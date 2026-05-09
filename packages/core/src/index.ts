@@ -162,6 +162,14 @@ export interface CreateFlowConnectorOperation {
   flowAction: string | null;
 }
 
+export interface UpdateFlowConnectorOperation {
+  type: 'update-flow-connector';
+  targetNodeId: string;
+  name: string;
+  routePoints: Point[];
+  flowAction: string | null;
+}
+
 export interface MoveNodeOperation {
   type: 'move-node';
   targetNodeId: string;
@@ -175,6 +183,7 @@ export type DocumentChangeOperation =
   | CreateAnnotationCardOperation
   | CreateAnnotationBadgeOperation
   | CreateFlowConnectorOperation
+  | UpdateFlowConnectorOperation
   | MoveNodeOperation;
 
 export interface DocumentChangePlan {
@@ -200,7 +209,9 @@ export interface CreateAnnotationPlan extends DocumentChangePlan {
 export interface CreateFlowConnectorPlan extends DocumentChangePlan {
   kind: 'create-flow-connector';
   connectorId: string;
+  mode: 'create' | 'update' | 'idempotent';
   createdNodeRefs: string[];
+  existingNodeRefs: string[];
   record: FlowConnectorRecord;
 }
 
@@ -282,6 +293,10 @@ export interface FlowEndpointInput {
 
 export interface BuildCreateFlowConnectorPlanInput {
   connectorId: string;
+  existingConnector?: {
+    nodeId: string;
+    record: FlowConnectorRecord;
+  };
   start: FlowEndpointInput;
   end: FlowEndpointInput;
   ownerContextFrameId: string;
@@ -415,14 +430,21 @@ export function buildCreateAnnotationPlan(input: BuildCreateAnnotationPlanInput)
 }
 
 export function buildCreateFlowConnectorPlan(input: BuildCreateFlowConnectorPlanInput): CreateFlowConnectorPlan {
+  if (input.start.id === input.end.id) {
+    throw new Error('Create Flow Connector requires two different Flow Endpoints.');
+  }
+
   const flowAction = input.flowAction.trim();
+  const normalizedFlowAction = flowAction.length > 0 ? flowAction : null;
+  const connectorId = input.existingConnector?.record.id ?? input.connectorId;
   const record = createFlowConnectorRecord({
-    connectorId: input.connectorId,
+    connectorId,
+    createdAt: input.existingConnector?.record.createdAt,
     end: {
       contextFrameId: input.end.contextFrameId,
       nodeId: input.end.id,
     },
-    flowAction: flowAction.length > 0 ? flowAction : null,
+    flowAction: normalizedFlowAction,
     now: input.now,
     ownerContextFrameId: input.ownerContextFrameId,
     routePoints: input.routePoints,
@@ -432,6 +454,57 @@ export function buildCreateFlowConnectorPlan(input: BuildCreateFlowConnectorPlan
     },
   });
   const connectorRef = 'flow-connector';
+  const existingConnector = input.existingConnector;
+
+  if (existingConnector !== undefined) {
+    if (!flowConnectorMatchesDirectedPair(existingConnector.record, input.start.id, input.end.id)) {
+      throw new Error('Existing Flow Connector does not match the directed endpoint pair.');
+    }
+
+    if (
+      existingConnector.record.flowAction === normalizedFlowAction &&
+      routePointsEqual(existingConnector.record.routeCache?.points, input.routePoints)
+    ) {
+      return {
+        schemaVersion: 1,
+        kind: 'create-flow-connector',
+        connectorId: existingConnector.record.id,
+        mode: 'idempotent',
+        createdNodeRefs: [],
+        existingNodeRefs: [existingConnector.nodeId],
+        operations: [],
+        record: existingConnector.record,
+      };
+    }
+
+    const operations: DocumentChangeOperation[] = [
+      {
+        type: 'update-flow-connector',
+        targetNodeId: existingConnector.nodeId,
+        name: formatFlowConnectorName(input.start.name, input.end.name),
+        routePoints: input.routePoints,
+        flowAction: record.flowAction,
+      },
+      {
+        type: 'set-shared-plugin-data',
+        target: { kind: 'existing-node', nodeId: existingConnector.nodeId },
+        key: SHARED_PLUGIN_DATA.keys.connector,
+        value: record,
+      },
+    ];
+
+    return {
+      schemaVersion: 1,
+      kind: 'create-flow-connector',
+      connectorId: existingConnector.record.id,
+      mode: 'update',
+      createdNodeRefs: [],
+      existingNodeRefs: [existingConnector.nodeId],
+      operations,
+      record,
+    };
+  }
+
   const operations: DocumentChangeOperation[] = [
     {
       type: 'ensure-container',
@@ -483,8 +556,10 @@ export function buildCreateFlowConnectorPlan(input: BuildCreateFlowConnectorPlan
   return {
     schemaVersion: 1,
     kind: 'create-flow-connector',
-    connectorId: input.connectorId,
+    connectorId,
+    mode: 'create',
     createdNodeRefs: [connectorRef],
+    existingNodeRefs: [],
     operations,
     record,
   };
@@ -711,6 +786,7 @@ export function createFlowConnectorRecord(input: {
   flowAction: string | null;
   routePoints?: Point[];
   now: string;
+  createdAt?: string;
 }): FlowConnectorRecord {
   return {
     schemaVersion: 1,
@@ -727,9 +803,21 @@ export function createFlowConnectorRecord(input: {
             points: input.routePoints,
           },
         }),
-    createdAt: input.now,
+    createdAt: input.createdAt ?? input.now,
     updatedAt: input.now,
   };
+}
+
+export function flowConnectorMatchesDirectedPair(
+  record: FlowConnectorRecord,
+  startNodeId: string,
+  endNodeId: string,
+): boolean {
+  return record.start.nodeId === startNodeId && record.end.nodeId === endNodeId;
+}
+
+export function isFlowEndpointEligibleVisualKind(kind: string): boolean {
+  return kind === '';
 }
 
 export function mergeAnnotationReferenceIds(existingIds: string[], annotationId: string): AnnotationRefsRecord {
@@ -843,4 +931,16 @@ function compareAnnotationNumbersThenIds(
 
 function appendUnique(existingIds: string[], id: string): string[] {
   return existingIds.includes(id) ? existingIds : [...existingIds, id];
+}
+
+function routePointsEqual(first: Point[] | undefined, second: Point[]): boolean {
+  if (first === undefined || first.length !== second.length) {
+    return false;
+  }
+
+  return first.every(
+    (point, index) =>
+      Math.abs(point.x - second[index].x) < 0.001 &&
+      Math.abs(point.y - second[index].y) < 0.001,
+  );
 }

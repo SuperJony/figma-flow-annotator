@@ -1,8 +1,9 @@
 import {
   createFlowConnector,
-  getPendingConnectorEndpointNodes,
+  getConnectSelectionState,
   handleSelectionChange,
   resetObservedEndpointSelection,
+  swapPendingConnectorEndpoints,
   type ConnectRuntime,
 } from './connect';
 import {
@@ -44,6 +45,7 @@ type PluginMessage =
   | { type: 'arrange-badges' }
   | { type: 'arrange-cards' }
   | { type: 'create-connector'; flowAction: string }
+  | { type: 'swap-connector-endpoints' }
   | { type: 'close' }
   | { type: 'request-selection-state' };
 
@@ -152,7 +154,13 @@ async function handleMessage(message: PluginMessage): Promise<void> {
     if (message.type === 'create-connector') {
       const created = createFlowConnector(message.flowAction, connectRuntime);
       selectAndZoom([created]);
-      postStatus('success', 'Created one flow connector.');
+      postStatus('success', 'Created or updated one flow connector.');
+      return;
+    }
+
+    if (message.type === 'swap-connector-endpoints') {
+      swapPendingConnectorEndpoints(connectRuntime);
+      postStatus('success', 'Swapped pending Flow Connector endpoints.');
     }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown plugin error.';
@@ -888,11 +896,14 @@ function postSelectionState(): void {
   const selected = figma.currentPage.selection;
   const eligibleCount = selected.filter((node) => !hasGeneratedAncestor(node)).length;
   const selectedAnnotationCardCount = selected.filter(isAnnotationCardNode).length;
-  const pendingConnectorEndpointCount = getPendingConnectorEndpointNodes(connectRuntime).length;
+  const connectState = getConnectSelectionState(connectRuntime);
   figma.ui.postMessage({
     type: 'selection-state',
-    totalCount: pendingConnectorEndpointCount,
+    totalCount: connectState.endpoints.length,
     eligibleCount,
     selectedAnnotationCardCount,
+    connectorEndpoints: connectState.endpoints,
+    existingConnector: connectState.existingConnector,
+    routingStatus: connectState.routingStatus,
   });
 }

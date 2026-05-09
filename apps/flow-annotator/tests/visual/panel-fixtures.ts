@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 
 interface PanelSelectionState {
+  connectorEndpoints?: { id: string; name: string }[];
   eligibleCount: number;
+  existingConnector?: { flowAction: string | null; id: string; nodeId: string } | null;
+  routingStatus?: string;
   selectedAnnotationCardCount?: number;
   totalCount: number;
 }
@@ -57,7 +60,31 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     flowAction: 'Choose plan',
     name: 'two-pending-connector-endpoints',
     selection: {
+      connectorEndpoints: [
+        { id: 'start-node', name: 'Start Frame' },
+        { id: 'end-node', name: 'End Frame' },
+      ],
       eligibleCount: 0,
+      routingStatus: 'Route preview pending router validation.',
+      totalCount: 2,
+    },
+  },
+  {
+    description: 'Existing directed connector status remains in create/upsert mode.',
+    flowAction: 'Choose plan',
+    name: 'existing-connector-status',
+    selection: {
+      connectorEndpoints: [
+        { id: 'start-node', name: 'Start Frame' },
+        { id: 'end-node', name: 'End Frame' },
+      ],
+      eligibleCount: 0,
+      existingConnector: {
+        flowAction: 'Choose plan',
+        id: 'connector-1',
+        nodeId: 'connector-node-1',
+      },
+      routingStatus: 'Route preview pending router validation.',
       totalCount: 2,
     },
   },
@@ -128,7 +155,7 @@ export async function loadPanelFixture(
 
 async function postPluginMessage(
   page: Page,
-  pluginMessage: Record<string, number | string>,
+  pluginMessage: Record<string, unknown>,
 ): Promise<void> {
   await page.evaluate((message) => {
     window.postMessage({ pluginMessage: message }, '*');
