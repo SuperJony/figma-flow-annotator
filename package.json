@@ -6,7 +6,15 @@
   "scripts": {
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "verify": "pnpm --filter @figma-flow-annotator/flow-annotator verify",
+    "check:biome": "biome check .",
+    "fix:biome": "biome check . --write",
+    "lint:biome": "biome lint .",
+    "format": "biome format . --write",
+    "format:check": "biome format .",
+    "verify": "pnpm --filter @figma-flow-annotator/core test && pnpm --filter @figma-flow-annotator/flow-annotator verify && pnpm run check:biome",
     "watch": "pnpm --filter @figma-flow-annotator/flow-annotator watch"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15"
   }
 }

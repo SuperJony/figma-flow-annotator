@@ -2,9 +2,9 @@
 
 Prepare the next agent to continue the Figma Flow Annotator first-demo implementation after PRD creation, verification, issue breakdown, and triage have been completed.
 
-Expected deliverable for the next implementation session: start with GitHub issue #4, migrate the existing plugin creation paths into a shared core package and Document Change Plans, preserve the current #2 visual proof behavior, and verify with automated tests plus independent `@verification` before reporting completion.
+Expected deliverable for the next implementation session: start with GitHub issue #4, migrate the existing plugin creation paths into a shared core package and Figma File Operation Batches, preserve the current #2 visual proof behavior, and verify with automated tests plus independent `@verification` before reporting completion.
 
-Definition of done for the immediate next task (#4): `Create Annotation` and `Create Flow Connector` still work, but schema, shared plugin data keys, record construction, naming inputs, and base plan shape come from shared core; the Figma plugin app only applies the resulting Document Change Plans.
+Definition of done for the immediate next task (#4): `Create Annotation` and `Create Flow Connector` still work, but schema, shared plugin data keys, record construction, naming inputs, and base batch shape come from shared core; the Figma plugin app only applies the resulting Figma File Operation Batches.
 
 ## 2. Current Progress
 
@@ -22,7 +22,7 @@ Definition of done for the immediate next task (#4): `Create Annotation` and `Cr
 
 Current ready-for-agent queue:
 
-- #4 `迁移现有创建链路到 shared core 和 Document Change Plans`
+- #4 `迁移现有创建链路到 shared core 和 Figma File Operation Batches`
 - #5 `补齐 Subject Node 追加和 Annotation 显式整理`
 - #6 `新增 Validate tab 框架和 Annotation 校验`
 - #7 `补齐 Connect endpoint 预览、状态和 directed upsert`
@@ -40,7 +40,7 @@ Current ready-for-agent queue:
 - The first demo is not a full diagram editor. It proves binding, standardized visuals, route readability, validation, and extraction readiness.
 - Use project glossary from `CONTEXT.md`; avoid vocabulary drift such as "target" where the glossary says **Subject Node** or **Flow Endpoint**.
 - Critical ADRs for the next task:
-  - `docs/adr/0043-share-core-rules-through-document-change-plans.md`
+  - `docs/adr/0043-share-core-rules-through-figma-file-operations.md`
   - `docs/adr/0044-use-versioned-shared-plugin-data-keys.md`
   - `docs/adr/0045-use-minimal-v1-record-fields.md`
   - `docs/adr/0046-name-and-group-generated-visual-nodes.md`
@@ -51,7 +51,7 @@ Current ready-for-agent queue:
 - Complete `Flow Connector` records live only on **Flow Connector** visual roots.
 - Bound **Subject Nodes** and **Flow Endpoints** store reverse refs only.
 - Route cache is derived visual data and may be refreshed without changing connector semantics.
-- Existing app code currently keeps most business rules directly in `apps/flow-annotator/code.ts` and `apps/flow-annotator/connect.ts`; #4 should move those rules into shared core rather than adding another wrapper.
+- Current app command code lives under `apps/flow-annotator/src/annotations/commands.ts` and `apps/flow-annotator/src/connectors/commands.ts`; shared business rules live under `packages/core/src/`.
 
 Existing package/test setup:
 
@@ -69,7 +69,7 @@ Existing package/test setup:
 
 ## 4. Key Findings
 
-- #4 is the correct next implementation step because #5-#13 all assume shared core, Document Change Plans, schemas, keys, and record builders exist.
+- #4 is the correct next implementation step because #5-#13 all assume shared core, Figma File Operation Batches, schemas, keys, and record builders exist.
 - Starting with UI, validation, routing, or connector trunk work before #4 would continue spreading business rules through the plugin app and cause rework.
 - The existing #2 baseline already creates native Figma visual nodes:
   - `FFA Annotations`
@@ -77,9 +77,10 @@ Existing package/test setup:
   - `FFA Annotation Card #<number>`
   - `FFA Annotation Badge #<number>`
   - `FFA Connector <startName> -> <endName>`
-- Current `apps/flow-annotator/code.ts` defines `NAMESPACE = 'figma_flow_annotator'`, Annotation record interfaces, Context record handling, card/badge creation, shared plugin data writes, and reverse annotation refs.
-- Current `apps/flow-annotator/connect.ts` defines connector record interfaces, runtime selection window state, connector creation, basic orthogonal route generation, Flow Action label visual model, and connector shared plugin data writes.
-- `packages/` is still empty. #4 should add the shared core package there.
+- `apps/flow-annotator/src/figma/runtime.ts` defines `NAMESPACE = 'figma_flow_annotator'` and Figma runtime helpers.
+- `packages/core/src/annotations/operations.ts` builds Annotation **Figma File Operation Batches**.
+- `packages/core/src/connectors/operations.ts` builds Flow Connector **Figma File Operation Batches**.
+- `packages/core/src/figma-file/operation-types.ts` defines the runtime-neutral Figma file operation type contract.
 - Current tests include node tests and Playwright visual tests under `apps/flow-annotator/tests/`.
 - ADR 0047 exists for browser visual regression harness usage; visual tests are part of the package scripts.
 - PRD #1 previously had a namespace contradiction, but it has been corrected in GitHub. Do not spend more time re-litigating that unless new evidence appears.
@@ -102,23 +103,24 @@ Existing package/test setup:
 Start by inspecting:
 
 - `CONTEXT.md`
-- `docs/adr/0043-share-core-rules-through-document-change-plans.md`
+- `docs/adr/0043-share-core-rules-through-figma-file-operations.md`
 - `docs/adr/0044-use-versioned-shared-plugin-data-keys.md`
 - `docs/adr/0045-use-minimal-v1-record-fields.md`
 - `docs/adr/0046-name-and-group-generated-visual-nodes.md`
-- `apps/flow-annotator/code.ts`
-- `apps/flow-annotator/connect.ts`
-- `apps/flow-annotator/tests/annotation-numbering.test.mjs`
-- `apps/flow-annotator/tests/connect-selection.test.mjs`
+- `apps/flow-annotator/src/plugin/code.ts`
+- `apps/flow-annotator/src/annotations/commands.ts`
+- `apps/flow-annotator/src/connectors/commands.ts`
+- `apps/flow-annotator/tests/annotations/numbering.test.mjs`
+- `apps/flow-annotator/tests/connectors/selection.test.mjs`
 - visual tests under `apps/flow-annotator/tests/visual/`
 - GitHub issue #4 body and Agent Brief: `gh issue view 4 --repo SuperJony/figma-flow-annotator --comments`
 
 Recommended first implementation action:
 
-- Create a branch such as `codex/issue-4-shared-core-plans`.
+- Create a branch such as `codex/issue-4-shared-core-figma-file-operations`.
 - Add a shared core package under `packages/`, using repo naming conventions that fit the existing pnpm workspace.
-- Move v1 schema, shared plugin data constants, record builders, and Document Change Plan types into core.
-- Keep plugin behavior vertical: update `apps/flow-annotator` to call core plan builders and apply plans through a Figma adapter.
+- Move v1 schema, shared plugin data constants, record builders, and Figma File Operation Batch types into core.
+- Keep plugin behavior vertical: update `apps/flow-annotator` to call core batch builders and apply batches through Figma file operation writers.
 - Do not build a broad abstraction layer before migrating one Annotation path and one Flow Connector path end to end.
 
 Verification commands for #4:
@@ -145,4 +147,4 @@ Verification commands for #4:
 
 ## First Step Recommendation For The Next Agent
 
-Run `gh issue view 4 --repo SuperJony/figma-flow-annotator --comments`, read the ADRs listed above, then create `codex/issue-4-shared-core-plans` and implement the smallest vertical migration: one shared core package that builds v1 records and Document Change Plans, plus a Figma adapter that applies those plans while preserving the existing Create Annotation and Create Flow Connector behavior.
+Run `gh issue view 4 --repo SuperJony/figma-flow-annotator --comments`, read the ADRs listed above, then create `codex/issue-4-shared-core-figma-file-operations` and implement the smallest vertical migration: one shared core package that builds v1 records and Figma File Operation Batches, plus a Figma file operation writer that applies those operation batches while preserving the existing Create Annotation and Create Flow Connector behavior.

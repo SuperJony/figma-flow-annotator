@@ -1,3 +1,0 @@
-# Share core rules through document change plans
-
-The monorepo should keep annotation and connector business rules in a shared core package and expose them as **Document Change Plans**. The core package owns schemas, plugin-data keys, numbering rules, validation rules, connector routing, card/badge layout planning, and connector upsert behavior, but it does not call Figma APIs directly. The first demo's `apps/flow-annotator` applies those plans through the Figma Plugin API. A later agent skill can apply the same plans through its own Figma-file writing adapter, but that adapter is outside the first-demo scope. This keeps first-demo plugin behavior testable without coupling core rules to one runtime.

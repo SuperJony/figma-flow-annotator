@@ -11,6 +11,7 @@ dist/
 out/
 code.js
 test-results/
+apps/flow-annotator/.test-build*/
 
 # Agent artifacts
 .harness/

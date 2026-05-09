@@ -7,6 +7,6 @@
   "scripts": {
     "build": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/annotations/*.test.mjs tests/connectors/*.test.mjs tests/shared/*.test.mjs tests/validation/*.test.mjs"
   }
 }

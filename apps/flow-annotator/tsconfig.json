@@ -7,9 +7,7 @@
     "allowImportingTsExtensions": true,
     "lib": ["es2020"],
     "strict": true,
-    "typeRoots": [
-      "./node_modules/@types",
-      "./node_modules/@figma"
-    ]
-  }
+    "typeRoots": ["./node_modules/@types", "./node_modules/@figma"]
+  },
+  "include": ["src/**/*.ts"]
 }

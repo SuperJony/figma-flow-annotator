@@ -104,6 +104,14 @@ _Avoid_: Parallel same-link connector
 A node-to-connector reference that points to a deleted **Flow Connector** visual root.
 _Avoid_: Broken index, dangling id
 
+**Figma File Operation**:
+A runtime-neutral instruction emitted by shared core for creating or updating project-owned Figma file nodes and shared plugin data.
+_Avoid_: Document operation, change plan
+
+**Figma File Operation Batch**:
+The ordered **Figma File Operations** for one authoring command, applied by a runtime-specific Figma writer.
+_Avoid_: Document Change Plan, plan
+
 ## Relationships
 
 - An **Annotation** has exactly one **Annotation Card**.
@@ -147,6 +155,8 @@ _Avoid_: Broken index, dangling id
 - A **Flow Connector** becomes an **Orphaned Flow Connector** when either **Flow Endpoint** is deleted.
 - Deleting a **Flow Connector** visual root deletes that **Flow Connector**.
 - A deleted **Flow Connector** may leave a **Stale Reverse Index** on its former **Flow Endpoints**.
+- A **Figma File Operation Batch** may create **Annotation Cards**, **Annotation Badges**, **Flow Connectors**, containers, shared plugin data, and reverse references.
+- A **Figma File Operation Batch** does not call the Figma Plugin API directly.
 
 ## Example Dialogue
 

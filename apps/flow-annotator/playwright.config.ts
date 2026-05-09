@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   expect: {
@@ -9,9 +9,9 @@ export default defineConfig({
   fullyParallel: false,
   projects: [
     {
-      name: 'chromium',
+      name: "chromium",
       use: {
-        browserName: 'chromium',
+        browserName: "chromium",
         deviceScaleFactor: 1,
         viewport: {
           height: 520,
@@ -20,11 +20,11 @@ export default defineConfig({
       },
     },
   ],
-  reporter: 'list',
-  testDir: './tests/visual',
+  reporter: "list",
+  testDir: "./tests/visual",
   timeout: 30_000,
   use: {
-    colorScheme: 'light',
+    colorScheme: "light",
   },
   workers: 1,
 });

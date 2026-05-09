@@ -5,17 +5,17 @@
   "description": "Figma Flow Annotator plugin",
   "main": "code.js",
   "scripts": {
-    "build": "tsc --noEmit --target es2019 --module esnext --moduleResolution bundler --lib es2020 --strict --allowImportingTsExtensions --typeRoots ./node_modules/@types,./node_modules/@figma code.ts connect.ts connector-visual.ts && esbuild code.ts --bundle --target=es2017 --outfile=code.js && pnpm run check:figma-syntax",
-    "check:figma-syntax": "eslint --no-config-lookup --parser-options '{\"ecmaVersion\":2017,\"sourceType\":\"script\"}' code.js",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "test": "node --test tests/*.test.mjs",
+    "build": "tsc --noEmit && esbuild src/plugin/code.ts --bundle --target=es2017 --outfile=code.js && pnpm run check:figma-syntax",
+    "check:figma-syntax": "node --check code.js",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "test": "node --test tests/annotations/*.test.mjs tests/connectors/*.test.mjs",
     "test:visual": "playwright test -c playwright.config.ts",
-    "test:visual:annotate": "playwright test -c playwright.config.ts annotation-visual.spec.ts",
-    "test:visual:connect": "playwright test -c playwright.config.ts connector-visual.spec.ts",
-    "test:visual:panel": "playwright test -c playwright.config.ts panel-ui.spec.ts",
+    "test:visual:annotate": "playwright test -c playwright.config.ts annotations/visual.spec.ts",
+    "test:visual:connect": "playwright test -c playwright.config.ts connectors/visual.spec.ts",
+    "test:visual:panel": "playwright test -c playwright.config.ts panel/ui.spec.ts",
     "verify": "pnpm run test && pnpm run test:visual && pnpm run lint && pnpm run build",
-    "watch": "esbuild code.ts --bundle --target=es2017 --outfile=code.js --watch"
+    "watch": "esbuild src/plugin/code.ts --bundle --target=es2017 --outfile=code.js --watch"
   },
   "author": "",
   "license": "",
@@ -23,13 +23,9 @@
     "@figma-flow-annotator/core": "workspace:*"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@figma/eslint-plugin-figma-plugins": "*",
     "@figma/plugin-typings": "*",
     "@playwright/test": "^1.59.1",
     "esbuild": "^0.28.0",
-    "eslint": "^9.39.4",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.1"
+    "typescript": "^5.9.3"
   }
 }

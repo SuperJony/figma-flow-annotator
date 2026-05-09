@@ -1,9 +1,5 @@
-
-export * from './geometry.ts';
-export * from './shared-data.ts';
-export * from './document-change-plans.ts';
-export * from './annotations.ts';
-export * from './flow-connectors.ts';
+export * from "./annotations/operations.ts";
+export * from "./connectors/operations.ts";
 export type {
   ConnectorObstacle,
   ConnectorObstacleKind,
@@ -13,17 +9,20 @@ export type {
   ConnectorTrunkAssignment,
   ConnectorTrunkGroup,
   ConnectorTrunkInput,
-  ConnectorTrunkPlan,
+  ConnectorTrunkLayout,
   FlowActionLabelPlacement,
+  GroupConnectorTrunksInput,
   PlaceFlowActionLabelInput,
-  PlanConnectorTrunksInput,
   RouteOrthogonalConnectorInput,
   RouteOrthogonalConnectorResult,
-} from './connector-routing.ts';
+} from "./connectors/routing.ts";
 export {
   ConnectorRouteFailure,
+  groupConnectorTrunks,
   placeFlowActionLabel,
-  planConnectorTrunks,
   routeOrthogonalConnector,
-} from './connector-routing.ts';
-export * from './validation.ts';
+} from "./connectors/routing.ts";
+export * from "./figma-file/operation-types.ts";
+export * from "./shared/geometry.ts";
+export * from "./shared/plugin-data.ts";
+export * from "./validation/index.ts";
