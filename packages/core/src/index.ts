@@ -162,17 +162,29 @@ export interface CreateFlowConnectorOperation {
   flowAction: string | null;
 }
 
+export interface MoveNodeOperation {
+  type: 'move-node';
+  targetNodeId: string;
+  position: Point;
+}
+
 export type DocumentChangeOperation =
   | EnsureContainerOperation
   | SetSharedPluginDataOperation
   | AppendSharedReferenceOperation
   | CreateAnnotationCardOperation
   | CreateAnnotationBadgeOperation
-  | CreateFlowConnectorOperation;
+  | CreateFlowConnectorOperation
+  | MoveNodeOperation;
 
 export interface DocumentChangePlan {
   schemaVersion: 1;
-  kind: 'create-annotation' | 'create-flow-connector';
+  kind:
+    | 'create-annotation'
+    | 'add-annotation-subjects'
+    | 'arrange-annotation-badges'
+    | 'arrange-annotation-cards'
+    | 'create-flow-connector';
   operations: DocumentChangeOperation[];
 }
 
@@ -192,6 +204,26 @@ export interface CreateFlowConnectorPlan extends DocumentChangePlan {
   record: FlowConnectorRecord;
 }
 
+export interface AddAnnotationSubjectsPlan extends DocumentChangePlan {
+  kind: 'add-annotation-subjects';
+  annotationId: string;
+  annotationNumber: number;
+  addedSubjectNodeIds: string[];
+  badgeCount: number;
+  createdNodeRefs: string[];
+  record: AnnotationRecord;
+}
+
+export interface ArrangeAnnotationBadgesPlan extends DocumentChangePlan {
+  kind: 'arrange-annotation-badges';
+  movedBadgeNodeIds: string[];
+}
+
+export interface ArrangeAnnotationCardsPlan extends DocumentChangePlan {
+  kind: 'arrange-annotation-cards';
+  movedCardNodeIds: string[];
+}
+
 export interface AnnotationSubjectInput {
   id: string;
   name: string;
@@ -206,6 +238,40 @@ export interface BuildCreateAnnotationPlanInput {
   contextFrameId: string;
   now: string;
   subjects: AnnotationSubjectInput[];
+}
+
+export interface BuildAddAnnotationSubjectsPlanInput {
+  annotationCardNodeId: string;
+  annotation: AnnotationRecord;
+  existingBadgeSubjectNodeIds: string[];
+  now: string;
+  subjects: AnnotationSubjectInput[];
+}
+
+export interface AnnotationBadgeLayoutInput {
+  annotationNumber: number;
+  nodeId: string;
+}
+
+export interface SubjectBadgeLayoutInput {
+  bounds: RectLike;
+  badges: AnnotationBadgeLayoutInput[];
+  id: string;
+}
+
+export interface BuildArrangeAnnotationBadgesPlanInput {
+  subjects: SubjectBadgeLayoutInput[];
+}
+
+export interface AnnotationCardLayoutInput {
+  annotationNumber: number;
+  nodeId: string;
+  rect: RectLike;
+}
+
+export interface BuildArrangeAnnotationCardsPlanInput {
+  basePosition: Point;
+  cards: AnnotationCardLayoutInput[];
 }
 
 export interface FlowEndpointInput {
@@ -424,6 +490,172 @@ export function buildCreateFlowConnectorPlan(input: BuildCreateFlowConnectorPlan
   };
 }
 
+export function buildAddAnnotationSubjectsPlan(
+  input: BuildAddAnnotationSubjectsPlanInput,
+): AddAnnotationSubjectsPlan {
+  if (input.annotation.body.trim().length === 0) {
+    throw new Error('Annotation Body is required.');
+  }
+  if (input.subjects.length === 0) {
+    throw new Error('Select one or more Subject Nodes to add.');
+  }
+
+  const existingSubjectIds = new Set(input.annotation.subjectNodeIds);
+  const addedSubjects = input.subjects.filter((subject) => !existingSubjectIds.has(subject.id));
+  const addedSubjectIds = addedSubjects.map((subject) => subject.id);
+  const updatedSubjectNodeIds = [...input.annotation.subjectNodeIds, ...addedSubjectIds];
+  const record: AnnotationRecord = {
+    ...input.annotation,
+    subjectNodeIds: updatedSubjectNodeIds,
+    updatedAt: addedSubjectIds.length > 0 ? input.now : input.annotation.updatedAt,
+  };
+  const existingBadgeSubjectIds = new Set(input.existingBadgeSubjectNodeIds);
+  const subjectsNeedingBadges = addedSubjects.filter((subject) => !existingBadgeSubjectIds.has(subject.id));
+  const operations: DocumentChangeOperation[] = [];
+
+  if (subjectsNeedingBadges.length > 0) {
+    operations.push(
+      {
+        type: 'ensure-container',
+        ref: 'annotations',
+        name: ANNOTATIONS_CONTAINER_NAME,
+      },
+      {
+        type: 'set-shared-plugin-data',
+        target: { kind: 'container', ref: 'annotations' },
+        key: SHARED_PLUGIN_DATA.keys.kind,
+        value: VISUAL_NODE_KINDS.container,
+      },
+    );
+  }
+
+  if (addedSubjectIds.length > 0) {
+    operations.push({
+      type: 'set-shared-plugin-data',
+      target: { kind: 'existing-node', nodeId: input.annotationCardNodeId },
+      key: SHARED_PLUGIN_DATA.keys.annotation,
+      value: record,
+    });
+  }
+
+  subjectsNeedingBadges.forEach((subject, index) => {
+    const badgeRef = createBadgeRefRecord({
+      annotationId: input.annotation.id,
+      annotationNumber: input.annotation.annotationNumber,
+      contextFrameId: input.annotation.contextFrameId,
+      subjectNodeId: subject.id,
+    });
+    const nodeRef = `annotation-badge-added-${index + 1}`;
+    operations.push(
+      {
+        type: 'create-annotation-badge',
+        ref: nodeRef,
+        containerRef: 'annotations',
+        name: formatAnnotationBadgeName(input.annotation.annotationNumber),
+        annotationNumber: input.annotation.annotationNumber,
+        subjectNodeId: subject.id,
+        position: {
+          x: subject.bounds.x + subject.bounds.width - BADGE_SIZE / 2 + subject.existingAnnotationRefCount * (BADGE_SIZE + 4),
+          y: subject.bounds.y - BADGE_SIZE / 2,
+        },
+      },
+      {
+        type: 'set-shared-plugin-data',
+        target: { kind: 'created-node', ref: nodeRef },
+        key: SHARED_PLUGIN_DATA.keys.kind,
+        value: VISUAL_NODE_KINDS.annotationBadge,
+      },
+      {
+        type: 'set-shared-plugin-data',
+        target: { kind: 'created-node', ref: nodeRef },
+        key: SHARED_PLUGIN_DATA.keys.badgeRef,
+        value: badgeRef,
+      },
+    );
+  });
+
+  addedSubjects.forEach((subject) => {
+    operations.push({
+      type: 'append-shared-reference',
+      targetNodeId: subject.id,
+      key: SHARED_PLUGIN_DATA.keys.annotationRefs,
+      listKey: 'annotationIds',
+      id: input.annotation.id,
+    });
+  });
+
+  return {
+    schemaVersion: 1,
+    kind: 'add-annotation-subjects',
+    annotationId: input.annotation.id,
+    annotationNumber: input.annotation.annotationNumber,
+    addedSubjectNodeIds: addedSubjectIds,
+    badgeCount: subjectsNeedingBadges.length,
+    createdNodeRefs: subjectsNeedingBadges.map((_subject, index) => `annotation-badge-added-${index + 1}`),
+    operations,
+    record,
+  };
+}
+
+export function buildArrangeAnnotationBadgesPlan(
+  input: BuildArrangeAnnotationBadgesPlanInput,
+): ArrangeAnnotationBadgesPlan {
+  if (input.subjects.length === 0) {
+    throw new Error('Select one or more Subject Nodes with Annotation Badges.');
+  }
+
+  const operations: MoveNodeOperation[] = [];
+  input.subjects.forEach((subject) => {
+    const sortedBadges = [...subject.badges].sort(compareAnnotationNumbersThenIds);
+    sortedBadges.forEach((badge, index) => {
+      operations.push({
+        type: 'move-node',
+        targetNodeId: badge.nodeId,
+        position: {
+          x: subject.bounds.x + subject.bounds.width - BADGE_SIZE / 2 + index * (BADGE_SIZE + 4),
+          y: subject.bounds.y - BADGE_SIZE / 2,
+        },
+      });
+    });
+  });
+
+  return {
+    schemaVersion: 1,
+    kind: 'arrange-annotation-badges',
+    movedBadgeNodeIds: operations.map((operation) => operation.targetNodeId),
+    operations,
+  };
+}
+
+export function buildArrangeAnnotationCardsPlan(
+  input: BuildArrangeAnnotationCardsPlanInput,
+): ArrangeAnnotationCardsPlan {
+  if (input.cards.length === 0) {
+    throw new Error('No Annotation Cards found to arrange.');
+  }
+
+  let nextY = input.basePosition.y;
+  const operations = [...input.cards].sort(compareAnnotationNumbersThenIds).map((card) => {
+    const operation: MoveNodeOperation = {
+      type: 'move-node',
+      targetNodeId: card.nodeId,
+      position: {
+        x: input.basePosition.x,
+        y: nextY,
+      },
+    };
+    nextY += card.rect.height + CARD_GAP;
+    return operation;
+  });
+
+  return {
+    schemaVersion: 1,
+    kind: 'arrange-annotation-cards',
+    movedCardNodeIds: operations.map((operation) => operation.targetNodeId),
+    operations,
+  };
+}
+
 export function createAnnotationRecord(input: {
   annotationId: string;
   annotationNumber: number;
@@ -600,6 +832,13 @@ function rectsOverlap(first: RectLike, second: RectLike): boolean {
     first.y < second.y + second.height &&
     first.y + first.height > second.y
   );
+}
+
+function compareAnnotationNumbersThenIds(
+  first: { annotationNumber: number; nodeId: string },
+  second: { annotationNumber: number; nodeId: string },
+): number {
+  return first.annotationNumber - second.annotationNumber || first.nodeId.localeCompare(second.nodeId);
 }
 
 function appendUnique(existingIds: string[], id: string): string[] {

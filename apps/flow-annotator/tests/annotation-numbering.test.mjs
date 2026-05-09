@@ -74,6 +74,124 @@ test('creates an Annotation without scanning unrelated frame descendants for num
   }
 });
 
+test('adds Subject Nodes to a selected Annotation Card without renumbering or duplicate badges', async () => {
+  try {
+    const page = createPage();
+    const subjectA = createNode(page, 'subject-a', 0);
+    const subjectB = createNode(page, 'subject-b', 180);
+    const annotationsContainer = createNode(page, 'FFA Annotations', 800);
+    const existingCard = createNode(annotationsContainer, 'FFA Annotation Card #4', 820);
+    const existingBadge = createNode(annotationsContainer, 'FFA Annotation Badge #4', 850);
+    const messages = [];
+
+    annotationsContainer.setSharedPluginData(namespace, 'kind', 'container');
+    existingCard.setSharedPluginData(namespace, 'kind', 'annotation-card');
+    existingCard.setSharedPluginData(namespace, 'annotation', JSON.stringify({
+      schemaVersion: 1,
+      id: 'annotation-existing',
+      annotationNumber: 4,
+      body: 'existing body',
+      contextFrameId: page.id,
+      subjectNodeIds: ['subject-a'],
+      createdAt: '2026-05-07T00:00:00.000Z',
+      updatedAt: '2026-05-07T00:00:00.000Z',
+    }));
+    existingBadge.setSharedPluginData(namespace, 'kind', 'annotation-badge');
+    existingBadge.setSharedPluginData(namespace, 'badgeRef', JSON.stringify({
+      schemaVersion: 1,
+      annotationId: 'annotation-existing',
+      annotationNumber: 4,
+      subjectNodeId: 'subject-a',
+      contextFrameId: page.id,
+    }));
+    subjectA.setSharedPluginData(namespace, 'annotationRefs', JSON.stringify({
+      schemaVersion: 1,
+      annotationIds: ['annotation-existing'],
+    }));
+
+    annotationsContainer.children = [existingCard, existingBadge];
+    page.children = [subjectA, subjectB, annotationsContainer];
+    page.selection = [existingCard, subjectA, subjectB];
+    globalThis.figma = createFigmaStub(page, messages);
+
+    await importCodeModule();
+
+    globalThis.figma.ui.onmessage({ type: 'add-subject-nodes' });
+    await flushPluginMessage(messages);
+
+    const updatedRecord = JSON.parse(existingCard.getSharedPluginData(namespace, 'annotation'));
+    const badges = annotationsContainer.children.filter(
+      (child) => child.getSharedPluginData(namespace, 'kind') === 'annotation-badge',
+    );
+    const subjectBBadge = badges.find((badge) => {
+      const ref = JSON.parse(badge.getSharedPluginData(namespace, 'badgeRef'));
+      return ref.subjectNodeId === 'subject-b';
+    });
+    const subjectABadges = badges.filter((badge) => {
+      const ref = JSON.parse(badge.getSharedPluginData(namespace, 'badgeRef'));
+      return ref.subjectNodeId === 'subject-a';
+    });
+    const status = messages.find((message) => message.type === 'status' && message.tone === 'success');
+
+    assert.equal(updatedRecord.annotationNumber, 4);
+    assert.equal(updatedRecord.body, 'existing body');
+    assert.deepEqual(updatedRecord.subjectNodeIds, ['subject-a', 'subject-b']);
+    assert.equal(badges.length, 2);
+    assert.equal(subjectABadges.length, 1);
+    assert.ok(subjectBBadge);
+    assert.deepEqual(readAnnotationRefs(subjectB), ['annotation-existing']);
+    assert.equal(status.message, 'Added 1 subject node(s) to annotation #4 with 1 new badge(s).');
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('explicitly arranges Annotation Badges and Annotation Cards by Annotation Number', async () => {
+  try {
+    const page = createPage();
+    const contextFrame = createNode(page, 'context-frame', 0);
+    contextFrame.resize(320, 180);
+    const subject = createNode(contextFrame, 'subject-a', 20);
+    subject.absoluteBoundingBox = { x: 20, y: 30, width: 120, height: 60 };
+    const annotationsContainer = createNode(page, 'FFA Annotations', 800);
+    const badge7 = createNode(annotationsContainer, 'FFA Annotation Badge #7', 300);
+    const badge2 = createNode(annotationsContainer, 'FFA Annotation Badge #2', 260);
+    const card7 = createNode(annotationsContainer, 'FFA Annotation Card #7', 900);
+    const card2 = createNode(annotationsContainer, 'FFA Annotation Card #2', 940);
+    const messages = [];
+
+    annotationsContainer.setSharedPluginData(namespace, 'kind', 'container');
+    setBadgeRecord(badge7, 7, subject.id, page.id);
+    setBadgeRecord(badge2, 2, subject.id, page.id);
+    setCardRecord(card7, 7, contextFrame.id);
+    setCardRecord(card2, 2, contextFrame.id);
+    annotationsContainer.children = [badge7, badge2, card7, card2];
+    contextFrame.children = [subject];
+    page.children = [contextFrame, annotationsContainer];
+    page.selection = [subject];
+    globalThis.figma = createFigmaStub(page, messages);
+
+    await importCodeModule();
+
+    globalThis.figma.ui.onmessage({ type: 'arrange-badges' });
+    await flushPluginMessage(messages);
+    assert.equal(badge2.x, 126);
+    assert.equal(badge2.y, 16);
+    assert.equal(badge7.x, 158);
+    assert.equal(badge7.y, 16);
+
+    messages.length = 0;
+    globalThis.figma.ui.onmessage({ type: 'arrange-cards' });
+    await flushPluginMessage(messages);
+    assert.equal(card2.x, 0);
+    assert.equal(card2.y, 220);
+    assert.equal(card7.x, 0);
+    assert.equal(card7.y, 336);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 async function flushPluginMessage(messages) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if (messages.some((message) => message.type === 'status')) {
@@ -172,12 +290,39 @@ function readAnnotationRefs(node) {
   return data.length === 0 ? [] : JSON.parse(data).annotationIds;
 }
 
+function setBadgeRecord(badge, annotationNumber, subjectNodeId, contextFrameId) {
+  badge.setSharedPluginData(namespace, 'kind', 'annotation-badge');
+  badge.setSharedPluginData(namespace, 'badgeRef', JSON.stringify({
+    schemaVersion: 1,
+    annotationId: `annotation-${annotationNumber}`,
+    annotationNumber,
+    subjectNodeId,
+    contextFrameId,
+  }));
+}
+
+function setCardRecord(card, annotationNumber, contextFrameId) {
+  card.setSharedPluginData(namespace, 'kind', 'annotation-card');
+  card.resize(280, 100);
+  card.setSharedPluginData(namespace, 'annotation', JSON.stringify({
+    schemaVersion: 1,
+    id: `annotation-${annotationNumber}`,
+    annotationNumber,
+    body: `body ${annotationNumber}`,
+    contextFrameId,
+    subjectNodeIds: ['subject-a'],
+    createdAt: '2026-05-07T00:00:00.000Z',
+    updatedAt: '2026-05-07T00:00:00.000Z',
+  }));
+}
+
 function createFigmaStub(page, messages) {
   return {
     closePlugin: () => {},
     createFrame: () => createNode(null, '', 0),
     createText: createTextNode,
     currentPage: page,
+    getNodeByIdAsync: async (id) => findNodeById(page, id),
     loadFontAsync: async () => {},
     notify: () => {},
     on: () => {},
@@ -192,4 +337,17 @@ function createFigmaStub(page, messages) {
       scrollAndZoomIntoView: () => {},
     },
   };
+}
+
+function findNodeById(node, id) {
+  if (node.id === id) {
+    return node;
+  }
+  for (const child of node.children ?? []) {
+    const found = findNodeById(child, id);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
 }

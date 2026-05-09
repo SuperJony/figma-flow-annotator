@@ -19,6 +19,12 @@ test.describe('Plugin panel browser visuals', () => {
         await expect(page.locator('#createAnnotation')).toBeDisabled();
       }
 
+      if (definition.name === 'add-subject-selection') {
+        await expect(page.locator('#addSubjectNodes')).toBeEnabled();
+      } else {
+        await expect(page.locator('#addSubjectNodes')).toBeDisabled();
+      }
+
       if (definition.name === 'two-pending-connector-endpoints') {
         await expect(page.locator('#createConnector')).toBeEnabled();
       } else {

@@ -126,6 +126,7 @@
 
     .actions {
       display: flex;
+      flex-wrap: wrap;
       justify-content: flex-end;
       gap: 8px;
     }
@@ -202,6 +203,11 @@
         </label>
         <div class="actions">
           <button id="createAnnotation" class="primary" type="button">Create Annotation</button>
+          <button id="addSubjectNodes" type="button">Add Subject Nodes</button>
+        </div>
+        <div class="actions">
+          <button id="arrangeBadges" type="button">Arrange Badges</button>
+          <button id="arrangeCards" type="button">Arrange Cards</button>
         </div>
       </section>
 
@@ -229,6 +235,9 @@
     const annotationBody = document.getElementById('annotationBody');
     const flowAction = document.getElementById('flowAction');
     const createAnnotation = document.getElementById('createAnnotation');
+    const addSubjectNodes = document.getElementById('addSubjectNodes');
+    const arrangeBadges = document.getElementById('arrangeBadges');
+    const arrangeCards = document.getElementById('arrangeCards');
     const createConnector = document.getElementById('createConnector');
     const closeButton = document.getElementById('close');
     const status = document.getElementById('status');
@@ -237,6 +246,7 @@
 
     let totalSelection = 0;
     let eligibleSelection = 0;
+    let selectedAnnotationCardCount = 0;
 
     createAnnotation.addEventListener('click', () => {
       const body = annotationBody.value.trim();
@@ -245,6 +255,18 @@
         return;
       }
       post({ type: 'create-annotation', body });
+    });
+
+    addSubjectNodes.addEventListener('click', () => {
+      post({ type: 'add-subject-nodes' });
+    });
+
+    arrangeBadges.addEventListener('click', () => {
+      post({ type: 'arrange-badges' });
+    });
+
+    arrangeCards.addEventListener('click', () => {
+      post({ type: 'arrange-cards' });
     });
 
     createConnector.addEventListener('click', () => {
@@ -264,6 +286,7 @@
       if (message.type === 'selection-state') {
         totalSelection = message.totalCount;
         eligibleSelection = message.eligibleCount;
+        selectedAnnotationCardCount = message.selectedAnnotationCardCount || 0;
         renderSelectionState();
         return;
       }
@@ -283,6 +306,9 @@
       selection.textContent = `${eligibleSelection} subject${eligibleSelection === 1 ? '' : 's'}`;
       connectorState.textContent = `${totalSelection} selected`;
       createAnnotation.disabled = eligibleSelection === 0 || annotationBody.value.trim().length === 0;
+      addSubjectNodes.disabled = eligibleSelection === 0 || selectedAnnotationCardCount !== 1;
+      arrangeBadges.disabled = eligibleSelection === 0;
+      arrangeCards.disabled = false;
       createConnector.disabled = totalSelection !== 2;
     }
 

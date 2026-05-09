@@ -4,6 +4,7 @@ import type { Page } from '@playwright/test';
 
 interface PanelSelectionState {
   eligibleCount: number;
+  selectedAnnotationCardCount?: number;
   totalCount: number;
 }
 
@@ -22,7 +23,7 @@ interface PanelFixtureDefinition {
 }
 
 const PANEL_VIEWPORT = {
-  height: 520,
+  height: 560,
   width: 360,
 };
 
@@ -39,6 +40,15 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     name: 'eligible-annotation-selection',
     selection: {
       eligibleCount: 1,
+      totalCount: 0,
+    },
+  },
+  {
+    description: 'One selected Annotation Card and one Subject Node can add subjects.',
+    name: 'add-subject-selection',
+    selection: {
+      eligibleCount: 1,
+      selectedAnnotationCardCount: 1,
       totalCount: 0,
     },
   },
