@@ -265,7 +265,8 @@ export interface DocumentChangePlan {
     | 'add-annotation-subjects'
     | 'arrange-annotation-badges'
     | 'arrange-annotation-cards'
-    | 'create-flow-connector';
+    | 'create-flow-connector'
+    | 'refresh-flow-connector';
   operations: DocumentChangeOperation[];
 }
 
@@ -283,6 +284,14 @@ export interface CreateFlowConnectorPlan extends DocumentChangePlan {
   connectorId: string;
   mode: 'create' | 'update' | 'idempotent';
   createdNodeRefs: string[];
+  existingNodeRefs: string[];
+  record: FlowConnectorRecord;
+}
+
+export interface RefreshFlowConnectorPlan extends DocumentChangePlan {
+  kind: 'refresh-flow-connector';
+  connectorId: string;
+  mode: 'update' | 'idempotent';
   existingNodeRefs: string[];
   record: FlowConnectorRecord;
 }
@@ -375,6 +384,15 @@ export interface BuildCreateFlowConnectorPlanInput {
   flowAction: string;
   routePoints: Point[];
   now: string;
+}
+
+export interface BuildRefreshFlowConnectorPlanInput {
+  connectorNodeId: string;
+  endName: string;
+  now: string;
+  record: FlowConnectorRecord;
+  routePoints: Point[];
+  startName: string;
 }
 
 export type ConnectorRouteSide = 'left' | 'right' | 'top' | 'bottom';
@@ -674,6 +692,55 @@ export function buildCreateFlowConnectorPlan(input: BuildCreateFlowConnectorPlan
     createdNodeRefs: [connectorRef],
     existingNodeRefs: [],
     operations,
+    record,
+  };
+}
+
+export function buildRefreshFlowConnectorPlan(input: BuildRefreshFlowConnectorPlanInput): RefreshFlowConnectorPlan {
+  const record: FlowConnectorRecord = {
+    ...input.record,
+    routeCache: {
+      schemaVersion: 1,
+      points: input.routePoints,
+    },
+    updatedAt: routePointsEqual(input.record.routeCache?.points, input.routePoints)
+      ? input.record.updatedAt
+      : input.now,
+  };
+
+  if (routePointsEqual(input.record.routeCache?.points, input.routePoints)) {
+    return {
+      schemaVersion: 1,
+      kind: 'refresh-flow-connector',
+      connectorId: input.record.id,
+      mode: 'idempotent',
+      existingNodeRefs: [input.connectorNodeId],
+      operations: [],
+      record: input.record,
+    };
+  }
+
+  return {
+    schemaVersion: 1,
+    kind: 'refresh-flow-connector',
+    connectorId: input.record.id,
+    mode: 'update',
+    existingNodeRefs: [input.connectorNodeId],
+    operations: [
+      {
+        type: 'update-flow-connector',
+        targetNodeId: input.connectorNodeId,
+        name: formatFlowConnectorName(input.startName, input.endName),
+        routePoints: input.routePoints,
+        flowAction: input.record.flowAction,
+      },
+      {
+        type: 'set-shared-plugin-data',
+        target: { kind: 'existing-node', nodeId: input.connectorNodeId },
+        key: SHARED_PLUGIN_DATA.keys.connector,
+        value: record,
+      },
+    ],
     record,
   };
 }

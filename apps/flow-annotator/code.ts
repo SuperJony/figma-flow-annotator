@@ -2,6 +2,7 @@ import {
   createFlowConnector,
   getConnectSelectionState,
   handleSelectionChange,
+  refreshFlowConnectors,
   resetObservedEndpointSelection,
   swapPendingConnectorEndpoints,
   type ConnectRuntime,
@@ -52,6 +53,7 @@ type PluginMessage =
   | { type: 'arrange-badges' }
   | { type: 'arrange-cards' }
   | { type: 'create-connector'; flowAction: string }
+  | { type: 'refresh-connectors' }
   | { type: 'swap-connector-endpoints' }
   | { type: 'validate-bindings' }
   | { type: 'locate-validation-issue'; issueId: string }
@@ -165,6 +167,18 @@ async function handleMessage(message: PluginMessage): Promise<void> {
       const created = createFlowConnector(message.flowAction, connectRuntime);
       selectAndZoom([created]);
       postStatus('success', 'Created or updated one flow connector.');
+      return;
+    }
+
+    if (message.type === 'refresh-connectors') {
+      const result = await refreshFlowConnectors(connectRuntime);
+      if (result.nodes.length > 0) {
+        selectAndZoom(result.nodes);
+      }
+      postStatus(
+        result.failedCount === 0 ? 'success' : 'error',
+        formatRefreshConnectorsStatus(result),
+      );
       return;
     }
 
@@ -1044,6 +1058,20 @@ function postValidationReport(report: ValidationReport): void {
     type: 'validation-report',
     report,
   });
+}
+
+function formatRefreshConnectorsStatus(result: {
+  failedCount: number;
+  failures: string[];
+  refreshedCount: number;
+  selectedOnly: boolean;
+}): string {
+  const scope = result.selectedOnly ? 'selected' : 'current-page';
+  if (result.failedCount === 0) {
+    return `Refreshed ${result.refreshedCount} ${scope} Flow Connector(s).`;
+  }
+  const firstFailure = result.failures[0] ?? 'Unknown connector refresh failure.';
+  return `Refreshed ${result.refreshedCount} ${scope} Flow Connector(s); ${result.failedCount} failed. ${firstFailure}`;
 }
 
 function postSelectionState(): void {

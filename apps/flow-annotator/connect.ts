@@ -3,6 +3,7 @@ import {
   CONNECTORS_CONTAINER_NAME,
   VISUAL_NODE_KINDS,
   buildCreateFlowConnectorPlan,
+  buildRefreshFlowConnectorPlan,
   flowConnectorMatchesDirectedPair,
   isFlowEndpointEligibleVisualKind,
   mergeConnectorReferenceIds,
@@ -16,6 +17,7 @@ import {
   type FlowConnectorRecord,
   type Point,
   type RectLike,
+  type RefreshFlowConnectorPlan,
   type SetSharedPluginDataOperation,
   type UpdateFlowConnectorOperation,
   unionRects,
@@ -84,6 +86,14 @@ export interface ConnectSelectionState {
   endpoints: ConnectEndpointPreview[];
   existingConnector: ExistingConnectorPreview | null;
   routingStatus: string;
+}
+
+export interface RefreshConnectorsResult {
+  failedCount: number;
+  failures: string[];
+  refreshedCount: number;
+  selectedOnly: boolean;
+  nodes: GroupNode[];
 }
 
 export interface ConnectRuntime {
@@ -159,6 +169,80 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
   return connectorRoot;
 }
 
+export async function refreshFlowConnectors(runtime: ConnectRuntime): Promise<RefreshConnectorsResult> {
+  const refreshedNodes: GroupNode[] = [];
+  const failures: string[] = [];
+  const selectedConnectorRoots = getSelectedFlowConnectorRoots(runtime);
+  const selectedOnly = selectedConnectorRoots.length > 0;
+  const connectorRecords = selectedOnly
+    ? selectedConnectorRoots.flatMap((node) => {
+        const record = readFlowConnectorRecord(node, runtime);
+        if (record === null) {
+          failures.push(`${node.name}: Missing Flow Connector record.`);
+          return [];
+        }
+        return [{ node, record }];
+      })
+    : getFlowConnectorRecords(runtime);
+
+  if (connectorRecords.length === 0 && failures.length === 0) {
+    throw new Error('No Flow Connectors found to refresh.');
+  }
+
+  for (const connector of connectorRecords) {
+    try {
+      const refreshed = await refreshOneFlowConnector(connector, runtime);
+      refreshedNodes.push(refreshed);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown connector refresh failure.';
+      failures.push(`${connector.node.name}: ${errorMessage}`);
+    }
+  }
+
+  if (refreshedNodes.length > 0) {
+    runtime.ensureLayerOrder();
+  }
+
+  return {
+    failedCount: failures.length,
+    failures,
+    refreshedCount: refreshedNodes.length,
+    selectedOnly,
+    nodes: refreshedNodes,
+  };
+}
+
+async function refreshOneFlowConnector(
+  connector: { node: GroupNode; record: FlowConnectorRecord },
+  runtime: ConnectRuntime,
+): Promise<GroupNode> {
+  const startNode = await getLiveSceneNode(connector.record.start.nodeId, 'start Flow Endpoint');
+  const endNode = await getLiveSceneNode(connector.record.end.nodeId, 'end Flow Endpoint');
+  const routePoints = routeOrthogonalConnector({
+    startRect: runtime.getVisibleBounds(startNode),
+    endRect: runtime.getVisibleBounds(endNode),
+    obstacles: collectConnectorObstacles(startNode, endNode, runtime),
+  }).points;
+  const plan = buildRefreshFlowConnectorPlan({
+    connectorNodeId: connector.node.id,
+    endName: endNode.name,
+    now: new Date().toISOString(),
+    record: connector.record,
+    routePoints,
+    startName: startNode.name,
+  });
+
+  return applyRefreshFlowConnectorPlan(plan, runtime, new Map([[connector.node.id, connector.node]]));
+}
+
+async function getLiveSceneNode(nodeId: string, role: string): Promise<SceneNode> {
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (node === null || node.type === 'PAGE' || !('absoluteBoundingBox' in node) || node.removed) {
+    throw new Error(`Missing ${role} ${nodeId}.`);
+  }
+  return node as SceneNode;
+}
+
 function applyCreateFlowConnectorPlan(
   plan: CreateFlowConnectorPlan,
   runtime: ConnectRuntime,
@@ -209,6 +293,33 @@ function applyCreateFlowConnectorPlan(
   return resolveExistingConnectorRoot(plan.existingNodeRefs[0], existingNodes);
 }
 
+function applyRefreshFlowConnectorPlan(
+  plan: RefreshFlowConnectorPlan,
+  runtime: ConnectRuntime,
+  existingNodes: Map<string, BaseNode>,
+): GroupNode {
+  plan.operations.forEach((operation) => {
+    if (operation.type === 'update-flow-connector') {
+      updateFlowConnectorRoot(resolveExistingConnectorRoot(operation.targetNodeId, existingNodes), operation, runtime);
+      return;
+    }
+
+    if (operation.type === 'set-shared-plugin-data') {
+      const node = resolvePlanTarget(operation.target, {
+        containers: new Map(),
+        createdNodes: new Map(),
+        existingNodes,
+      });
+      writeSharedPluginData(node, runtime, operation);
+      return;
+    }
+
+    throw new Error(`Flow Connector refresh adapter cannot apply ${operation.type}.`);
+  });
+
+  return resolveExistingConnectorRoot(plan.existingNodeRefs[0], existingNodes);
+}
+
 function createFlowConnectorRoot(
   container: FrameNode,
   operation: CreateFlowConnectorOperation,
@@ -225,10 +336,11 @@ function updateFlowConnectorRoot(
   operation: UpdateFlowConnectorOperation,
   runtime: ConnectRuntime,
 ): void {
+  const nextVisualNodes = createConnectorVisualNodes(operation.routePoints, operation.flowAction ?? '', runtime);
   [...connectorRoot.children].forEach((child) => {
     child.remove();
   });
-  createConnectorVisualNodes(operation.routePoints, operation.flowAction ?? '', runtime).forEach((node) => {
+  nextVisualNodes.forEach((node) => {
     connectorRoot.appendChild(node);
   });
   connectorRoot.name = operation.name;
@@ -389,6 +501,19 @@ function getFlowConnectorRecords(runtime: ConnectRuntime): { node: GroupNode; re
 
     const record = readFlowConnectorRecord(child, runtime);
     return record === null ? [] : [{ node: child, record }];
+  });
+}
+
+function getSelectedFlowConnectorRoots(runtime: ConnectRuntime): GroupNode[] {
+  return figma.currentPage.selection.flatMap((node) => {
+    if (
+      node.type !== 'GROUP' ||
+      node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.flowConnector
+    ) {
+      return [];
+    }
+
+    return [node];
   });
 }
 

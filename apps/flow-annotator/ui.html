@@ -417,6 +417,9 @@
           <button id="swapConnector" type="button">Swap</button>
           <button id="createConnector" class="primary" type="button">Create Flow Connector</button>
         </div>
+        <div class="actions">
+          <button id="refreshConnectors" type="button">Refresh Connectors</button>
+        </div>
       </section>
 
       <section id="panelValidate" class="tab-panel" data-tab-panel="validate" hidden>
@@ -455,6 +458,7 @@
     const arrangeBadges = document.getElementById('arrangeBadges');
     const arrangeCards = document.getElementById('arrangeCards');
     const createConnector = document.getElementById('createConnector');
+    const refreshConnectors = document.getElementById('refreshConnectors');
     const swapConnector = document.getElementById('swapConnector');
     const runValidation = document.getElementById('runValidation');
     const closeButton = document.getElementById('close');
@@ -516,6 +520,10 @@
 
     createConnector.addEventListener('click', () => {
       post({ type: 'create-connector', flowAction: flowAction.value.trim() });
+    });
+
+    refreshConnectors.addEventListener('click', () => {
+      post({ type: 'refresh-connectors' });
     });
 
     swapConnector.addEventListener('click', () => {
@@ -597,6 +605,7 @@
       arrangeCards.disabled = false;
       swapConnector.disabled = connectorEndpoints.length !== 2;
       createConnector.disabled = connectorEndpoints.length !== 2;
+      refreshConnectors.disabled = false;
     }
 
     function setActiveTab(tab) {

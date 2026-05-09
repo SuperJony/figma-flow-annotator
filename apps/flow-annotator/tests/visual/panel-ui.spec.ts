@@ -31,6 +31,7 @@ test.describe('Plugin panel browser visuals', () => {
         definition.name === 'existing-connector-status'
       ) {
         await expect(page.locator('#createConnector')).toBeEnabled();
+        await expect(page.locator('#refreshConnectors')).toBeEnabled();
       } else {
         await expect(page.locator('#createConnector')).toBeDisabled();
       }

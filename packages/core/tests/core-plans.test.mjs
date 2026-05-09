@@ -340,6 +340,90 @@ test('upserts Flow Connectors by directed endpoint pair and keeps reverse direct
   );
 });
 
+test('builds explicit Flow Connector refresh plans without changing semantics', async () => {
+  const core = await importCoreModule();
+  const existingRecord = core.createFlowConnectorRecord({
+    connectorId: 'connector-existing',
+    createdAt: '2026-05-08T00:00:00.000Z',
+    end: {
+      contextFrameId: 'frame-b',
+      nodeId: 'node-b',
+    },
+    flowAction: 'choose',
+    now: '2026-05-08T01:00:00.000Z',
+    ownerContextFrameId: 'frame-a',
+    routePoints: [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+    ],
+    start: {
+      contextFrameId: 'frame-a',
+      nodeId: 'node-a',
+    },
+  });
+  const refreshed = core.buildRefreshFlowConnectorPlan({
+    connectorNodeId: 'connector-node',
+    endName: 'End',
+    now: '2026-05-09T00:00:00.000Z',
+    record: existingRecord,
+    routePoints: [
+      { x: 0, y: 0 },
+      { x: 40, y: 0 },
+      { x: 40, y: 80 },
+    ],
+    startName: 'Start',
+  });
+
+  assert.equal(refreshed.kind, 'refresh-flow-connector');
+  assert.equal(refreshed.mode, 'update');
+  assert.equal(refreshed.connectorId, 'connector-existing');
+  assert.deepEqual(refreshed.record.start, existingRecord.start);
+  assert.deepEqual(refreshed.record.end, existingRecord.end);
+  assert.equal(refreshed.record.ownerContextFrameId, existingRecord.ownerContextFrameId);
+  assert.equal(refreshed.record.flowAction, existingRecord.flowAction);
+  assert.equal(refreshed.record.createdAt, existingRecord.createdAt);
+  assert.equal(refreshed.record.updatedAt, '2026-05-09T00:00:00.000Z');
+  assert.deepEqual(refreshed.record.routeCache.points, [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+    { x: 40, y: 80 },
+  ]);
+  assert.deepEqual(
+    refreshed.operations.map((operation) => operation.type),
+    ['update-flow-connector', 'set-shared-plugin-data'],
+  );
+
+  const idempotent = core.buildRefreshFlowConnectorPlan({
+    connectorNodeId: 'connector-node',
+    endName: 'End',
+    now: '2026-05-09T00:00:00.000Z',
+    record: existingRecord,
+    routePoints: existingRecord.routeCache.points,
+    startName: 'Start',
+  });
+
+  assert.equal(idempotent.mode, 'idempotent');
+  assert.deepEqual(idempotent.operations, []);
+  assert.equal(idempotent.record.updatedAt, existingRecord.updatedAt);
+  assert.throws(
+    () => core.routeOrthogonalConnector({
+      startRect: { x: 0, y: 0, width: 80, height: 80 },
+      endRect: { x: 320, y: 0, width: 80, height: 80 },
+      obstacles: [
+        { id: 'left-wall', kind: 'context-frame', rect: { x: -60, y: -60, width: 50, height: 200 } },
+        { id: 'right-wall', kind: 'context-frame', rect: { x: 80, y: -60, width: 50, height: 200 } },
+        { id: 'top-wall', kind: 'context-frame', rect: { x: -60, y: -60, width: 190, height: 50 } },
+        { id: 'bottom-wall', kind: 'context-frame', rect: { x: -60, y: 80, width: 190, height: 50 } },
+      ],
+    }),
+    (error) => error instanceof core.ConnectorRouteFailure && error.code === 'no-legal-route',
+  );
+  assert.deepEqual(existingRecord.routeCache.points, [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+  ]);
+});
+
 test('routes horizontal Context Frames around a middle Connector Obstacle', async () => {
   const core = await importCoreModule();
   const middleFrame = { x: 180, y: 0, width: 120, height: 100 };
