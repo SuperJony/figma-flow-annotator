@@ -97,6 +97,78 @@ export interface ConnectorRefsRecord {
   connectorIds: string[];
 }
 
+export type ValidationSeverity = 'error' | 'warning' | 'info';
+
+export type ValidationIssueCode =
+  | 'annotation-missing-badge'
+  | 'annotation-duplicate-badge'
+  | 'annotation-orphaned'
+  | 'annotation-missing-body'
+  | 'annotation-card-outside-design-notes-area'
+  | 'annotation-cards-unsorted'
+  | 'annotation-badges-unarranged';
+
+export interface ValidationIssue {
+  id: string;
+  code: ValidationIssueCode;
+  severity: ValidationSeverity;
+  title: string;
+  affectedObjectCount: number;
+  description: string;
+  locationNodeIds: string[];
+}
+
+export interface ValidationReportSummary {
+  all: number;
+  errors: number;
+  warnings: number;
+  info: number;
+}
+
+export interface ValidationReport {
+  schemaVersion: 1;
+  issues: ValidationIssue[];
+  summary: ValidationReportSummary;
+}
+
+export interface AnnotationValidationRecord {
+  id: string;
+  annotationNumber: number;
+  body: string;
+  contextFrameId: string;
+  subjectNodeIds: string[];
+}
+
+export interface AnnotationValidationCardInput {
+  nodeId: string;
+  record: AnnotationValidationRecord;
+  rect: RectLike;
+}
+
+export interface AnnotationValidationBadgeInput {
+  nodeId: string;
+  record: BadgeRefRecord;
+  rect: RectLike;
+}
+
+export interface AnnotationValidationSubjectInput {
+  nodeId: string;
+  annotationIds: string[];
+  rect?: RectLike;
+}
+
+export interface AnnotationValidationContextInput {
+  nodeId: string;
+  rect?: RectLike;
+}
+
+export interface ValidateAnnotationBindingsInput {
+  badges: AnnotationValidationBadgeInput[];
+  cards: AnnotationValidationCardInput[];
+  contexts: AnnotationValidationContextInput[];
+  subjects: AnnotationValidationSubjectInput[];
+}
+
 export type SharedPluginDataValue =
   | string
   | AnnotationRecord
@@ -308,6 +380,8 @@ export interface BuildCreateFlowConnectorPlanInput {
 const CARD_OFFSET_Y = 40;
 const BADGE_SIZE = 28;
 const CARD_GAP = 16;
+const BADGE_GAP = 4;
+const VALIDATION_LAYOUT_TOLERANCE = 1;
 
 export function buildCreateAnnotationPlan(input: BuildCreateAnnotationPlanInput): CreateAnnotationPlan {
   const body = input.body.trim();
@@ -820,6 +894,174 @@ export function isFlowEndpointEligibleVisualKind(kind: string): boolean {
   return kind === '';
 }
 
+export function validateAnnotationBindings(input: ValidateAnnotationBindingsInput): ValidationReport {
+  const issues: ValidationIssue[] = [];
+  const cardsByAnnotationId = new Map(input.cards.map((card) => [card.record.id, card]));
+  const subjectsById = new Map(input.subjects.map((subject) => [subject.nodeId, subject]));
+  const contextsById = new Map(input.contexts.map((context) => [context.nodeId, context]));
+
+  const missingBadgeTargets: string[] = [];
+  const missingBadgeSubjectIds: string[] = [];
+  input.cards.forEach((card) => {
+    card.record.subjectNodeIds.forEach((subjectNodeId) => {
+      if (!subjectsById.has(subjectNodeId)) {
+        return;
+      }
+      const hasBadge = input.badges.some(
+        (badge) =>
+          badge.record.annotationId === card.record.id &&
+          badge.record.subjectNodeId === subjectNodeId,
+      );
+      if (!hasBadge) {
+        missingBadgeTargets.push(card.nodeId, subjectNodeId);
+        missingBadgeSubjectIds.push(subjectNodeId);
+      }
+    });
+  });
+  addIssue(issues, {
+    code: 'annotation-missing-badge',
+    severity: 'warning',
+    title: 'Missing Annotation Badge',
+    affectedObjectCount: countUnique(missingBadgeSubjectIds),
+    description: 'Some bound Subject Nodes do not have a matching Annotation Badge.',
+    locationNodeIds: missingBadgeTargets,
+  });
+
+  const duplicateBadgeTargets: string[] = [];
+  groupBy(input.badges, (badge) => `${badge.record.annotationId}\u0000${badge.record.subjectNodeId}`).forEach((badges) => {
+    if (badges.length <= 1) {
+      return;
+    }
+    duplicateBadgeTargets.push(...badges.map((badge) => badge.nodeId), badges[0].record.subjectNodeId);
+  });
+  addIssue(issues, {
+    code: 'annotation-duplicate-badge',
+    severity: 'warning',
+    title: 'Duplicate Annotation Badge',
+    affectedObjectCount: duplicateBadgeTargets.length,
+    description: 'A Subject Node has more than one Annotation Badge for the same Annotation.',
+    locationNodeIds: duplicateBadgeTargets,
+  });
+
+  const orphanTargets: string[] = [];
+  input.cards.forEach((card) => {
+    const contextExists = contextsById.has(card.record.contextFrameId);
+    const liveSubjectCount = card.record.subjectNodeIds.filter((subjectNodeId) => subjectsById.has(subjectNodeId)).length;
+    if (!contextExists || card.record.subjectNodeIds.length === 0 || liveSubjectCount === 0) {
+      orphanTargets.push(card.nodeId, ...card.record.subjectNodeIds.filter((subjectNodeId) => subjectsById.has(subjectNodeId)));
+    }
+  });
+  input.subjects.forEach((subject) => {
+    subject.annotationIds.forEach((annotationId) => {
+      if (!cardsByAnnotationId.has(annotationId)) {
+        orphanTargets.push(subject.nodeId);
+      }
+    });
+  });
+  addIssue(issues, {
+    code: 'annotation-orphaned',
+    severity: 'error',
+    title: 'Orphaned Annotation',
+    affectedObjectCount: countUnique(orphanTargets),
+    description: 'An Annotation is missing its required card, context, or all live Subject Nodes.',
+    locationNodeIds: orphanTargets,
+  });
+
+  const missingBodyTargets = input.cards
+    .filter((card) => card.record.body.trim().length === 0)
+    .map((card) => card.nodeId);
+  addIssue(issues, {
+    code: 'annotation-missing-body',
+    severity: 'error',
+    title: 'Missing Required Annotation Body',
+    affectedObjectCount: missingBodyTargets.length,
+    description: 'An Annotation Card has an empty required Annotation Body.',
+    locationNodeIds: missingBodyTargets,
+  });
+
+  const outsideTargets = input.cards.filter((card) => {
+    const context = contextsById.get(card.record.contextFrameId);
+    if (context?.rect === undefined) {
+      return false;
+    }
+    const minY = context.rect.y + context.rect.height + CARD_OFFSET_Y;
+    return (
+      card.rect.y < minY - VALIDATION_LAYOUT_TOLERANCE ||
+      card.rect.x < context.rect.x - VALIDATION_LAYOUT_TOLERANCE ||
+      card.rect.x > context.rect.x + context.rect.width + VALIDATION_LAYOUT_TOLERANCE
+    );
+  }).map((card) => card.nodeId);
+  addIssue(issues, {
+    code: 'annotation-card-outside-design-notes-area',
+    severity: 'warning',
+    title: 'Annotation Card Outside Design Notes Area',
+    affectedObjectCount: outsideTargets.length,
+    description: 'An Annotation Card is not placed below its Context Frame in the Design Notes Area.',
+    locationNodeIds: outsideTargets,
+  });
+
+  const unsortedCardTargets: string[] = [];
+  groupBy(input.cards, (card) => card.record.contextFrameId).forEach((cards) => {
+    const visualOrder = [...cards].sort(compareRectsThenIds).map((card) => card.nodeId);
+    const numberOrder = [...cards].sort((first, second) =>
+      compareAnnotationNumbersThenIds(
+        { annotationNumber: first.record.annotationNumber, nodeId: first.nodeId },
+        { annotationNumber: second.record.annotationNumber, nodeId: second.nodeId },
+      ),
+    ).map((card) => card.nodeId);
+    if (!arraysEqual(visualOrder, numberOrder)) {
+      unsortedCardTargets.push(...cards.map((card) => card.nodeId));
+    }
+  });
+  addIssue(issues, {
+    code: 'annotation-cards-unsorted',
+    severity: 'info',
+    title: 'Unsorted Annotation Cards',
+    affectedObjectCount: countUnique(unsortedCardTargets),
+    description: 'Annotation Cards are not visually sorted by Annotation Number.',
+    locationNodeIds: unsortedCardTargets,
+  });
+
+  const unarrangedBadgeTargets: string[] = [];
+  groupBy(input.badges, (badge) => badge.record.subjectNodeId).forEach((badges, subjectNodeId) => {
+    const subject = subjectsById.get(subjectNodeId);
+    const subjectRect = subject?.rect;
+    if (subjectRect === undefined || badges.length <= 1) {
+      return;
+    }
+    const arrangedOrder = [...badges].sort((first, second) =>
+      compareAnnotationNumbersThenIds(
+        { annotationNumber: first.record.annotationNumber, nodeId: first.nodeId },
+        { annotationNumber: second.record.annotationNumber, nodeId: second.nodeId },
+      ),
+    );
+    arrangedOrder.forEach((badge, index) => {
+      const expectedX = subjectRect.x + subjectRect.width - BADGE_SIZE / 2 + index * (BADGE_SIZE + BADGE_GAP);
+      const expectedY = subjectRect.y - BADGE_SIZE / 2;
+      if (
+        Math.abs(badge.rect.x - expectedX) > VALIDATION_LAYOUT_TOLERANCE ||
+        Math.abs(badge.rect.y - expectedY) > VALIDATION_LAYOUT_TOLERANCE
+      ) {
+        unarrangedBadgeTargets.push(badge.nodeId, subjectNodeId);
+      }
+    });
+  });
+  addIssue(issues, {
+    code: 'annotation-badges-unarranged',
+    severity: 'info',
+    title: 'Unarranged Annotation Badges',
+    affectedObjectCount: countUnique(unarrangedBadgeTargets),
+    description: 'Annotation Badges beside a Subject Node are not arranged by Annotation Number.',
+    locationNodeIds: unarrangedBadgeTargets,
+  });
+
+  return {
+    schemaVersion: 1,
+    issues,
+    summary: summarizeValidationIssues(issues),
+  };
+}
+
 export function mergeAnnotationReferenceIds(existingIds: string[], annotationId: string): AnnotationRefsRecord {
   return {
     schemaVersion: 1,
@@ -922,11 +1164,66 @@ function rectsOverlap(first: RectLike, second: RectLike): boolean {
   );
 }
 
+function addIssue(
+  issues: ValidationIssue[],
+  input: Omit<ValidationIssue, 'id' | 'locationNodeIds'> & { locationNodeIds: string[] },
+): void {
+  const locationNodeIds = unique(input.locationNodeIds);
+  if (input.affectedObjectCount === 0 || locationNodeIds.length === 0) {
+    return;
+  }
+
+  issues.push({
+    ...input,
+    id: `${input.code}-${issues.length + 1}`,
+    locationNodeIds,
+  });
+}
+
+function summarizeValidationIssues(issues: ValidationIssue[]): ValidationReportSummary {
+  return {
+    all: issues.length,
+    errors: issues.filter((issue) => issue.severity === 'error').length,
+    warnings: issues.filter((issue) => issue.severity === 'warning').length,
+    info: issues.filter((issue) => issue.severity === 'info').length,
+  };
+}
+
+function compareRectsThenIds(
+  first: { nodeId: string; rect: RectLike },
+  second: { nodeId: string; rect: RectLike },
+): number {
+  return first.rect.y - second.rect.y || first.rect.x - second.rect.x || first.nodeId.localeCompare(second.nodeId);
+}
+
 function compareAnnotationNumbersThenIds(
   first: { annotationNumber: number; nodeId: string },
   second: { annotationNumber: number; nodeId: string },
 ): number {
   return first.annotationNumber - second.annotationNumber || first.nodeId.localeCompare(second.nodeId);
+}
+
+function groupBy<T>(items: T[], keyForItem: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  items.forEach((item) => {
+    const key = keyForItem(item);
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  });
+  return groups;
+}
+
+function arraysEqual(first: string[], second: string[]): boolean {
+  return first.length === second.length && first.every((value, index) => value === second[index]);
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function countUnique(values: string[]): number {
+  return unique(values).length;
 }
 
 function appendUnique(existingIds: string[], id: string): string[] {

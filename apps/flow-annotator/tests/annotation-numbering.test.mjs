@@ -192,6 +192,99 @@ test('explicitly arranges Annotation Badges and Annotation Cards by Annotation N
   }
 });
 
+test('validates Annotation bindings and locates validation issue nodes without shared report data', async () => {
+  try {
+    const page = createPage();
+    const contextFrame = createNode(page, 'context-frame', 0);
+    contextFrame.resize(320, 180);
+    contextFrame.absoluteBoundingBox = { x: 0, y: 0, width: 320, height: 180 };
+    const subjectA = createNode(contextFrame, 'subject-a', 20);
+    const subjectB = createNode(contextFrame, 'subject-b', 160);
+    const annotationsContainer = createNode(page, 'FFA Annotations', 800);
+    const cardMissingBody = createNode(annotationsContainer, 'card-missing-body', 900);
+    const cardMissingBadge = createNode(annotationsContainer, 'card-missing-badge', 940);
+    const duplicateBadgeA = createNode(annotationsContainer, 'badge-duplicate-a', 260);
+    const duplicateBadgeB = createNode(annotationsContainer, 'badge-duplicate-b', 300);
+    const messages = [];
+    const scrollEvents = [];
+
+    subjectA.absoluteBoundingBox = { x: 20, y: 24, width: 100, height: 50 };
+    subjectB.absoluteBoundingBox = { x: 160, y: 24, width: 100, height: 50 };
+    subjectA.setSharedPluginData(namespace, 'annotationRefs', JSON.stringify({
+      schemaVersion: 1,
+      annotationIds: ['annotation-1'],
+    }));
+    subjectB.setSharedPluginData(namespace, 'annotationRefs', JSON.stringify({
+      schemaVersion: 1,
+      annotationIds: ['annotation-2', 'annotation-missing-card'],
+    }));
+    annotationsContainer.setSharedPluginData(namespace, 'kind', 'container');
+    setCardRecord(cardMissingBody, 1, contextFrame.id);
+    cardMissingBody.setSharedPluginData(namespace, 'annotation', JSON.stringify({
+      schemaVersion: 1,
+      id: 'annotation-1',
+      annotationNumber: 1,
+      body: '',
+      contextFrameId: contextFrame.id,
+      subjectNodeIds: ['subject-a'],
+      createdAt: '2026-05-07T00:00:00.000Z',
+      updatedAt: '2026-05-07T00:00:00.000Z',
+    }));
+    setCardRecord(cardMissingBadge, 2, contextFrame.id);
+    cardMissingBadge.setSharedPluginData(namespace, 'annotation', JSON.stringify({
+      schemaVersion: 1,
+      id: 'annotation-2',
+      annotationNumber: 2,
+      body: 'missing badge',
+      contextFrameId: contextFrame.id,
+      subjectNodeIds: ['subject-b'],
+      createdAt: '2026-05-07T00:00:00.000Z',
+      updatedAt: '2026-05-07T00:00:00.000Z',
+    }));
+    setBadgeRecord(duplicateBadgeA, 1, subjectA.id, contextFrame.id);
+    setBadgeRecord(duplicateBadgeB, 1, subjectA.id, contextFrame.id);
+
+    annotationsContainer.children = [cardMissingBody, cardMissingBadge, duplicateBadgeA, duplicateBadgeB];
+    contextFrame.children = [subjectA, subjectB];
+    page.children = [contextFrame, annotationsContainer];
+    globalThis.figma = createFigmaStub(page, messages, scrollEvents);
+
+    await importCodeModule();
+
+    globalThis.figma.ui.onmessage({ type: 'validate-bindings' });
+    await flushPluginMessage(messages);
+
+    const reportMessage = messages.find((message) => message.type === 'validation-report');
+    assert.ok(reportMessage);
+    assert.equal(reportMessage.report.summary.errors, 2);
+    assert.equal(reportMessage.report.summary.warnings, 3);
+    assert.equal(reportMessage.report.summary.info, 1);
+    assert.deepEqual(
+      reportMessage.report.issues.map((issue) => issue.code),
+      [
+        'annotation-missing-badge',
+        'annotation-duplicate-badge',
+        'annotation-orphaned',
+        'annotation-missing-body',
+        'annotation-card-outside-design-notes-area',
+        'annotation-badges-unarranged',
+      ],
+    );
+    assert.equal(page.getSharedPluginData(namespace, 'validationReport'), '');
+    assert.equal(cardMissingBody.getSharedPluginData(namespace, 'validationReport'), '');
+
+    const missingBodyIssue = reportMessage.report.issues.find((issue) => issue.code === 'annotation-missing-body');
+    messages.length = 0;
+    globalThis.figma.ui.onmessage({ type: 'locate-validation-issue', issueId: missingBodyIssue.id });
+    await flushPluginMessage(messages);
+
+    assert.deepEqual(page.selection.map((node) => node.id), ['card-missing-body']);
+    assert.deepEqual(scrollEvents.at(-1).map((node) => node.id), ['card-missing-body']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 async function flushPluginMessage(messages) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if (messages.some((message) => message.type === 'status')) {
@@ -316,7 +409,7 @@ function setCardRecord(card, annotationNumber, contextFrameId) {
   }));
 }
 
-function createFigmaStub(page, messages) {
+function createFigmaStub(page, messages, scrollEvents = []) {
   return {
     closePlugin: () => {},
     createFrame: () => createNode(null, '', 0),
@@ -334,7 +427,9 @@ function createFigmaStub(page, messages) {
       },
     },
     viewport: {
-      scrollAndZoomIntoView: () => {},
+      scrollAndZoomIntoView: (nodes) => {
+        scrollEvents.push(nodes);
+      },
     },
   };
 }

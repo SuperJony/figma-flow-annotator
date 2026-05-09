@@ -67,6 +67,31 @@
       background: #ffffff;
     }
 
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      padding: 6px 10px 0;
+      background: #ffffff;
+    }
+
+    .tab {
+      height: 26px;
+      border-color: transparent;
+      background: #eef2f7;
+      color: #3b4656;
+    }
+
+    .tab.active {
+      border-color: #174f8f;
+      background: #174f8f;
+      color: #ffffff;
+    }
+
+    .tab-panel[hidden] {
+      display: none;
+    }
+
     label {
       display: grid;
       gap: 4px;
@@ -174,6 +199,113 @@
       color: #1f6b36;
     }
 
+    .validation-summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+    }
+
+    .summary-cell {
+      display: grid;
+      gap: 1px;
+      min-width: 0;
+      border: 1px solid #d9dee7;
+      border-radius: 6px;
+      padding: 5px 4px;
+      background: #f7f8f9;
+      text-align: center;
+    }
+
+    .summary-count {
+      color: #172033;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .summary-label {
+      overflow: hidden;
+      color: #657286;
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+    }
+
+    .filter {
+      height: 26px;
+      padding: 0 4px;
+    }
+
+    .filter.active {
+      border-color: #174f8f;
+      background: #e9f2ff;
+      color: #174f8f;
+    }
+
+    .issue-list {
+      display: grid;
+      gap: 6px;
+      min-height: 130px;
+      max-height: 210px;
+      overflow: auto;
+    }
+
+    .issue-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      align-items: start;
+      border: 1px solid #d9dee7;
+      border-left-width: 4px;
+      border-radius: 6px;
+      padding: 6px;
+      background: #ffffff;
+    }
+
+    .issue-row.error {
+      border-left-color: #b42318;
+    }
+
+    .issue-row.warning {
+      border-left-color: #b7791f;
+    }
+
+    .issue-row.info {
+      border-left-color: #2b6cb0;
+    }
+
+    .issue-copy {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .issue-title {
+      color: #172033;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .issue-meta,
+    .issue-description,
+    .empty-report {
+      color: #657286;
+      font-size: 11px;
+      line-height: 1.25;
+    }
+
+    .locate {
+      min-width: 54px;
+      height: 26px;
+      padding: 0 6px;
+    }
+
     button {
       height: 28px;
       border: 1px solid #b8c1ce;
@@ -234,8 +366,14 @@
       <button id="close" type="button">Close</button>
     </header>
 
+    <nav class="tabs" aria-label="Flow Annotator sections">
+      <button id="tabAnnotate" class="tab active" type="button" data-tab="annotate">Annotate</button>
+      <button id="tabConnect" class="tab" type="button" data-tab="connect">Connect</button>
+      <button id="tabValidate" class="tab" type="button" data-tab="validate">Validate</button>
+    </nav>
+
     <main>
-      <section>
+      <section id="panelAnnotate" class="tab-panel" data-tab-panel="annotate">
         <div class="row">
           <h2>Annotate</h2>
           <div id="selection" class="selection">0 selected</div>
@@ -254,7 +392,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="panelConnect" class="tab-panel" data-tab-panel="connect" hidden>
         <div class="row">
           <h2>Connect</h2>
           <div id="connectorState" class="selection">2 endpoints</div>
@@ -280,6 +418,28 @@
           <button id="createConnector" class="primary" type="button">Create Flow Connector</button>
         </div>
       </section>
+
+      <section id="panelValidate" class="tab-panel" data-tab-panel="validate" hidden>
+        <div class="row">
+          <h2>Validate</h2>
+          <button id="runValidation" class="primary" type="button">Validate Bindings</button>
+        </div>
+        <div class="validation-summary" aria-label="Validation summary">
+          <div class="summary-cell"><div id="summaryAll" class="summary-count">0</div><div class="summary-label">All</div></div>
+          <div class="summary-cell"><div id="summaryErrors" class="summary-count">0</div><div class="summary-label">Errors</div></div>
+          <div class="summary-cell"><div id="summaryWarnings" class="summary-count">0</div><div class="summary-label">Warnings</div></div>
+          <div class="summary-cell"><div id="summaryInfo" class="summary-count">0</div><div class="summary-label">Info</div></div>
+        </div>
+        <div class="filters" aria-label="Validation filters">
+          <button class="filter active" type="button" data-filter="all">All</button>
+          <button class="filter" type="button" data-filter="error">Errors</button>
+          <button class="filter" type="button" data-filter="warning">Warnings</button>
+          <button class="filter" type="button" data-filter="info">Info</button>
+        </div>
+        <div id="validationIssues" class="issue-list">
+          <div class="empty-report">Run validation to inspect Annotation bindings.</div>
+        </div>
+      </section>
     </main>
 
     <footer>
@@ -296,6 +456,7 @@
     const arrangeCards = document.getElementById('arrangeCards');
     const createConnector = document.getElementById('createConnector');
     const swapConnector = document.getElementById('swapConnector');
+    const runValidation = document.getElementById('runValidation');
     const closeButton = document.getElementById('close');
     const status = document.getElementById('status');
     const selection = document.getElementById('selection');
@@ -304,6 +465,14 @@
     const endEndpoint = document.getElementById('endEndpoint');
     const routingStatus = document.getElementById('routingStatus');
     const existingConnectorStatus = document.getElementById('existingConnectorStatus');
+    const validationIssues = document.getElementById('validationIssues');
+    const summaryAll = document.getElementById('summaryAll');
+    const summaryErrors = document.getElementById('summaryErrors');
+    const summaryWarnings = document.getElementById('summaryWarnings');
+    const summaryInfo = document.getElementById('summaryInfo');
+    const tabButtons = Array.from(document.querySelectorAll('.tab'));
+    const tabPanels = Array.from(document.querySelectorAll('.tab-panel'));
+    const filterButtons = Array.from(document.querySelectorAll('.filter'));
 
     let totalSelection = 0;
     let eligibleSelection = 0;
@@ -311,6 +480,18 @@
     let connectorEndpoints = [];
     let existingConnector = null;
     let currentRoutingStatus = 'Select two Flow Endpoints to preview a Connector Route.';
+    let activeFilter = 'all';
+    let validationReport = {
+      schemaVersion: 1,
+      issues: [],
+      summary: { all: 0, errors: 0, warnings: 0, info: 0 },
+    };
+
+    tabButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        setActiveTab(button.dataset.tab);
+      });
+    });
 
     createAnnotation.addEventListener('click', () => {
       const body = annotationBody.value.trim();
@@ -341,6 +522,26 @@
       post({ type: 'swap-connector-endpoints' });
     });
 
+    runValidation.addEventListener('click', () => {
+      setActiveTab('validate');
+      post({ type: 'validate-bindings' });
+    });
+
+    filterButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        activeFilter = button.dataset.filter;
+        renderValidationReport();
+      });
+    });
+
+    validationIssues.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-issue-id]');
+      if (!button) {
+        return;
+      }
+      post({ type: 'locate-validation-issue', issueId: button.dataset.issueId });
+    });
+
     closeButton.addEventListener('click', () => {
       post({ type: 'close' });
     });
@@ -364,6 +565,13 @@
 
       if (message.type === 'status') {
         setStatus(message.tone, message.message);
+        return;
+      }
+
+      if (message.type === 'validation-report') {
+        validationReport = message.report;
+        setActiveTab('validate');
+        renderValidationReport();
       }
     });
 
@@ -389,6 +597,66 @@
       arrangeCards.disabled = false;
       swapConnector.disabled = connectorEndpoints.length !== 2;
       createConnector.disabled = connectorEndpoints.length !== 2;
+    }
+
+    function setActiveTab(tab) {
+      tabButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.tab === tab);
+      });
+      tabPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.tabPanel !== tab;
+      });
+    }
+
+    function renderValidationReport() {
+      const summary = validationReport.summary || { all: 0, errors: 0, warnings: 0, info: 0 };
+      summaryAll.textContent = String(summary.all || 0);
+      summaryErrors.textContent = String(summary.errors || 0);
+      summaryWarnings.textContent = String(summary.warnings || 0);
+      summaryInfo.textContent = String(summary.info || 0);
+      filterButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.filter === activeFilter);
+      });
+
+      const issues = Array.isArray(validationReport.issues) ? validationReport.issues : [];
+      const filtered = activeFilter === 'all'
+        ? issues
+        : issues.filter((issue) => issue.severity === activeFilter);
+      if (filtered.length === 0) {
+        validationIssues.innerHTML = `<div class="empty-report">${issues.length === 0 ? 'No validation issues found.' : 'No issues match this filter.'}</div>`;
+        return;
+      }
+
+      validationIssues.innerHTML = filtered.map((issue) => `
+        <div class="issue-row ${issue.severity}">
+          <div class="issue-copy">
+            <div class="issue-title">${escapeHtml(issue.title)}</div>
+            <div class="issue-meta">${formatSeverity(issue.severity)} - ${issue.affectedObjectCount} affected</div>
+            <div class="issue-description">${escapeHtml(issue.description)}</div>
+          </div>
+          <button class="locate" type="button" data-issue-id="${escapeHtml(issue.id)}">Locate</button>
+        </div>
+      `).join('');
+    }
+
+    function formatSeverity(severity) {
+      if (severity === 'error') {
+        return 'Error';
+      }
+      if (severity === 'warning') {
+        return 'Warning';
+      }
+      return 'Info';
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[character]));
     }
 
     function setStatus(tone, message) {

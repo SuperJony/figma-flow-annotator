@@ -340,6 +340,118 @@ test('upserts Flow Connectors by directed endpoint pair and keeps reverse direct
   );
 });
 
+test('validates Annotation bindings by impact severity without repair plans', async () => {
+  const core = await importCoreModule();
+  const report = core.validateAnnotationBindings({
+    contexts: [
+      { nodeId: 'context-1', rect: { x: 0, y: 0, width: 320, height: 180 } },
+    ],
+    subjects: [
+      {
+        annotationIds: ['annotation-missing-card'],
+        nodeId: 'subject-1',
+        rect: { x: 20, y: 24, width: 100, height: 50 },
+      },
+      {
+        annotationIds: ['annotation-missing-badge'],
+        nodeId: 'subject-2',
+        rect: { x: 160, y: 24, width: 100, height: 50 },
+      },
+    ],
+    cards: [
+      {
+        nodeId: 'card-missing-body',
+        rect: { x: 0, y: 220, width: 280, height: 100 },
+        record: {
+          id: 'annotation-missing-body',
+          annotationNumber: 1,
+          body: '  ',
+          contextFrameId: 'context-1',
+          subjectNodeIds: ['subject-1'],
+        },
+      },
+      {
+        nodeId: 'card-missing-badge',
+        rect: { x: 20, y: 340, width: 280, height: 100 },
+        record: {
+          id: 'annotation-missing-badge',
+          annotationNumber: 3,
+          body: 'Requires a badge.',
+          contextFrameId: 'context-1',
+          subjectNodeIds: ['subject-2'],
+        },
+      },
+      {
+        nodeId: 'card-orphan-context',
+        rect: { x: 0, y: 460, width: 280, height: 100 },
+        record: {
+          id: 'annotation-orphan-context',
+          annotationNumber: 2,
+          body: 'Missing context.',
+          contextFrameId: 'context-deleted',
+          subjectNodeIds: ['subject-1'],
+        },
+      },
+      {
+        nodeId: 'card-outside',
+        rect: { x: 0, y: 190, width: 280, height: 100 },
+        record: {
+          id: 'annotation-outside',
+          annotationNumber: 4,
+          body: 'Too high.',
+          contextFrameId: 'context-1',
+          subjectNodeIds: ['subject-1'],
+        },
+      },
+    ],
+    badges: [
+      {
+        nodeId: 'badge-1a',
+        rect: { x: 106, y: 10, width: 28, height: 28 },
+        record: {
+          schemaVersion: 1,
+          annotationId: 'annotation-missing-body',
+          annotationNumber: 1,
+          contextFrameId: 'context-1',
+          subjectNodeId: 'subject-1',
+        },
+      },
+      {
+        nodeId: 'badge-1b',
+        rect: { x: 200, y: 10, width: 28, height: 28 },
+        record: {
+          schemaVersion: 1,
+          annotationId: 'annotation-missing-body',
+          annotationNumber: 1,
+          contextFrameId: 'context-1',
+          subjectNodeId: 'subject-1',
+        },
+      },
+    ],
+  });
+
+  assert.equal(report.schemaVersion, 1);
+  assert.deepEqual(report.summary, {
+    all: 7,
+    errors: 2,
+    warnings: 3,
+    info: 2,
+  });
+  assert.deepEqual(
+    report.issues.map((issue) => [issue.code, issue.severity]),
+    [
+      ['annotation-missing-badge', 'warning'],
+      ['annotation-duplicate-badge', 'warning'],
+      ['annotation-orphaned', 'error'],
+      ['annotation-missing-body', 'error'],
+      ['annotation-card-outside-design-notes-area', 'warning'],
+      ['annotation-cards-unsorted', 'info'],
+      ['annotation-badges-unarranged', 'info'],
+    ],
+  );
+  assert.ok(report.issues.every((issue) => issue.locationNodeIds.length > 0));
+});
+
 async function importCoreModule() {
   return import(`${resolve(packageRoot, 'src/index.ts')}?cache=${Date.now()}-${Math.random()}`);
 }

@@ -17,12 +17,29 @@ interface PanelStatusState {
 }
 
 interface PanelFixtureDefinition {
+  activeTab?: 'annotate' | 'connect' | 'validate';
   annotationBody?: string;
   description: string;
   flowAction?: string;
   name: string;
   selection?: PanelSelectionState;
   status?: PanelStatusState;
+  validationReport?: {
+    issues: {
+      affectedObjectCount: number;
+      description: string;
+      id: string;
+      severity: 'error' | 'info' | 'warning';
+      title: string;
+    }[];
+    schemaVersion: 1;
+    summary: {
+      all: number;
+      errors: number;
+      info: number;
+      warnings: number;
+    };
+  };
 }
 
 const PANEL_VIEWPORT = {
@@ -56,6 +73,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     },
   },
   {
+    activeTab: 'connect',
     description: 'Two pending Flow Endpoint selections can create a connector.',
     flowAction: 'Choose plan',
     name: 'two-pending-connector-endpoints',
@@ -70,6 +88,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     },
   },
   {
+    activeTab: 'connect',
     description: 'Existing directed connector status remains in create/upsert mode.',
     flowAction: 'Choose plan',
     name: 'existing-connector-status',
@@ -112,6 +131,43 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
       tone: 'error',
     },
   },
+  {
+    activeTab: 'validate',
+    description: 'Validate tab report with severity filters, rows, and location actions.',
+    name: 'validate-report',
+    validationReport: {
+      schemaVersion: 1,
+      summary: {
+        all: 3,
+        errors: 1,
+        warnings: 1,
+        info: 1,
+      },
+      issues: [
+        {
+          affectedObjectCount: 1,
+          description: 'An Annotation Card has an empty required Annotation Body.',
+          id: 'annotation-missing-body-1',
+          severity: 'error',
+          title: 'Missing Required Annotation Body',
+        },
+        {
+          affectedObjectCount: 2,
+          description: 'Some bound Subject Nodes do not have a matching Annotation Badge.',
+          id: 'annotation-missing-badge-2',
+          severity: 'warning',
+          title: 'Missing Annotation Badge',
+        },
+        {
+          affectedObjectCount: 2,
+          description: 'Annotation Badges beside a Subject Node are not arranged by Annotation Number.',
+          id: 'annotation-badges-unarranged-3',
+          severity: 'info',
+          title: 'Unarranged Annotation Badges',
+        },
+      ],
+    },
+  },
 ];
 
 export async function loadPanelFixture(
@@ -132,8 +188,19 @@ export async function loadPanelFixture(
     await page.locator('#annotationBody').fill(definition.annotationBody);
   }
 
+  if (definition.activeTab !== undefined) {
+    await page.locator(`[data-tab="${definition.activeTab}"]`).click();
+  }
+
   if (definition.flowAction !== undefined) {
     await page.locator('#flowAction').fill(definition.flowAction);
+  }
+
+  if (definition.validationReport !== undefined) {
+    await postPluginMessage(page, {
+      type: 'validation-report',
+      report: definition.validationReport,
+    });
   }
 
   if (definition.status !== undefined) {

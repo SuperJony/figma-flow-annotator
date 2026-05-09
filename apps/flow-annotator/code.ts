@@ -19,6 +19,11 @@ import {
   planAnnotationCardPosition,
   serializeSharedPluginDataValue,
   type AddAnnotationSubjectsPlan,
+  type AnnotationValidationBadgeInput,
+  type AnnotationValidationCardInput,
+  type AnnotationValidationContextInput,
+  type AnnotationValidationRecord,
+  type AnnotationValidationSubjectInput,
   type AnnotationRecord,
   type ArrangeAnnotationBadgesPlan,
   type ArrangeAnnotationCardsPlan,
@@ -32,6 +37,8 @@ import {
   type MoveNodeOperation,
   type Point,
   type SetSharedPluginDataOperation,
+  type ValidationReport,
+  validateAnnotationBindings,
 } from '../../packages/core/src/index';
 
 const NAMESPACE = SHARED_PLUGIN_DATA.namespace;
@@ -46,6 +53,8 @@ type PluginMessage =
   | { type: 'arrange-cards' }
   | { type: 'create-connector'; flowAction: string }
   | { type: 'swap-connector-endpoints' }
+  | { type: 'validate-bindings' }
+  | { type: 'locate-validation-issue'; issueId: string }
   | { type: 'close' }
   | { type: 'request-selection-state' };
 
@@ -72,6 +81,7 @@ interface ArrangeResult {
 type ContextDataNode = FrameNode | PageNode;
 
 let loadedFonts = false;
+let validationTargetsByIssueId = new Map<string, string[]>();
 
 const connectRuntime: ConnectRuntime = {
   namespace: NAMESPACE,
@@ -161,6 +171,19 @@ async function handleMessage(message: PluginMessage): Promise<void> {
     if (message.type === 'swap-connector-endpoints') {
       swapPendingConnectorEndpoints(connectRuntime);
       postStatus('success', 'Swapped pending Flow Connector endpoints.');
+      return;
+    }
+
+    if (message.type === 'validate-bindings') {
+      const report = validateCurrentPageBindings();
+      postValidationReport(report);
+      postStatus('success', `Validation found ${report.summary.all} issue(s).`);
+      return;
+    }
+
+    if (message.type === 'locate-validation-issue') {
+      await locateValidationIssue(message.issueId);
+      return;
     }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown plugin error.';
@@ -169,6 +192,47 @@ async function handleMessage(message: PluginMessage): Promise<void> {
   } finally {
     postSelectionState();
   }
+}
+
+function validateCurrentPageBindings(): ValidationReport {
+  const pageNodes = collectCurrentPageNodes();
+  const allNodes = [figma.currentPage, ...pageNodes];
+  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
+  const cards = annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
+  const badges = annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
+  const subjects: AnnotationValidationSubjectInput[] = pageNodes.map((node) => ({
+    annotationIds: readReferenceIds(node, SHARED_PLUGIN_DATA.keys.annotationRefs, 'annotationIds'),
+    nodeId: node.id,
+    ...(node.absoluteBoundingBox === null ? {} : { rect: node.absoluteBoundingBox }),
+  }));
+  const contexts: AnnotationValidationContextInput[] = allNodes.map((node) => ({
+    nodeId: node.id,
+    ...('absoluteBoundingBox' in node && node.absoluteBoundingBox !== null ? { rect: node.absoluteBoundingBox } : {}),
+  }));
+  const report = validateAnnotationBindings({
+    badges,
+    cards,
+    contexts,
+    subjects,
+  });
+
+  validationTargetsByIssueId = new Map(report.issues.map((issue) => [issue.id, issue.locationNodeIds]));
+  return report;
+}
+
+async function locateValidationIssue(issueId: string): Promise<void> {
+  const nodeIds = validationTargetsByIssueId.get(issueId);
+  if (nodeIds === undefined) {
+    throw new Error('Validation issue is no longer available. Run Validate again.');
+  }
+
+  const nodes = await getExistingSceneNodes(nodeIds);
+  if (nodes.length === 0) {
+    throw new Error('No live Figma nodes are available for this validation issue.');
+  }
+
+  selectAndZoom(nodes);
+  postStatus('success', `Located ${nodes.length} validation object(s).`);
 }
 
 function createAnnotations(bodyValue: string): AnnotationCreationResult {
@@ -512,6 +576,60 @@ function getAnnotationCardRecords(container: FrameNode): { node: FrameNode; reco
   });
 }
 
+function getAnnotationValidationCards(container: FrameNode): AnnotationValidationCardInput[] {
+  return container.children.flatMap((child) => {
+    if (!isAnnotationCardNode(child) || child.absoluteBoundingBox === null) {
+      return [];
+    }
+    const record = readAnnotationValidationRecord(child);
+    return record === null ? [] : [{
+      nodeId: child.id,
+      record,
+      rect: child.absoluteBoundingBox,
+    }];
+  });
+}
+
+function getAnnotationValidationBadges(container: FrameNode): AnnotationValidationBadgeInput[] {
+  return container.children.flatMap((child) => {
+    if (
+      child.type !== 'FRAME' ||
+      child.absoluteBoundingBox === null ||
+      child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.annotationBadge
+    ) {
+      return [];
+    }
+    const record = readBadgeRefRecord(child);
+    return record === null ? [] : [{
+      nodeId: child.id,
+      record,
+      rect: child.absoluteBoundingBox,
+    }];
+  });
+}
+
+function readAnnotationValidationRecord(node: BaseNode): AnnotationValidationRecord | null {
+  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation));
+  if (
+    !isRecord(parsed) ||
+    typeof parsed.id !== 'string' ||
+    !isPositiveInteger(parsed.annotationNumber) ||
+    typeof parsed.body !== 'string' ||
+    typeof parsed.contextFrameId !== 'string' ||
+    !Array.isArray(parsed.subjectNodeIds)
+  ) {
+    return null;
+  }
+
+  return {
+    id: parsed.id,
+    annotationNumber: parsed.annotationNumber,
+    body: parsed.body,
+    contextFrameId: parsed.contextFrameId,
+    subjectNodeIds: parsed.subjectNodeIds.filter((value): value is string => typeof value === 'string'),
+  };
+}
+
 function groupCardsByContext(
   cards: { node: FrameNode; record: AnnotationRecord }[],
 ): Map<string, { node: FrameNode; record: AnnotationRecord }[]> {
@@ -687,6 +805,24 @@ function findContainer(name: string): FrameNode | null {
     }
   }
   return null;
+}
+
+function collectCurrentPageNodes(): SceneNode[] {
+  const result: SceneNode[] = [];
+  const queue = [...figma.currentPage.children];
+
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (node === undefined) {
+      continue;
+    }
+    result.push(node);
+    if ('children' in node) {
+      queue.push(...node.children);
+    }
+  }
+
+  return result;
 }
 
 function ensureLayerOrder(): void {
@@ -881,6 +1017,17 @@ function selectAndZoom(nodes: SceneNode[]): void {
   figma.viewport.scrollAndZoomIntoView(nodes);
 }
 
+async function getExistingSceneNodes(nodeIds: string[]): Promise<SceneNode[]> {
+  const nodes: SceneNode[] = [];
+  for (const nodeId of nodeIds) {
+    const node = await figma.getNodeByIdAsync(nodeId);
+    if (node !== null && node.type !== 'PAGE' && 'absoluteBoundingBox' in node) {
+      nodes.push(node as SceneNode);
+    }
+  }
+  return nodes;
+}
+
 function postStatus(tone: StatusTone, message: string): void {
   figma.ui.postMessage({
     type: 'status',
@@ -890,6 +1037,13 @@ function postStatus(tone: StatusTone, message: string): void {
   if (tone === 'success') {
     figma.notify(message);
   }
+}
+
+function postValidationReport(report: ValidationReport): void {
+  figma.ui.postMessage({
+    type: 'validation-report',
+    report,
+  });
 }
 
 function postSelectionState(): void {
