@@ -81,11 +81,11 @@ ADR 0047 keeps real Figma desktop checks out of routine verification. Use local
 Figma loading as a low-frequency smoke check before demos or releases, or when
 plugin manifest/loading behavior changes.
 
-The current panel baselines intentionally capture the existing two-section
-`ui.html` panel. ADR 0037 describes the future first-demo panel as three tabs:
-**Annotate**, **Connect**, and **Validate**. Until that UI is implemented, visual
-snapshot failures should be judged against the current two-section panel, while
-the gap remains documented here.
+The current panel baselines intentionally capture the implemented three-tab
+`ui.html` panel: **Annotate**, **Connect**, and **Validate**. Visual snapshot
+failures should be judged against that current panel, including **Add Subject
+Nodes**, **Refresh Connectors**, **Validate Bindings**, **Clean Stale Indexes**,
+validation filters, and connector status states.
 
 ## Local Figma loading
 
@@ -95,7 +95,39 @@ the gap remains documented here.
 4. Run the local `flow-annotator` plugin. It opens a persistent **Flow Annotator**
    panel and reads the current page selection.
 
-## Manual proof notes
+## First demo scenario smoke
+
+The release proof matrix for ADR 0041 lives in repository root
+`docs/first-demo-release-proof.md`. Before a demo or release, use local Figma
+loading above and smoke these nine scenarios in the persistent panel:
+
+1. In **Annotate**, select one normal Figma Design node, enter a non-empty
+   **Annotation Body**, and click **Create Annotation**. Confirm one
+   **Annotation Card**, one **Annotation Badge**, and shared plugin data.
+2. Select multiple normal nodes, create one **Annotation**, and confirm one
+   shared **Annotation Card** plus one same-number **Annotation Badge** beside
+   each **Subject Node**.
+3. Select an existing **Annotation Card** plus additional **Subject Nodes**, then
+   click **Add Subject Nodes**. Confirm the **Annotation Number** stays stable
+   and only missing same-number badges are added.
+4. Delete one **Annotation Badge**, run **Validate Bindings**, and confirm the
+   report warns about the missing badge while the **Annotation** record remains
+   present on its **Annotation Card**.
+5. With the plugin already open, select endpoint A, shift-select endpoint B, and
+   click **Create Flow Connector** in **Connect**. Confirm A -> B direction and
+   shared plugin data.
+6. Create three horizontal **Context Frames**, connect frame 1 to frame 3, and
+   confirm the **Connector Route** avoids frame 2 and **Annotation Cards**.
+7. Create two different starts with the same end and incoming side; confirm the
+   resulting **Flow Connectors** share the final **Connector Trunk**.
+8. Select the same A -> B pair again, change **Flow Action**, and click
+   **Create Flow Connector**. Confirm the existing **Flow Connector** updates
+   instead of creating a duplicate. This is the first-demo **Edit Flow Action**
+   path.
+9. Delete one **Flow Endpoint** used by an existing **Flow Connector**, run
+   **Validate Bindings**, and confirm an **Orphaned Flow Connector** error.
+
+## Manual inspection notes
 
 Annotation proof:
 

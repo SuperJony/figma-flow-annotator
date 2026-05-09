@@ -1,10 +1,32 @@
-import { type Point, unionRects } from './geometry';
-
-export const CONNECTORS_CONTAINER_NAME = 'FFA Connectors';
+import {
+  SHARED_PLUGIN_DATA,
+  CONNECTORS_CONTAINER_NAME,
+  VISUAL_NODE_KINDS,
+  buildCreateFlowConnectorPlan,
+  buildRefreshFlowConnectorPlan,
+  flowConnectorMatchesDirectedPair,
+  isFlowEndpointEligibleVisualKind,
+  mergeConnectorReferenceIds,
+  placeFlowActionLabel,
+  planConnectorTrunks,
+  routeOrthogonalConnector,
+  serializeSharedPluginDataValue,
+  type AppendSharedReferenceOperation,
+  type ConnectorRouteSegment,
+  type ConnectorObstacle,
+  type CreateFlowConnectorOperation,
+  type CreateFlowConnectorPlan,
+  type DocumentNodeTarget,
+  type FlowConnectorRecord,
+  type Point,
+  type RectLike,
+  type RefreshFlowConnectorPlan,
+  type SetSharedPluginDataOperation,
+  type UpdateFlowConnectorOperation,
+  unionRects,
+} from '../../packages/core/src/index';
 
 const CONNECTOR_THICKNESS = 4;
-const CONNECTOR_ROUTE_PADDING = 24;
-const CONNECTOR_ENDPOINT_GAP = 32;
 const CONNECTOR_ARROW_LENGTH = 18;
 const CONNECTOR_ARROW_WIDTH = 16;
 const CONNECTOR_COLOR = '#1F3A5A';
@@ -18,34 +40,11 @@ const FLOW_ACTION_LABEL_MIN_WIDTH = 56;
 const FLOW_ACTION_LABEL_MIN_HEIGHT = 28;
 const FLOW_ACTION_LABEL_MAX_BROWSER_TEXT_WIDTH = 160;
 const FLOW_ACTION_LABEL_RADIUS = 6;
-const ROUTE_EPSILON = 0.001;
-
-type RouteDirection = -1 | 1;
-
-interface EndpointRecord {
-  nodeId: string;
-  contextFrameId: string;
-}
-
-interface ConnectorRecord {
-  schemaVersion: 1;
-  id: string;
-  start: EndpointRecord;
-  end: EndpointRecord;
-  ownerContextFrameId: string;
-  flowAction: string | null;
-  routeCache: {
-    schemaVersion: 1;
-    points: Point[];
-  };
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface ConnectorObstacleTraversalItem {
   node: SceneNode;
   generatedAncestor: boolean;
-  coveringObstacles: Rect[];
+  coveringObstacles: RectLike[];
 }
 
 export interface ConnectorRouteVisual {
@@ -73,11 +72,41 @@ export interface FlowActionLabelVisual {
 export interface ConnectorVisualModel {
   label: FlowActionLabelVisual | null;
   route: ConnectorRouteVisual;
+  trunkSegment: ConnectorRouteSegment | null;
+}
+
+export interface ConnectorVisualModelOptions {
+  obstacles?: ConnectorObstacle[];
+  sharedTrunkSegment?: ConnectorRouteSegment;
+}
+
+export interface ConnectEndpointPreview {
+  id: string;
+  name: string;
+}
+
+export interface ExistingConnectorPreview {
+  flowAction: string | null;
+  id: string;
+  nodeId: string;
+}
+
+export interface ConnectSelectionState {
+  endpoints: ConnectEndpointPreview[];
+  existingConnector: ExistingConnectorPreview | null;
+  routingStatus: string;
+}
+
+export interface RefreshConnectorsResult {
+  failedCount: number;
+  failures: string[];
+  refreshedCount: number;
+  selectedOnly: boolean;
+  nodes: GroupNode[];
 }
 
 export interface ConnectRuntime {
   namespace: string;
-  appendConnectorReference(node: SceneNode, connectorId: string): void;
   createId(prefix: 'connector'): string;
   createText(name: string, characters: string, fontSize: number, fills: SolidPaint, width: number): TextNode;
   ensureContainer(name: string): FrameNode;
@@ -86,7 +115,6 @@ export interface ConnectRuntime {
   getVisibleBounds(node: SceneNode): Rect;
   hasGeneratedAncestor(node: SceneNode): boolean;
   postSelectionState(): void;
-  readableName(name: string): string;
   solidPaint(r: number, g: number, b: number): SolidPaint;
 }
 
@@ -108,48 +136,491 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
   const endBounds = runtime.getVisibleBounds(endNode);
   const startContextFrameId = runtime.findContextFrameId(startNode);
   const endContextFrameId = runtime.findContextFrameId(endNode);
-  const routePoints = buildOrthogonalRoute(startBounds, endBounds, collectConnectorObstacles(startNode, endNode, runtime));
-  const connectorId = runtime.createId('connector');
-  const flowAction = flowActionValue.trim();
+  const routePoints = routeOrthogonalConnector({
+    startRect: startBounds,
+    endRect: endBounds,
+    obstacles: collectConnectorObstacles(startNode, endNode, runtime),
+  }).points;
+  const existingConnector = findExistingDirectedConnector(startNode.id, endNode.id, runtime);
+  const connectorId = existingConnector?.record.id ?? runtime.createId('connector');
   const now = new Date().toISOString();
-  const container = runtime.ensureContainer(CONNECTORS_CONTAINER_NAME);
-
-  const visualNodes = createConnectorVisualNodes(routePoints, flowAction, runtime);
-  const connectorRoot = figma.group(visualNodes, container);
-  connectorRoot.name = `FFA Connector ${runtime.readableName(startNode.name)} -> ${runtime.readableName(endNode.name)}`;
-
-  const record: ConnectorRecord = {
-    schemaVersion: 1,
-    id: connectorId,
+  const plan = buildCreateFlowConnectorPlan({
+    connectorId,
+    ...(existingConnector === null
+      ? {}
+      : {
+          existingConnector: {
+            nodeId: existingConnector.node.id,
+            record: existingConnector.record,
+          },
+        }),
     start: {
-      nodeId: startNode.id,
+      id: startNode.id,
+      name: startNode.name,
       contextFrameId: startContextFrameId,
     },
     end: {
-      nodeId: endNode.id,
+      id: endNode.id,
+      name: endNode.name,
       contextFrameId: endContextFrameId,
     },
     ownerContextFrameId: startContextFrameId,
-    flowAction: flowAction.length > 0 ? flowAction : null,
-    routeCache: {
-      schemaVersion: 1,
-      points: routePoints,
-    },
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  connectorRoot.setSharedPluginData(runtime.namespace, 'kind', 'flow-connector');
-  connectorRoot.setSharedPluginData(runtime.namespace, 'connector', JSON.stringify(record));
-  runtime.appendConnectorReference(startNode, connectorId);
-  runtime.appendConnectorReference(endNode, connectorId);
-
+    flowAction: flowActionValue,
+    routePoints,
+    now,
+  });
+  const connectorRoot = applyCreateFlowConnectorPlan(plan, runtime, new Map([
+    [startNode.id, startNode],
+    [endNode.id, endNode],
+    ...(existingConnector === null ? [] : [[existingConnector.node.id, existingConnector.node] as [string, BaseNode]]),
+  ]));
+  regenerateConnectorVisuals(runtime);
   runtime.ensureLayerOrder();
   return connectorRoot;
 }
 
-function createConnectorVisualNodes(points: Point[], flowAction: string, runtime: ConnectRuntime): SceneNode[] {
-  const visual = buildConnectorVisualModel(points, flowAction);
+export async function refreshFlowConnectors(runtime: ConnectRuntime): Promise<RefreshConnectorsResult> {
+  const refreshedNodes: GroupNode[] = [];
+  const failures: string[] = [];
+  const selectedConnectorRoots = getSelectedFlowConnectorRoots(runtime);
+  const selectedOnly = selectedConnectorRoots.length > 0;
+  const connectorRecords = selectedOnly
+    ? selectedConnectorRoots.flatMap((node) => {
+        const record = readFlowConnectorRecord(node, runtime);
+        if (record === null) {
+          failures.push(`${node.name}: Missing Flow Connector record.`);
+          return [];
+        }
+        return [{ node, record }];
+      })
+    : getFlowConnectorRecords(runtime);
+
+  if (connectorRecords.length === 0 && failures.length === 0) {
+    throw new Error('No Flow Connectors found to refresh.');
+  }
+
+  for (const connector of connectorRecords) {
+    try {
+      const refreshed = await refreshOneFlowConnector(connector, runtime);
+      refreshedNodes.push(refreshed);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown connector refresh failure.';
+      failures.push(`${connector.node.name}: ${errorMessage}`);
+    }
+  }
+
+  if (refreshedNodes.length > 0) {
+    regenerateConnectorVisuals(runtime);
+    runtime.ensureLayerOrder();
+  }
+
+  return {
+    failedCount: failures.length,
+    failures,
+    refreshedCount: refreshedNodes.length,
+    selectedOnly,
+    nodes: refreshedNodes,
+  };
+}
+
+async function refreshOneFlowConnector(
+  connector: { node: GroupNode; record: FlowConnectorRecord },
+  runtime: ConnectRuntime,
+): Promise<GroupNode> {
+  const startNode = await getLiveSceneNode(connector.record.start.nodeId, 'start Flow Endpoint');
+  const endNode = await getLiveSceneNode(connector.record.end.nodeId, 'end Flow Endpoint');
+  const routePoints = routeOrthogonalConnector({
+    startRect: runtime.getVisibleBounds(startNode),
+    endRect: runtime.getVisibleBounds(endNode),
+    obstacles: collectConnectorObstacles(startNode, endNode, runtime),
+  }).points;
+  const plan = buildRefreshFlowConnectorPlan({
+    connectorNodeId: connector.node.id,
+    endName: endNode.name,
+    now: new Date().toISOString(),
+    record: connector.record,
+    routePoints,
+    startName: startNode.name,
+  });
+
+  return applyRefreshFlowConnectorPlan(plan, runtime, new Map([[connector.node.id, connector.node]]));
+}
+
+async function getLiveSceneNode(nodeId: string, role: string): Promise<SceneNode> {
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (node === null || node.type === 'PAGE' || !('absoluteBoundingBox' in node) || node.removed) {
+    throw new Error(`Missing ${role} ${nodeId}.`);
+  }
+  return node as SceneNode;
+}
+
+function applyCreateFlowConnectorPlan(
+  plan: CreateFlowConnectorPlan,
+  runtime: ConnectRuntime,
+  existingNodes: Map<string, BaseNode>,
+): GroupNode {
+  const containers = new Map<string, FrameNode>();
+  const createdNodes = new Map<string, SceneNode>();
+
+  plan.operations.forEach((operation) => {
+    if (operation.type === 'ensure-container') {
+      containers.set(operation.ref, runtime.ensureContainer(operation.name));
+      return;
+    }
+
+    if (operation.type === 'set-shared-plugin-data') {
+      const node = resolvePlanTarget(operation.target, { containers, createdNodes, existingNodes });
+      writeSharedPluginData(node, runtime, operation);
+      return;
+    }
+
+    if (operation.type === 'create-flow-connector') {
+      const container = resolveContainer(operation.containerRef, containers);
+      createdNodes.set(operation.ref, createFlowConnectorRoot(container, operation, runtime));
+      return;
+    }
+
+    if (operation.type === 'update-flow-connector') {
+      updateFlowConnectorRoot(resolveExistingConnectorRoot(operation.targetNodeId, existingNodes), operation, runtime);
+      return;
+    }
+
+    if (operation.type === 'append-shared-reference') {
+      appendConnectorReference(existingNodes, runtime, operation);
+      return;
+    }
+
+    throw new Error(`Flow Connector adapter cannot apply ${operation.type}.`);
+  });
+
+  if (plan.mode === 'create') {
+    const connectorRoot = createdNodes.get(plan.createdNodeRefs[0]);
+    if (connectorRoot === undefined || connectorRoot.type !== 'GROUP') {
+      throw new Error('Flow Connector plan did not create a connector root.');
+    }
+    return connectorRoot;
+  }
+
+  return resolveExistingConnectorRoot(plan.existingNodeRefs[0], existingNodes);
+}
+
+function applyRefreshFlowConnectorPlan(
+  plan: RefreshFlowConnectorPlan,
+  runtime: ConnectRuntime,
+  existingNodes: Map<string, BaseNode>,
+): GroupNode {
+  plan.operations.forEach((operation) => {
+    if (operation.type === 'update-flow-connector') {
+      updateFlowConnectorRoot(resolveExistingConnectorRoot(operation.targetNodeId, existingNodes), operation, runtime);
+      return;
+    }
+
+    if (operation.type === 'set-shared-plugin-data') {
+      const node = resolvePlanTarget(operation.target, {
+        containers: new Map(),
+        createdNodes: new Map(),
+        existingNodes,
+      });
+      writeSharedPluginData(node, runtime, operation);
+      return;
+    }
+
+    throw new Error(`Flow Connector refresh adapter cannot apply ${operation.type}.`);
+  });
+
+  return resolveExistingConnectorRoot(plan.existingNodeRefs[0], existingNodes);
+}
+
+function createFlowConnectorRoot(
+  container: FrameNode,
+  operation: CreateFlowConnectorOperation,
+  runtime: ConnectRuntime,
+): GroupNode {
+  const visualNodes = createConnectorVisualNodes(operation.routePoints, operation.flowAction ?? '', runtime);
+  const connectorRoot = figma.group(visualNodes, container);
+  connectorRoot.name = operation.name;
+  return connectorRoot;
+}
+
+function updateFlowConnectorRoot(
+  connectorRoot: GroupNode,
+  operation: UpdateFlowConnectorOperation,
+  runtime: ConnectRuntime,
+): void {
+  const nextVisualNodes = createConnectorVisualNodes(operation.routePoints, operation.flowAction ?? '', runtime);
+  replaceConnectorVisualNodes(connectorRoot, nextVisualNodes);
+  connectorRoot.name = operation.name;
+}
+
+function regenerateConnectorVisuals(runtime: ConnectRuntime): void {
+  const connectors = getFlowConnectorRecords(runtime).filter((connector) => connector.record.routeCache !== undefined);
+  const trunkPlan = planConnectorTrunks({
+    connectors: connectors.map((connector) => ({
+      record: connector.record,
+    })),
+  });
+  const assignmentByConnectorId = new Map(
+    trunkPlan.assignments.map((assignment) => [assignment.connectorId, assignment]),
+  );
+
+  connectors.forEach((connector) => {
+    const routePoints = connector.record.routeCache?.points;
+    if (routePoints === undefined) {
+      return;
+    }
+    const assignment = assignmentByConnectorId.get(connector.record.id);
+    const nextVisualNodes = createConnectorVisualNodes(
+      routePoints,
+      connector.record.flowAction ?? '',
+      runtime,
+      assignment === undefined ? {} : { sharedTrunkSegment: assignment.segment },
+    );
+    replaceConnectorVisualNodes(connector.node, nextVisualNodes);
+  });
+}
+
+function replaceConnectorVisualNodes(connectorRoot: GroupNode, nextVisualNodes: SceneNode[]): void {
+  [...connectorRoot.children].forEach((child) => {
+    child.remove();
+  });
+  nextVisualNodes.forEach((node) => {
+    connectorRoot.appendChild(node);
+  });
+}
+
+function resolveExistingConnectorRoot(nodeId: string, existingNodes: Map<string, BaseNode>): GroupNode {
+  const node = existingNodes.get(nodeId);
+  if (node === undefined || node.type !== 'GROUP') {
+    throw new Error(`Flow Connector plan references missing connector root ${nodeId}.`);
+  }
+  return node;
+}
+
+function resolveContainer(ref: string, containers: Map<string, FrameNode>): FrameNode {
+  const container = containers.get(ref);
+  if (container === undefined) {
+    throw new Error(`Flow Connector plan references missing container ${ref}.`);
+  }
+  return container;
+}
+
+function resolvePlanTarget(
+  target: DocumentNodeTarget,
+  refs: {
+    containers: Map<string, FrameNode>;
+    createdNodes: Map<string, SceneNode>;
+    existingNodes: Map<string, BaseNode>;
+  },
+): BaseNode {
+  if (target.kind === 'container') {
+    return resolveContainer(target.ref, refs.containers);
+  }
+
+  if (target.kind === 'created-node') {
+    const node = refs.createdNodes.get(target.ref);
+    if (node === undefined) {
+      throw new Error(`Flow Connector plan references missing created node ${target.ref}.`);
+    }
+    return node;
+  }
+
+  const node = refs.existingNodes.get(target.nodeId);
+  if (node === undefined) {
+    throw new Error(`Flow Connector plan references missing existing node ${target.nodeId}.`);
+  }
+  return node;
+}
+
+function writeSharedPluginData(
+  node: BaseNode,
+  runtime: ConnectRuntime,
+  operation: SetSharedPluginDataOperation,
+): void {
+  node.setSharedPluginData(
+    runtime.namespace,
+    operation.key,
+    serializeSharedPluginDataValue(operation.value),
+  );
+}
+
+function appendConnectorReference(
+  existingNodes: Map<string, BaseNode>,
+  runtime: ConnectRuntime,
+  operation: AppendSharedReferenceOperation,
+): void {
+  if (operation.key !== SHARED_PLUGIN_DATA.keys.connectorRefs || operation.listKey !== 'connectorIds') {
+    throw new Error('Flow Connector adapter can only apply connector reverse references.');
+  }
+
+  const node = existingNodes.get(operation.targetNodeId);
+  if (node === undefined) {
+    throw new Error(`Flow Connector plan references missing Flow Endpoint ${operation.targetNodeId}.`);
+  }
+  const record = mergeConnectorReferenceIds(readConnectorReferenceIds(node, runtime), operation.id);
+  node.setSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.connectorRefs, JSON.stringify(record));
+}
+
+function readConnectorReferenceIds(node: BaseNode, runtime: ConnectRuntime): string[] {
+  const parsed = parseJson(node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.connectorRefs));
+  if (!isRecord(parsed) || !Array.isArray(parsed.connectorIds)) {
+    return [];
+  }
+  return parsed.connectorIds.filter((value): value is string => typeof value === 'string');
+}
+
+export function getConnectSelectionState(runtime: ConnectRuntime): ConnectSelectionState {
+  const endpoints = getPendingConnectorEndpointNodes(runtime);
+  const existingConnector = endpoints.length === 2
+    ? findExistingDirectedConnector(endpoints[0].id, endpoints[1].id, runtime)
+    : null;
+
+  return {
+    endpoints: endpoints.map((node) => ({
+      id: node.id,
+      name: node.name,
+    })),
+    existingConnector: existingConnector === null
+      ? null
+      : {
+          flowAction: existingConnector.record.flowAction,
+          id: existingConnector.record.id,
+          nodeId: existingConnector.node.id,
+        },
+    routingStatus: endpoints.length === 2
+      ? 'Route preview pending router validation.'
+      : 'Select two Flow Endpoints to preview a Connector Route.',
+  };
+}
+
+export function swapPendingConnectorEndpoints(runtime: ConnectRuntime): void {
+  const endpoints = getPendingConnectorEndpointNodes(runtime);
+  if (endpoints.length !== 2) {
+    throw new Error('Swap requires exactly two pending Flow Endpoints.');
+  }
+  connectorEndpointWindowNodes = [endpoints[1], endpoints[0]];
+  runtime.postSelectionState();
+}
+
+function parseJson(value: string): unknown {
+  if (value.length === 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (_error: unknown) {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function findExistingDirectedConnector(
+  startNodeId: string,
+  endNodeId: string,
+  runtime: ConnectRuntime,
+): { node: GroupNode; record: FlowConnectorRecord } | null {
+  return getFlowConnectorRecords(runtime).find((connector) =>
+    flowConnectorMatchesDirectedPair(connector.record, startNodeId, endNodeId),
+  ) ?? null;
+}
+
+function getFlowConnectorRecords(runtime: ConnectRuntime): { node: GroupNode; record: FlowConnectorRecord }[] {
+  const container = findConnectorsContainer(runtime);
+  if (container === null) {
+    return [];
+  }
+
+  return container.children.flatMap((child) => {
+    if (
+      child.type !== 'GROUP' ||
+      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.flowConnector
+    ) {
+      return [];
+    }
+
+    const record = readFlowConnectorRecord(child, runtime);
+    return record === null ? [] : [{ node: child, record }];
+  });
+}
+
+function getSelectedFlowConnectorRoots(runtime: ConnectRuntime): GroupNode[] {
+  return figma.currentPage.selection.flatMap((node) => {
+    if (
+      node.type !== 'GROUP' ||
+      node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.flowConnector
+    ) {
+      return [];
+    }
+
+    return [node];
+  });
+}
+
+function findConnectorsContainer(runtime: ConnectRuntime): FrameNode | null {
+  for (const child of figma.currentPage.children) {
+    if (
+      child.type === 'FRAME' &&
+      child.name === CONNECTORS_CONTAINER_NAME &&
+      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) === VISUAL_NODE_KINDS.container
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function readFlowConnectorRecord(node: BaseNode, runtime: ConnectRuntime): FlowConnectorRecord | null {
+  const parsed = parseJson(node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.connector));
+  if (
+    !isRecord(parsed) ||
+    parsed.schemaVersion !== 1 ||
+    typeof parsed.id !== 'string' ||
+    !isFlowEndpointRecord(parsed.start) ||
+    !isFlowEndpointRecord(parsed.end) ||
+    typeof parsed.ownerContextFrameId !== 'string' ||
+    !(typeof parsed.flowAction === 'string' || parsed.flowAction === null) ||
+    typeof parsed.createdAt !== 'string' ||
+    typeof parsed.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    id: parsed.id,
+    start: parsed.start,
+    end: parsed.end,
+    ownerContextFrameId: parsed.ownerContextFrameId,
+    flowAction: parsed.flowAction,
+    ...(isRouteCacheRecord(parsed.routeCache) ? { routeCache: parsed.routeCache } : {}),
+    createdAt: parsed.createdAt,
+    updatedAt: parsed.updatedAt,
+  };
+}
+
+function isFlowEndpointRecord(value: unknown): value is { nodeId: string; contextFrameId: string } {
+  return isRecord(value) && typeof value.nodeId === 'string' && typeof value.contextFrameId === 'string';
+}
+
+function isRouteCacheRecord(value: unknown): value is { schemaVersion: 1; points: Point[] } {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    Array.isArray(value.points) &&
+    value.points.every((point) => isRecord(point) && typeof point.x === 'number' && typeof point.y === 'number')
+  );
+}
+
+function createConnectorVisualNodes(
+  points: Point[],
+  flowAction: string,
+  runtime: ConnectRuntime,
+  options: ConnectorVisualModelOptions = {},
+): SceneNode[] {
+  const visual = buildConnectorVisualModel(points, flowAction, options);
   const nodes: SceneNode[] = [createConnectorRouteSvg(visual.route)];
 
   if (visual.label !== null) {
@@ -159,7 +630,11 @@ function createConnectorVisualNodes(points: Point[], flowAction: string, runtime
   return nodes;
 }
 
-export function buildConnectorVisualModel(points: Point[], flowAction: string): ConnectorVisualModel {
+export function buildConnectorVisualModel(
+  points: Point[],
+  flowAction: string,
+  options: ConnectorVisualModelOptions = {},
+): ConnectorVisualModel {
   const distinctPoints = compactPoints(points);
   if (distinctPoints.length < 2) {
     throw new Error('Connector route requires at least two points.');
@@ -175,13 +650,16 @@ export function buildConnectorVisualModel(points: Point[], flowAction: string): 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${pathData}" fill="none" stroke="${CONNECTOR_COLOR}" stroke-width="${CONNECTOR_THICKNESS}" stroke-linecap="round" stroke-linejoin="round"/><path d="${arrowData}" fill="${CONNECTOR_COLOR}"/></svg>`;
   const trimmedFlowAction = flowAction.trim();
   return {
-    label: trimmedFlowAction.length > 0 ? buildFlowActionLabelVisual(distinctPoints, trimmedFlowAction) : null,
+    label: trimmedFlowAction.length > 0
+      ? buildFlowActionLabelVisual(distinctPoints, trimmedFlowAction, options)
+      : null,
     route: {
       bounds,
       height,
       svg,
       width,
     },
+    trunkSegment: options.sharedTrunkSegment ?? null,
   };
 }
 
@@ -226,9 +704,23 @@ function buildConnectorDrawing(points: Point[]): { pathPoints: Point[]; arrowPoi
   };
 }
 
-function buildFlowActionLabelVisual(points: Point[], flowAction: string): FlowActionLabelVisual {
+function buildFlowActionLabelVisual(
+  points: Point[],
+  flowAction: string,
+  options: ConnectorVisualModelOptions,
+): FlowActionLabelVisual | null {
+  const placement = placeFlowActionLabel({
+    flowAction,
+    obstacles: options.obstacles,
+    routePoints: points,
+    sharedTrunkSegment: options.sharedTrunkSegment,
+  });
+  if (placement === null) {
+    return null;
+  }
+
   return {
-    center: getLongestSegmentMidpoint(points),
+    center: placement.center,
     fill: FLOW_ACTION_LABEL_FILL,
     fontSize: FLOW_ACTION_LABEL_FONT_SIZE,
     maxTextWidth: FLOW_ACTION_LABEL_MAX_BROWSER_TEXT_WIDTH,
@@ -274,221 +766,8 @@ function createFlowActionLabel(visual: FlowActionLabelVisual, runtime: ConnectRu
   return label;
 }
 
-export function buildOrthogonalRoute(start: Rect, end: Rect, obstacles: Rect[]): Point[] {
-  const startCenter = centerOf(start);
-  const endCenter = centerOf(end);
-  const deltaX = endCenter.x - startCenter.x;
-  const deltaY = endCenter.y - startCenter.y;
-  const expandedObstacles = obstacles.map((obstacle) => expandRect(obstacle, CONNECTOR_ROUTE_PADDING));
-  const horizontalDirection = deltaX >= 0 ? 1 : -1;
-  const verticalDirection = deltaY >= 0 ? 1 : -1;
-  const dominantAxisCandidates = Math.abs(deltaX) >= Math.abs(deltaY)
-    ? buildHorizontalRouteCandidates(start, end, expandedObstacles, horizontalDirection)
-    : buildVerticalRouteCandidates(start, end, expandedObstacles, verticalDirection);
-  const alternateAxisCandidates = Math.abs(deltaX) >= Math.abs(deltaY)
-    ? buildVerticalRouteCandidates(start, end, expandedObstacles, verticalDirection)
-    : buildHorizontalRouteCandidates(start, end, expandedObstacles, horizontalDirection);
-  const fallbackSideCandidates = [
-    ...buildHorizontalRouteCandidates(start, end, expandedObstacles, oppositeDirection(horizontalDirection)),
-    ...buildVerticalRouteCandidates(start, end, expandedObstacles, oppositeDirection(verticalDirection)),
-  ];
-  const candidates = [
-    ...dominantAxisCandidates,
-    ...alternateAxisCandidates,
-    ...fallbackSideCandidates,
-  ];
-  const legalCandidates = candidates
-    .map(compactPoints)
-    .filter(
-      (candidate) =>
-        !routeIntersectsObstacles(candidate, expandedObstacles) &&
-        !routeIntersectsEndpointInteriors(candidate, [start, end]),
-    );
-
-  if (legalCandidates.length === 0) {
-    throw new Error('No orthogonal route avoids Context Frames and Annotation Cards.');
-  }
-
-  legalCandidates.sort((first, second) => scoreRoute(first) - scoreRoute(second));
-  return legalCandidates[0];
-}
-
-function buildHorizontalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[], direction: RouteDirection): Point[][] {
-  const startCenter = centerOf(start);
-  const endCenter = centerOf(end);
-  const startPoint = {
-    x: direction > 0 ? start.x + start.width : start.x,
-    y: startCenter.y,
-  };
-  const endPoint = {
-    x: direction > 0 ? end.x : end.x + end.width,
-    y: endCenter.y,
-  };
-  const startLead = {
-    x: startPoint.x + direction * CONNECTOR_ENDPOINT_GAP,
-    y: startPoint.y,
-  };
-  const endLead = {
-    x: endPoint.x - direction * CONNECTOR_ENDPOINT_GAP,
-    y: endPoint.y,
-  };
-  const middleX = startLead.x + (endLead.x - startLead.x) / 2;
-  const directRoute = [startPoint, startLead, { x: middleX, y: startLead.y }, { x: middleX, y: endLead.y }, endLead, endPoint];
-  const laneValues = getHorizontalLaneValues(start, end, startPoint.y, endPoint.y, obstacles);
-  const laneRoutes = laneValues.map((laneY) => [
-    startPoint,
-    startLead,
-    { x: startLead.x, y: laneY },
-    { x: endLead.x, y: laneY },
-    endLead,
-    endPoint,
-  ]);
-  return [directRoute, ...laneRoutes];
-}
-
-function buildVerticalRouteCandidates(start: Rect, end: Rect, obstacles: Rect[], direction: RouteDirection): Point[][] {
-  const startCenter = centerOf(start);
-  const endCenter = centerOf(end);
-  const startPoint = {
-    x: startCenter.x,
-    y: direction > 0 ? start.y + start.height : start.y,
-  };
-  const endPoint = {
-    x: endCenter.x,
-    y: direction > 0 ? end.y : end.y + end.height,
-  };
-  const startLead = {
-    x: startPoint.x,
-    y: startPoint.y + direction * CONNECTOR_ENDPOINT_GAP,
-  };
-  const endLead = {
-    x: endPoint.x,
-    y: endPoint.y - direction * CONNECTOR_ENDPOINT_GAP,
-  };
-  const middleY = startLead.y + (endLead.y - startLead.y) / 2;
-  const directRoute = [startPoint, startLead, { x: startLead.x, y: middleY }, { x: endLead.x, y: middleY }, endLead, endPoint];
-  const laneValues = getVerticalLaneValues(start, end, startPoint.x, endPoint.x, obstacles);
-  const laneRoutes = laneValues.map((laneX) => [
-    startPoint,
-    startLead,
-    { x: laneX, y: startLead.y },
-    { x: laneX, y: endLead.y },
-    endLead,
-    endPoint,
-  ]);
-  return [directRoute, ...laneRoutes];
-}
-
-function oppositeDirection(direction: RouteDirection): RouteDirection {
-  return direction > 0 ? -1 : 1;
-}
-
-function getHorizontalLaneValues(start: Rect, end: Rect, startY: number, endY: number, obstacles: Rect[]): number[] {
-  const relevantBounds = unionRects([start, end, ...obstacles]);
-  return uniqueNumbers([
-    startY,
-    endY,
-    start.y - CONNECTOR_ROUTE_PADDING,
-    start.y + start.height + CONNECTOR_ROUTE_PADDING,
-    end.y - CONNECTOR_ROUTE_PADDING,
-    end.y + end.height + CONNECTOR_ROUTE_PADDING,
-    relevantBounds.y - CONNECTOR_ROUTE_PADDING,
-    relevantBounds.y + relevantBounds.height + CONNECTOR_ROUTE_PADDING,
-    ...obstacles.flatMap((obstacle) => [
-      obstacle.y - CONNECTOR_ROUTE_PADDING,
-      obstacle.y + obstacle.height + CONNECTOR_ROUTE_PADDING,
-    ]),
-  ]);
-}
-
-function getVerticalLaneValues(start: Rect, end: Rect, startX: number, endX: number, obstacles: Rect[]): number[] {
-  const relevantBounds = unionRects([start, end, ...obstacles]);
-  return uniqueNumbers([
-    startX,
-    endX,
-    start.x - CONNECTOR_ROUTE_PADDING,
-    start.x + start.width + CONNECTOR_ROUTE_PADDING,
-    end.x - CONNECTOR_ROUTE_PADDING,
-    end.x + end.width + CONNECTOR_ROUTE_PADDING,
-    relevantBounds.x - CONNECTOR_ROUTE_PADDING,
-    relevantBounds.x + relevantBounds.width + CONNECTOR_ROUTE_PADDING,
-    ...obstacles.flatMap((obstacle) => [
-      obstacle.x - CONNECTOR_ROUTE_PADDING,
-      obstacle.x + obstacle.width + CONNECTOR_ROUTE_PADDING,
-    ]),
-  ]);
-}
-
-function routeIntersectsObstacles(points: Point[], obstacles: Rect[]): boolean {
-  for (let index = 0; index < points.length - 1; index += 1) {
-    if (obstacles.some((obstacle) => segmentIntersectsRect(points[index], points[index + 1], obstacle))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function routeIntersectsEndpointInteriors(points: Point[], endpoints: Rect[]): boolean {
-  for (let index = 0; index < points.length - 1; index += 1) {
-    if (endpoints.some((endpoint) => segmentIntersectsRectInterior(points[index], points[index + 1], endpoint))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function segmentIntersectsRect(start: Point, end: Point, rect: Rect): boolean {
-  if (Math.abs(start.y - end.y) < ROUTE_EPSILON) {
-    const minX = Math.min(start.x, end.x);
-    const maxX = Math.max(start.x, end.x);
-    return start.y >= rect.y && start.y <= rect.y + rect.height && maxX >= rect.x && minX <= rect.x + rect.width;
-  }
-
-  if (Math.abs(start.x - end.x) < ROUTE_EPSILON) {
-    const minY = Math.min(start.y, end.y);
-    const maxY = Math.max(start.y, end.y);
-    return start.x >= rect.x && start.x <= rect.x + rect.width && maxY >= rect.y && minY <= rect.y + rect.height;
-  }
-
-  return true;
-}
-
-function segmentIntersectsRectInterior(start: Point, end: Point, rect: Rect): boolean {
-  if (Math.abs(start.y - end.y) < ROUTE_EPSILON) {
-    const minX = Math.min(start.x, end.x);
-    const maxX = Math.max(start.x, end.x);
-    return (
-      start.y > rect.y + ROUTE_EPSILON &&
-      start.y < rect.y + rect.height - ROUTE_EPSILON &&
-      maxX > rect.x + ROUTE_EPSILON &&
-      minX < rect.x + rect.width - ROUTE_EPSILON
-    );
-  }
-
-  if (Math.abs(start.x - end.x) < ROUTE_EPSILON) {
-    const minY = Math.min(start.y, end.y);
-    const maxY = Math.max(start.y, end.y);
-    return (
-      start.x > rect.x + ROUTE_EPSILON &&
-      start.x < rect.x + rect.width - ROUTE_EPSILON &&
-      maxY > rect.y + ROUTE_EPSILON &&
-      minY < rect.y + rect.height - ROUTE_EPSILON
-    );
-  }
-
-  return true;
-}
-
-function scoreRoute(points: Point[]): number {
-  let length = 0;
-  for (let index = 0; index < points.length - 1; index += 1) {
-    length += distance(points[index], points[index + 1]);
-  }
-  return length + Math.max(0, points.length - 2) * 8;
-}
-
-export function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNode, runtime: ConnectRuntime): Rect[] {
-  const obstacles: Rect[] = [];
+export function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNode, runtime: ConnectRuntime): ConnectorObstacle[] {
+  const obstacles: ConnectorObstacle[] = [];
   const startAncestorIds = getAncestorIds(startNode);
   const endAncestorIds = getAncestorIds(endNode);
   const pending: ConnectorObstacleTraversalItem[] = figma.currentPage.children.map((node) => ({
@@ -504,20 +783,28 @@ export function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNo
       continue;
     }
 
-    const kind = node.getSharedPluginData(runtime.namespace, 'kind');
+    const kind = node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind);
     const nodeContainsEndpoint = startAncestorIds.has(node.id) || endAncestorIds.has(node.id);
     let generatedAncestor = item.generatedAncestor;
     let coveringObstacles = item.coveringObstacles;
     let wholeFrameObstacle = false;
 
-    if (kind === 'annotation-card' && !nodeContainsEndpoint && node.absoluteBoundingBox !== null) {
+    if (kind === VISUAL_NODE_KINDS.annotationCard && !nodeContainsEndpoint && node.absoluteBoundingBox !== null) {
       generatedAncestor = true;
-      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, node.absoluteBoundingBox);
+      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, {
+        id: node.id,
+        kind: 'annotation-card',
+        rect: node.absoluteBoundingBox,
+      });
     } else if (kind !== '' || generatedAncestor) {
       generatedAncestor = true;
     } else if (node.type === 'FRAME' && !nodeContainsEndpoint && node.absoluteBoundingBox !== null) {
       wholeFrameObstacle = true;
-      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, node.absoluteBoundingBox);
+      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, {
+        id: node.id,
+        kind: 'context-frame',
+        rect: node.absoluteBoundingBox,
+      });
     }
 
     if (generatedAncestor || wholeFrameObstacle || !('children' in node)) {
@@ -536,17 +823,21 @@ export function collectConnectorObstacles(startNode: SceneNode, endNode: SceneNo
   return obstacles;
 }
 
-function appendUncoveredObstacle(obstacles: Rect[], coveringObstacles: Rect[], candidate: Rect): Rect[] {
+function appendUncoveredObstacle(
+  obstacles: ConnectorObstacle[],
+  coveringObstacles: RectLike[],
+  candidate: ConnectorObstacle,
+): RectLike[] {
   // Descendant obstacles fully inside an ancestor cannot add routing constraints.
-  if (isCoveredByObstacle(candidate, coveringObstacles)) {
+  if (isCoveredByObstacle(candidate.rect, coveringObstacles)) {
     return coveringObstacles;
   }
 
   obstacles.push(candidate);
-  return [...coveringObstacles, candidate];
+  return [...coveringObstacles, candidate.rect];
 }
 
-function isCoveredByObstacle(candidate: Rect, coveringObstacles: Rect[]): boolean {
+function isCoveredByObstacle(candidate: RectLike, coveringObstacles: RectLike[]): boolean {
   return coveringObstacles.some((obstacle) => rectContainsRect(obstacle, candidate));
 }
 
@@ -588,13 +879,6 @@ function compactPoints(points: Point[]): Point[] {
   return compacted;
 }
 
-function centerOf(rect: Rect): Point {
-  return {
-    x: rect.x + rect.width / 2,
-    y: rect.y + rect.height / 2,
-  };
-}
-
 function distance(start: Point, end: Point): number {
   return Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
 }
@@ -607,26 +891,6 @@ function normalize(vector: Point): Point {
   return {
     x: vector.x / length,
     y: vector.y / length,
-  };
-}
-
-function getLongestSegmentMidpoint(points: Point[]): Point {
-  let bestStart = points[0];
-  let bestEnd = points[points.length - 1];
-  let bestLength = -1;
-
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const length = distance(points[index], points[index + 1]);
-    if (length > bestLength) {
-      bestStart = points[index];
-      bestEnd = points[index + 1];
-      bestLength = length;
-    }
-  }
-
-  return {
-    x: bestStart.x + (bestEnd.x - bestStart.x) / 2,
-    y: bestStart.y + (bestEnd.y - bestStart.y) / 2,
   };
 }
 
@@ -660,19 +924,6 @@ function hexToSolidPaint(hex: string): SolidPaint {
       b: blue,
     },
   };
-}
-
-function uniqueNumbers(values: number[]): number[] {
-  const seen = new Set<number>();
-  const unique: number[] = [];
-  values.forEach((value) => {
-    const rounded = Number(value.toFixed(2));
-    if (!seen.has(rounded)) {
-      seen.add(rounded);
-      unique.push(rounded);
-    }
-  });
-  return unique;
 }
 
 function getAncestorIds(node: BaseNode): Set<string> {
@@ -742,9 +993,13 @@ function getSelectedConnectorEndpoints(runtime: ConnectRuntime): SceneNode[] {
 }
 
 function isConnectorEndpoint(node: SceneNode, runtime: ConnectRuntime): boolean {
-  return !runtime.hasGeneratedAncestor(node);
+  return (
+    isFlowEndpointEligibleVisualKind(node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind)) &&
+    !runtime.hasGeneratedAncestor(node)
+  );
 }
 
 export function resetObservedEndpointSelection(runtime: ConnectRuntime): void {
+  connectorEndpointWindowNodes = [];
   observedSelectedEndpointIds = new Set(getSelectedConnectorEndpointIds(runtime));
 }

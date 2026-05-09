@@ -1,24 +1,75 @@
 import {
-  CONNECTORS_CONTAINER_NAME,
+  collectConnectorObstacles,
   createFlowConnector,
-  getPendingConnectorEndpointNodes,
+  getConnectSelectionState,
   handleSelectionChange,
+  refreshFlowConnectors,
   resetObservedEndpointSelection,
+  swapPendingConnectorEndpoints,
   type ConnectRuntime,
 } from './connect';
-import { type Point, unionRects } from './geometry';
+import {
+  ANNOTATIONS_CONTAINER_NAME,
+  CONNECTORS_CONTAINER_NAME,
+  SHARED_PLUGIN_DATA,
+  VISUAL_NODE_KINDS,
+  buildAddAnnotationSubjectsPlan,
+  buildArrangeAnnotationBadgesPlan,
+  buildArrangeAnnotationCardsPlan,
+  buildCleanStaleIndexesPlan,
+  buildCreateAnnotationPlan,
+  mergeAnnotationReferenceIds,
+  mergeValidationReports,
+  planAnnotationCardPosition,
+  serializeSharedPluginDataValue,
+  type AddAnnotationSubjectsPlan,
+  type AnnotationValidationBadgeInput,
+  type AnnotationValidationCardInput,
+  type AnnotationValidationContextInput,
+  type AnnotationValidationRecord,
+  type AnnotationValidationSubjectInput,
+  type AnnotationRecord,
+  type ArrangeAnnotationBadgesPlan,
+  type ArrangeAnnotationCardsPlan,
+  type AppendSharedReferenceOperation,
+  type BadgeRefRecord,
+  type CleanStaleIndexesPlan,
+  type ContextRecord,
+  type CreateAnnotationBadgeOperation,
+  type CreateAnnotationCardOperation,
+  type CreateAnnotationPlan,
+  type DocumentNodeTarget,
+  type FlowConnectorRecord,
+  type FlowConnectorRouteValidationConnectorInput,
+  type FlowConnectorValidationConnectorInput,
+  type FlowConnectorValidationEndpointInput,
+  type MoveNodeOperation,
+  type Point,
+  type SetSharedPluginDataOperation,
+  type ValidateFlowConnectorRouteGeometryInput,
+  type ValidateFlowConnectorReferencesInput,
+  type ValidationReport,
+  validateAnnotationBindings,
+  validateFlowConnectorReferences,
+  validateFlowConnectorRouteGeometry,
+} from '../../packages/core/src/index';
 
-const NAMESPACE = 'figma_flow_annotator';
-const ANNOTATIONS_CONTAINER_NAME = 'FFA Annotations';
+const NAMESPACE = SHARED_PLUGIN_DATA.namespace;
 const FONT: FontName = { family: 'Inter', style: 'Regular' };
 const CARD_WIDTH = 280;
 const BADGE_SIZE = 28;
-const CARD_OFFSET_Y = 40;
-const CARD_GAP = 16;
 
 type PluginMessage =
   | { type: 'create-annotation'; body: string }
+  | { type: 'add-subject-nodes' }
+  | { type: 'arrange-badges' }
+  | { type: 'arrange-cards' }
   | { type: 'create-connector'; flowAction: string }
+  | { type: 'refresh-connectors' }
+  | { type: 'swap-connector-endpoints' }
+  | { type: 'validate-bindings' }
+  | { type: 'clean-stale-indexes' }
+  | { type: 'locate-validation-issue'; issueId: string }
   | { type: 'close' }
   | { type: 'request-selection-state' };
 
@@ -30,40 +81,30 @@ interface AnnotationCreationResult {
   nodes: SceneNode[];
 }
 
-interface AnnotationRecord {
-  schemaVersion: 1;
-  id: string;
+interface AddSubjectsResult {
+  addedSubjectCount: number;
   annotationNumber: number;
-  body: string;
-  contextFrameId: string;
-  subjectNodeIds: string[];
-  createdAt: string;
-  updatedAt: string;
+  badgeCount: number;
+  nodes: SceneNode[];
 }
 
-interface BadgeRefRecord {
-  schemaVersion: 1;
-  annotationId: string;
-  annotationNumber: number;
-  subjectNodeId: string;
-  contextFrameId: string;
+interface ArrangeResult {
+  movedCount: number;
+  nodes: SceneNode[];
 }
 
-interface ContextRecord {
-  schemaVersion: 1;
-  contextFrameId: string;
-  nextAnnotationNumber: number;
+interface CleanStaleIndexesResult {
+  cleanedEndpointCount: number;
+  removedConnectorRefCount: number;
 }
 
 type ContextDataNode = FrameNode | PageNode;
 
 let loadedFonts = false;
+let validationTargetsByIssueId = new Map<string, string[]>();
 
 const connectRuntime: ConnectRuntime = {
   namespace: NAMESPACE,
-  appendConnectorReference: (node, connectorId) => {
-    appendSharedReference(node, 'connectorRefs', 'connectorIds', connectorId);
-  },
   createId,
   createText,
   ensureContainer,
@@ -72,14 +113,13 @@ const connectRuntime: ConnectRuntime = {
   getVisibleBounds,
   hasGeneratedAncestor,
   postSelectionState,
-  readableName,
   solidPaint,
 };
 
 figma.showUI(__html__, {
   title: 'Flow Annotator',
   width: 360,
-  height: 520,
+  height: 560,
   themeColors: true,
 });
 
@@ -117,9 +157,77 @@ async function handleMessage(message: PluginMessage): Promise<void> {
       return;
     }
 
-    const created = createFlowConnector(message.flowAction, connectRuntime);
-    selectAndZoom([created]);
-    postStatus('success', 'Created one flow connector.');
+    if (message.type === 'add-subject-nodes') {
+      const result = addSubjectNodesToAnnotation();
+      selectAndZoom(result.nodes);
+      postStatus(
+        'success',
+        `Added ${result.addedSubjectCount} subject node(s) to annotation #${result.annotationNumber} with ${result.badgeCount} new badge(s).`,
+      );
+      return;
+    }
+
+    if (message.type === 'arrange-badges') {
+      const result = arrangeBadgesForSelectedSubjects();
+      selectAndZoom(result.nodes);
+      postStatus('success', `Arranged ${result.movedCount} annotation badge(s).`);
+      return;
+    }
+
+    if (message.type === 'arrange-cards') {
+      const result = await arrangeAnnotationCards();
+      selectAndZoom(result.nodes);
+      postStatus('success', `Arranged ${result.movedCount} annotation card(s).`);
+      return;
+    }
+
+    if (message.type === 'create-connector') {
+      const created = createFlowConnector(message.flowAction, connectRuntime);
+      selectAndZoom([created]);
+      postStatus('success', 'Created or updated one flow connector.');
+      return;
+    }
+
+    if (message.type === 'refresh-connectors') {
+      const result = await refreshFlowConnectors(connectRuntime);
+      if (result.nodes.length > 0) {
+        selectAndZoom(result.nodes);
+      }
+      postStatus(
+        result.failedCount === 0 ? 'success' : 'error',
+        formatRefreshConnectorsStatus(result),
+      );
+      return;
+    }
+
+    if (message.type === 'swap-connector-endpoints') {
+      swapPendingConnectorEndpoints(connectRuntime);
+      postStatus('success', 'Swapped pending Flow Connector endpoints.');
+      return;
+    }
+
+    if (message.type === 'validate-bindings') {
+      const report = validateCurrentPageBindings();
+      postValidationReport(report);
+      postStatus('success', `Validation found ${report.summary.all} issue(s).`);
+      return;
+    }
+
+    if (message.type === 'clean-stale-indexes') {
+      const result = cleanStaleIndexes();
+      const report = validateCurrentPageBindings();
+      postValidationReport(report);
+      postStatus(
+        'success',
+        `Cleaned stale indexes on ${result.cleanedEndpointCount} Flow Endpoint(s); removed ${result.removedConnectorRefCount} stale connector reference(s).`,
+      );
+      return;
+    }
+
+    if (message.type === 'locate-validation-issue') {
+      await locateValidationIssue(message.issueId);
+      return;
+    }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown plugin error.';
     figma.notify(errorMessage);
@@ -129,72 +237,271 @@ async function handleMessage(message: PluginMessage): Promise<void> {
   }
 }
 
-function createAnnotations(bodyValue: string): AnnotationCreationResult {
-  const body = bodyValue.trim();
-  if (body.length === 0) {
-    throw new Error('Annotation Body is required.');
-  }
+function validateCurrentPageBindings(): ValidationReport {
+  const pageNodes = collectCurrentPageNodes();
+  const allNodes = [figma.currentPage, ...pageNodes];
+  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
+  const cards = annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
+  const badges = annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
+  const subjects: AnnotationValidationSubjectInput[] = pageNodes.map((node) => ({
+    annotationIds: readReferenceIds(node, SHARED_PLUGIN_DATA.keys.annotationRefs, 'annotationIds'),
+    nodeId: node.id,
+    ...(node.absoluteBoundingBox === null ? {} : { rect: node.absoluteBoundingBox }),
+  }));
+  const contexts: AnnotationValidationContextInput[] = allNodes.map((node) => ({
+    nodeId: node.id,
+    ...('absoluteBoundingBox' in node && node.absoluteBoundingBox !== null ? { rect: node.absoluteBoundingBox } : {}),
+  }));
+  const annotationReport = validateAnnotationBindings({
+    badges,
+    cards,
+    contexts,
+    subjects,
+  });
+  const connectorRecords = getFlowConnectorValidationRecords();
+  const connectorReferenceInput = getFlowConnectorReferenceValidationInput(pageNodes, connectorRecords);
+  const connectorReport = validateFlowConnectorReferences(connectorReferenceInput);
+  const routeReport = validateFlowConnectorRouteGeometry(
+    getFlowConnectorRouteValidationInput(pageNodes, connectorRecords),
+  );
+  const report = mergeValidationReports([annotationReport, connectorReport, routeReport]);
 
-  const subjects = figma.currentPage.selection.filter((node) => !hasGeneratedAncestor(node));
-  if (subjects.length === 0) {
-    throw new Error('Select one or more non-generated Subject Nodes.');
-  }
+  validationTargetsByIssueId = new Map(report.issues.map((issue) => [issue.id, issue.locationNodeIds]));
+  return report;
+}
 
-  const contextNode = findAnnotationContextNode(subjects);
-  const contextFrameId = contextNode.id;
-  const subjectBounds = subjects.map(getVisibleBounds);
-  const annotationBounds = unionRects(subjectBounds);
-  const annotationNumber = allocateNextAnnotationNumber(contextNode);
-  const container = ensureContainer(ANNOTATIONS_CONTAINER_NAME);
-  const now = new Date().toISOString();
-  const annotationId = createId('annotation');
-  const record: AnnotationRecord = {
-    schemaVersion: 1,
-    id: annotationId,
-    annotationNumber,
-    body,
-    contextFrameId,
-    subjectNodeIds: subjects.map((subject) => subject.id),
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const card = createAnnotationCard(container, subjects, annotationBounds, record);
-  card.setSharedPluginData(NAMESPACE, 'kind', 'annotation-card');
-  card.setSharedPluginData(NAMESPACE, 'annotation', JSON.stringify(record));
-
-  const badges = subjects.map((subject, index) => {
-    const badgeRef: BadgeRefRecord = {
-      schemaVersion: 1,
-      annotationId,
-      annotationNumber,
-      subjectNodeId: subject.id,
-      contextFrameId,
-    };
-    const badge = createAnnotationBadge(container, subjectBounds[index], subject, record);
-    badge.setSharedPluginData(NAMESPACE, 'kind', 'annotation-badge');
-    badge.setSharedPluginData(NAMESPACE, 'badgeRef', JSON.stringify(badgeRef));
-    appendSharedReference(subject, 'annotationRefs', 'annotationIds', annotationId);
-    return badge;
+function cleanStaleIndexes(): CleanStaleIndexesResult {
+  const pageNodes = collectCurrentPageNodes();
+  const connectorInput = getFlowConnectorReferenceValidationInput(pageNodes, getFlowConnectorValidationRecords());
+  const plan = buildCleanStaleIndexesPlan({
+    endpoints: connectorInput.endpoints,
+    liveConnectorIds: connectorInput.connectors.map((connector) => connector.record.id),
   });
 
-  bringBadgesToFront(container);
-  ensureLayerOrder();
+  applyCleanStaleIndexesPlan(plan, new Map(pageNodes.map((node): [string, BaseNode] => [node.id, node])));
   return {
-    annotationNumber,
-    badgeCount: badges.length,
-    nodes: [card, ...badges],
+    cleanedEndpointCount: plan.cleanedEndpointNodeIds.length,
+    removedConnectorRefCount: plan.removedConnectorIds.length,
   };
 }
 
-function createAnnotationCard(
-  container: FrameNode,
-  subjects: SceneNode[],
-  bounds: Rect,
-  record: AnnotationRecord,
-): FrameNode {
+function applyCleanStaleIndexesPlan(plan: CleanStaleIndexesPlan, existingNodes: Map<string, BaseNode>): void {
+  plan.operations.forEach((operation) => {
+    if (operation.type !== 'set-shared-plugin-data') {
+      throw new Error(`Clean Stale Indexes cannot apply ${operation.type}.`);
+    }
+
+    const node = resolvePlanTarget(operation.target, {
+      containers: new Map(),
+      createdNodes: new Map(),
+      existingNodes,
+    });
+    writeSharedPluginData(node, operation);
+  });
+}
+
+async function locateValidationIssue(issueId: string): Promise<void> {
+  const nodeIds = validationTargetsByIssueId.get(issueId);
+  if (nodeIds === undefined) {
+    throw new Error('Validation issue is no longer available. Run Validate again.');
+  }
+
+  const nodes = await getExistingSceneNodes(nodeIds);
+  if (nodes.length === 0) {
+    throw new Error('No live Figma nodes are available for this validation issue.');
+  }
+
+  selectAndZoom(nodes);
+  postStatus('success', `Located ${nodes.length} validation object(s).`);
+}
+
+function createAnnotations(bodyValue: string): AnnotationCreationResult {
+  const subjects = figma.currentPage.selection.filter((node) => !hasGeneratedAncestor(node));
+  const contextNode = findAnnotationContextNode(subjects);
+  const contextFrameId = contextNode.id;
+  const annotationNumber = getNextAnnotationNumber(contextNode);
+  const now = new Date().toISOString();
+  const plan = buildCreateAnnotationPlan({
+    annotationId: createId('annotation'),
+    annotationNumber,
+    body: bodyValue,
+    contextFrameId,
+    now,
+    subjects: subjects.map((subject) => ({
+      bounds: getVisibleBounds(subject),
+      existingAnnotationRefCount: readReferenceIds(subject, 'annotationRefs', 'annotationIds').length,
+      id: subject.id,
+      name: subject.name,
+    })),
+  });
+  const applied = applyAnnotationPlan(plan, new Map([
+    [contextNode.id, contextNode],
+    ...subjects.map((subject): [string, BaseNode] => [subject.id, subject]),
+  ]));
+
+  ensureLayerOrder();
+  return {
+    annotationNumber: plan.annotationNumber,
+    badgeCount: plan.badgeCount,
+    nodes: applied.nodes,
+  };
+}
+
+function addSubjectNodesToAnnotation(): AddSubjectsResult {
+  const annotationCard = getSelectedAnnotationCard();
+  const annotation = readAnnotationRecord(annotationCard);
+  const subjects = figma.currentPage.selection.filter((node) => node !== annotationCard && !hasGeneratedAncestor(node));
+  const annotationsContainer = ensureContainer(ANNOTATIONS_CONTAINER_NAME);
+  const now = new Date().toISOString();
+  const plan = buildAddAnnotationSubjectsPlan({
+    annotation,
+    annotationCardNodeId: annotationCard.id,
+    existingBadgeSubjectNodeIds: getBadgeSubjectNodeIds(annotationsContainer, annotation.id),
+    now,
+    subjects: subjects.map((subject) => ({
+      bounds: getVisibleBounds(subject),
+      existingAnnotationRefCount: readReferenceIds(subject, 'annotationRefs', 'annotationIds').length,
+      id: subject.id,
+      name: subject.name,
+    })),
+  });
+  const existingNodes = new Map<string, BaseNode>([
+    [annotationCard.id, annotationCard],
+    ...subjects.map((subject): [string, BaseNode] => [subject.id, subject]),
+  ]);
+  const applied = applyAnnotationPlan(plan, existingNodes);
+
+  ensureLayerOrder();
+  return {
+    addedSubjectCount: plan.addedSubjectNodeIds.length,
+    annotationNumber: plan.annotationNumber,
+    badgeCount: plan.badgeCount,
+    nodes: applied.nodes.length > 0 ? applied.nodes : [annotationCard],
+  };
+}
+
+function arrangeBadgesForSelectedSubjects(): ArrangeResult {
+  const subjects = figma.currentPage.selection.filter((node) => !hasGeneratedAncestor(node));
+  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
+  if (annotationsContainer === null) {
+    throw new Error('No Annotation Badges found to arrange.');
+  }
+
+  const badgeRecords = getAnnotationBadgeRecords(annotationsContainer);
+  const plan = buildArrangeAnnotationBadgesPlan({
+    subjects: subjects.map((subject) => ({
+      badges: badgeRecords.filter((badge) => badge.record.subjectNodeId === subject.id).map((badge) => ({
+        annotationNumber: badge.record.annotationNumber,
+        nodeId: badge.node.id,
+      })),
+      bounds: getVisibleBounds(subject),
+      id: subject.id,
+    })).filter((subject) => subject.badges.length > 0),
+  });
+  const existingNodes = new Map<string, BaseNode>(badgeRecords.map((badge) => [badge.node.id, badge.node]));
+  const applied = applyAnnotationPlan(plan, existingNodes);
+  bringBadgesToFront(annotationsContainer);
+  return {
+    movedCount: plan.movedBadgeNodeIds.length,
+    nodes: applied.nodes,
+  };
+}
+
+async function arrangeAnnotationCards(): Promise<ArrangeResult> {
+  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
+  if (annotationsContainer === null) {
+    throw new Error('No Annotation Cards found to arrange.');
+  }
+
+  const cardRecords = getAnnotationCardRecords(annotationsContainer);
+  if (cardRecords.length === 0) {
+    throw new Error('No Annotation Cards found to arrange.');
+  }
+
+  const existingNodes = new Map<string, BaseNode>(cardRecords.map((card) => [card.node.id, card.node]));
+  const movedNodes: SceneNode[] = [];
+  for (const cards of groupCardsByContext(cardRecords).values()) {
+    const plan = buildArrangeAnnotationCardsPlan({
+      basePosition: await getCardArrangeBasePosition(cards),
+      cards: cards.map((card) => ({
+        annotationNumber: card.record.annotationNumber,
+        nodeId: card.node.id,
+        rect: localRect(card.node),
+      })),
+    });
+    movedNodes.push(...applyAnnotationPlan(plan, existingNodes).nodes);
+  }
+
+  ensureLayerOrder();
+  return {
+    movedCount: movedNodes.length,
+    nodes: movedNodes,
+  };
+}
+
+function applyAnnotationPlan(
+  plan: CreateAnnotationPlan | AddAnnotationSubjectsPlan | ArrangeAnnotationBadgesPlan | ArrangeAnnotationCardsPlan,
+  existingNodes: Map<string, BaseNode>,
+): { nodes: SceneNode[] } {
+  const containers = new Map<string, FrameNode>();
+  const createdNodes = new Map<string, SceneNode>();
+  const movedNodes: SceneNode[] = [];
+
+  plan.operations.forEach((operation) => {
+    if (operation.type === 'ensure-container') {
+      containers.set(operation.ref, ensureContainer(operation.name));
+      return;
+    }
+
+    if (operation.type === 'set-shared-plugin-data') {
+      const node = resolvePlanTarget(operation.target, { containers, createdNodes, existingNodes });
+      writeSharedPluginData(node, operation);
+      return;
+    }
+
+    if (operation.type === 'create-annotation-card') {
+      const container = resolveContainer(operation.containerRef, containers);
+      createdNodes.set(operation.ref, createAnnotationCard(container, operation));
+      return;
+    }
+
+    if (operation.type === 'create-annotation-badge') {
+      const container = resolveContainer(operation.containerRef, containers);
+      createdNodes.set(operation.ref, createAnnotationBadge(container, operation));
+      return;
+    }
+
+    if (operation.type === 'append-shared-reference') {
+      appendAnnotationReference(existingNodes, operation);
+      return;
+    }
+
+    if (operation.type === 'move-node') {
+      movedNodes.push(moveExistingNode(existingNodes, operation));
+      return;
+    }
+
+    throw new Error(`Annotation adapter cannot apply ${operation.type}.`);
+  });
+
+  const container = containers.get('annotations');
+  if (container !== undefined) {
+    bringBadgesToFront(container);
+  }
+  return {
+    nodes: 'createdNodeRefs' in plan ? plan.createdNodeRefs.map((ref) => {
+      const node = createdNodes.get(ref);
+      if (node === undefined) {
+        throw new Error(`Annotation plan did not create ${ref}.`);
+      }
+      return node;
+    }) : movedNodes,
+  };
+}
+
+function createAnnotationCard(container: FrameNode, operation: CreateAnnotationCardOperation): FrameNode {
   const card = figma.createFrame();
-  card.name = `FFA Annotation Card #${record.annotationNumber}`;
+  card.name = operation.name;
   card.fills = [solidPaint(1, 1, 1)];
   card.strokes = [solidPaint(0.21, 0.35, 0.55)];
   card.strokeWeight = 1;
@@ -203,25 +510,26 @@ function createAnnotationCard(
   card.resize(CARD_WIDTH, 128);
   container.appendChild(card);
 
-  const title = createText(`Annotation Number ${record.annotationNumber}`, `Annotation #${record.annotationNumber}`, 13, solidPaint(0.07, 0.12, 0.2), CARD_WIDTH - 32);
+  const title = createText(`Annotation Number ${operation.annotationNumber}`, `Annotation #${operation.annotationNumber}`, 13, solidPaint(0.07, 0.12, 0.2), CARD_WIDTH - 32);
   card.appendChild(title);
   title.x = 16;
   title.y = 14;
 
-  const subjectLabel = createText('Subject Nodes', `Subjects: ${readableSubjectNames(subjects)}`, 11, solidPaint(0.34, 0.4, 0.49), CARD_WIDTH - 32);
+  const subjectLabel = createText('Subject Nodes', `Subjects: ${operation.subjectSummary}`, 11, solidPaint(0.34, 0.4, 0.49), CARD_WIDTH - 32);
   card.appendChild(subjectLabel);
   subjectLabel.x = 16;
   subjectLabel.y = 38;
 
-  const body = createText('Annotation Body', record.body, 12, solidPaint(0.1, 0.1, 0.11), CARD_WIDTH - 32);
+  const body = createText('Annotation Body', operation.body, 12, solidPaint(0.1, 0.1, 0.11), CARD_WIDTH - 32);
   card.appendChild(body);
   body.x = 16;
   body.y = 64;
   card.resize(CARD_WIDTH, Math.max(112, body.y + body.height + 18));
 
-  const position = findOpenCardPosition(container, card, {
-    x: bounds.x,
-    y: bounds.y + bounds.height + CARD_OFFSET_Y,
+  const position = planAnnotationCardPosition({
+    basePosition: operation.basePosition,
+    cardRect: localRect(card),
+    existingCardRects: getExistingAnnotationCardRects(container, card),
   });
   card.x = position.x;
   card.y = position.y;
@@ -229,15 +537,9 @@ function createAnnotationCard(
   return card;
 }
 
-function createAnnotationBadge(
-  container: FrameNode,
-  bounds: Rect,
-  subject: SceneNode,
-  record: AnnotationRecord,
-): FrameNode {
-  const existingRefs = readReferenceIds(subject, 'annotationRefs', 'annotationIds');
+function createAnnotationBadge(container: FrameNode, operation: CreateAnnotationBadgeOperation): FrameNode {
   const badge = figma.createFrame();
-  badge.name = `FFA Annotation Badge #${record.annotationNumber}`;
+  badge.name = operation.name;
   badge.fills = [solidPaint(0.88, 0.22, 0.2)];
   badge.strokes = [solidPaint(1, 1, 1)];
   badge.strokeWeight = 2;
@@ -245,10 +547,10 @@ function createAnnotationBadge(
   badge.clipsContent = false;
   badge.resize(BADGE_SIZE, BADGE_SIZE);
   container.appendChild(badge);
-  badge.x = bounds.x + bounds.width - BADGE_SIZE / 2 + existingRefs.length * (BADGE_SIZE + 4);
-  badge.y = bounds.y - BADGE_SIZE / 2;
+  badge.x = operation.position.x;
+  badge.y = operation.position.y;
 
-  const number = createText('Annotation Badge Number', String(record.annotationNumber), 12, solidPaint(1, 1, 1), BADGE_SIZE);
+  const number = createText('Annotation Badge Number', String(operation.annotationNumber), 12, solidPaint(1, 1, 1), BADGE_SIZE);
   number.textAutoResize = 'WIDTH_AND_HEIGHT';
   badge.appendChild(number);
   number.x = (BADGE_SIZE - number.width) / 2;
@@ -257,36 +559,397 @@ function createAnnotationBadge(
   return badge;
 }
 
-function findOpenCardPosition(container: FrameNode, card: FrameNode, basePosition: Point): Point {
-  let candidate = {
-    x: basePosition.x,
-    y: basePosition.y,
-  };
-  const existingCards = container.children.filter(
-    (child): child is FrameNode =>
-      child !== card &&
-      child.type === 'FRAME' &&
-      child.getSharedPluginData(NAMESPACE, 'kind') === 'annotation-card',
-  );
+function getSelectedAnnotationCard(): FrameNode {
+  const selectedCards = figma.currentPage.selection.filter(isAnnotationCardNode);
+  if (selectedCards.length !== 1) {
+    throw new Error('Select exactly one Annotation Card root and one or more Subject Nodes.');
+  }
+  return selectedCards[0];
+}
 
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const candidateRect = {
-      x: candidate.x,
-      y: candidate.y,
-      width: card.width,
-      height: card.height,
-    };
-    const conflict = existingCards.find((existingCard) => rectsOverlap(candidateRect, localRect(existingCard)));
-    if (conflict === undefined) {
-      return candidate;
+function isAnnotationCardNode(node: SceneNode): node is FrameNode {
+  return (
+    node.type === 'FRAME' &&
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === VISUAL_NODE_KINDS.annotationCard
+  );
+}
+
+function readAnnotationRecord(node: BaseNode): AnnotationRecord {
+  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation));
+  if (
+    !isRecord(parsed) ||
+    parsed.schemaVersion !== 1 ||
+    typeof parsed.id !== 'string' ||
+    !isPositiveInteger(parsed.annotationNumber) ||
+    typeof parsed.body !== 'string' ||
+    parsed.body.trim().length === 0 ||
+    typeof parsed.contextFrameId !== 'string' ||
+    !Array.isArray(parsed.subjectNodeIds) ||
+    typeof parsed.createdAt !== 'string' ||
+    typeof parsed.updatedAt !== 'string'
+  ) {
+    throw new Error('Selected Annotation Card does not contain a complete Annotation record.');
+  }
+
+  return {
+    schemaVersion: 1,
+    id: parsed.id,
+    annotationNumber: parsed.annotationNumber,
+    ...(typeof parsed.title === 'string' ? { title: parsed.title } : {}),
+    body: parsed.body,
+    ...(typeof parsed.kind === 'string' ? { kind: parsed.kind } : {}),
+    contextFrameId: parsed.contextFrameId,
+    subjectNodeIds: parsed.subjectNodeIds.filter((value): value is string => typeof value === 'string'),
+    createdAt: parsed.createdAt,
+    updatedAt: parsed.updatedAt,
+  };
+}
+
+function readBadgeRefRecord(node: BaseNode): BadgeRefRecord | null {
+  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.badgeRef));
+  if (
+    !isRecord(parsed) ||
+    parsed.schemaVersion !== 1 ||
+    typeof parsed.annotationId !== 'string' ||
+    !isPositiveInteger(parsed.annotationNumber) ||
+    typeof parsed.subjectNodeId !== 'string' ||
+    typeof parsed.contextFrameId !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    annotationId: parsed.annotationId,
+    annotationNumber: parsed.annotationNumber,
+    subjectNodeId: parsed.subjectNodeId,
+    contextFrameId: parsed.contextFrameId,
+  };
+}
+
+function getAnnotationBadgeRecords(container: FrameNode): { node: FrameNode; record: BadgeRefRecord }[] {
+  return container.children.flatMap((child) => {
+    if (
+      child.type !== 'FRAME' ||
+      child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.annotationBadge
+    ) {
+      return [];
     }
-    candidate = {
-      x: candidate.x,
-      y: localRect(conflict).y + localRect(conflict).height + CARD_GAP,
+
+    const record = readBadgeRefRecord(child);
+    return record === null ? [] : [{ node: child, record }];
+  });
+}
+
+function getBadgeSubjectNodeIds(container: FrameNode, annotationId: string): string[] {
+  return getAnnotationBadgeRecords(container)
+    .filter((badge) => badge.record.annotationId === annotationId)
+    .map((badge) => badge.record.subjectNodeId);
+}
+
+function getAnnotationCardRecords(container: FrameNode): { node: FrameNode; record: AnnotationRecord }[] {
+  return container.children.flatMap((child) => {
+    if (!isAnnotationCardNode(child)) {
+      return [];
+    }
+    return [{ node: child, record: readAnnotationRecord(child) }];
+  });
+}
+
+function getAnnotationValidationCards(container: FrameNode): AnnotationValidationCardInput[] {
+  return container.children.flatMap((child) => {
+    if (!isAnnotationCardNode(child) || child.absoluteBoundingBox === null) {
+      return [];
+    }
+    const record = readAnnotationValidationRecord(child);
+    return record === null ? [] : [{
+      nodeId: child.id,
+      record,
+      rect: child.absoluteBoundingBox,
+    }];
+  });
+}
+
+function getAnnotationValidationBadges(container: FrameNode): AnnotationValidationBadgeInput[] {
+  return container.children.flatMap((child) => {
+    if (
+      child.type !== 'FRAME' ||
+      child.absoluteBoundingBox === null ||
+      child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.annotationBadge
+    ) {
+      return [];
+    }
+    const record = readBadgeRefRecord(child);
+    return record === null ? [] : [{
+      nodeId: child.id,
+      record,
+      rect: child.absoluteBoundingBox,
+    }];
+  });
+}
+
+function readAnnotationValidationRecord(node: BaseNode): AnnotationValidationRecord | null {
+  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation));
+  if (
+    !isRecord(parsed) ||
+    typeof parsed.id !== 'string' ||
+    !isPositiveInteger(parsed.annotationNumber) ||
+    typeof parsed.body !== 'string' ||
+    typeof parsed.contextFrameId !== 'string' ||
+    !Array.isArray(parsed.subjectNodeIds)
+  ) {
+    return null;
+  }
+
+  return {
+    id: parsed.id,
+    annotationNumber: parsed.annotationNumber,
+    body: parsed.body,
+    contextFrameId: parsed.contextFrameId,
+    subjectNodeIds: parsed.subjectNodeIds.filter((value): value is string => typeof value === 'string'),
+  };
+}
+
+function getFlowConnectorValidationRecords(): { node: GroupNode; record: FlowConnectorRecord }[] {
+  const connectorsContainer = findContainer(CONNECTORS_CONTAINER_NAME);
+  return connectorsContainer === null
+    ? []
+    : connectorsContainer.children.flatMap((child) => {
+        if (
+          child.type !== 'GROUP' ||
+          child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.flowConnector
+        ) {
+          return [];
+        }
+
+        const record = readFlowConnectorValidationRecord(child);
+        return record === null ? [] : [{ node: child, record }];
+      });
+}
+
+function getFlowConnectorReferenceValidationInput(
+  pageNodes: SceneNode[],
+  connectorRecords: { node: GroupNode; record: FlowConnectorRecord }[] = getFlowConnectorValidationRecords(),
+): ValidateFlowConnectorReferencesInput {
+  const connectors: FlowConnectorValidationConnectorInput[] = connectorRecords.map((connector) => ({
+    nodeId: connector.node.id,
+    record: connector.record,
+  }));
+  const endpoints: FlowConnectorValidationEndpointInput[] = pageNodes.map((node) => ({
+    connectorIds: readReferenceIds(node, SHARED_PLUGIN_DATA.keys.connectorRefs, 'connectorIds'),
+    isEligibleFlowEndpoint: isFlowEndpointEligibleNode(node),
+    nodeId: node.id,
+  }));
+
+  return { connectors, endpoints };
+}
+
+function getFlowConnectorRouteValidationInput(
+  pageNodes: SceneNode[],
+  connectorRecords: { node: GroupNode; record: FlowConnectorRecord }[],
+): ValidateFlowConnectorRouteGeometryInput {
+  const nodesById = new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node]));
+  const connectors: FlowConnectorRouteValidationConnectorInput[] = connectorRecords.map((connector) => {
+    const startNode = nodesById.get(connector.record.start.nodeId);
+    const endNode = nodesById.get(connector.record.end.nodeId);
+    const labelRect = getFlowActionLabelRect(connector.node);
+    const baseInput = {
+      nodeId: connector.node.id,
+      record: connector.record,
+      ...(labelRect === undefined ? {} : { labelRect }),
+    };
+
+    if (
+      startNode === undefined ||
+      endNode === undefined ||
+      startNode.absoluteBoundingBox === null ||
+      endNode.absoluteBoundingBox === null
+    ) {
+      return {
+        ...baseInput,
+        obstacles: [],
+      };
+    }
+
+    return {
+      ...baseInput,
+      endRect: getVisibleBounds(endNode),
+      obstacles: collectConnectorObstacles(startNode, endNode, connectRuntime),
+      startRect: getVisibleBounds(startNode),
+    };
+  });
+
+  return { connectors };
+}
+
+function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {
+  const label = connectorRoot.children.find((child) =>
+    child.name === 'FFA Flow Action Label' &&
+    child.visible !== false &&
+    'absoluteBoundingBox' in child &&
+    child.absoluteBoundingBox !== null,
+  );
+  return label === undefined || !('absoluteBoundingBox' in label) || label.absoluteBoundingBox === null
+    ? undefined
+    : label.absoluteBoundingBox;
+}
+
+function readFlowConnectorValidationRecord(node: BaseNode): FlowConnectorRecord | null {
+  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.connector));
+  if (
+    !isRecord(parsed) ||
+    parsed.schemaVersion !== 1 ||
+    typeof parsed.id !== 'string' ||
+    !isFlowEndpointRecordValue(parsed.start) ||
+    !isFlowEndpointRecordValue(parsed.end) ||
+    typeof parsed.ownerContextFrameId !== 'string' ||
+    !(typeof parsed.flowAction === 'string' || parsed.flowAction === null) ||
+    typeof parsed.createdAt !== 'string' ||
+    typeof parsed.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    id: parsed.id,
+    start: parsed.start,
+    end: parsed.end,
+    ownerContextFrameId: parsed.ownerContextFrameId,
+    flowAction: parsed.flowAction,
+    ...(isRouteCacheRecordValue(parsed.routeCache) ? { routeCache: parsed.routeCache } : {}),
+    createdAt: parsed.createdAt,
+    updatedAt: parsed.updatedAt,
+  };
+}
+
+function isFlowEndpointEligibleNode(node: SceneNode): boolean {
+  return (
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === '' &&
+    !hasGeneratedAncestor(node)
+  );
+}
+
+function isFlowEndpointRecordValue(value: unknown): value is { nodeId: string; contextFrameId: string } {
+  return isRecord(value) && typeof value.nodeId === 'string' && typeof value.contextFrameId === 'string';
+}
+
+function isRouteCacheRecordValue(value: unknown): value is { schemaVersion: 1; points: Point[] } {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    Array.isArray(value.points) &&
+    value.points.every((point) => isRecord(point) && typeof point.x === 'number' && typeof point.y === 'number')
+  );
+}
+
+function groupCardsByContext(
+  cards: { node: FrameNode; record: AnnotationRecord }[],
+): Map<string, { node: FrameNode; record: AnnotationRecord }[]> {
+  const groups = new Map<string, { node: FrameNode; record: AnnotationRecord }[]>();
+  cards.forEach((card) => {
+    const existing = groups.get(card.record.contextFrameId) ?? [];
+    existing.push(card);
+    groups.set(card.record.contextFrameId, existing);
+  });
+  return groups;
+}
+
+async function getCardArrangeBasePosition(cards: { node: FrameNode; record: AnnotationRecord }[]): Promise<Point> {
+  const contextNode = await figma.getNodeByIdAsync(cards[0].record.contextFrameId);
+  if (contextNode !== null && 'absoluteBoundingBox' in contextNode && contextNode.absoluteBoundingBox !== null) {
+    return {
+      x: contextNode.absoluteBoundingBox.x,
+      y: contextNode.absoluteBoundingBox.y + contextNode.absoluteBoundingBox.height + 40,
     };
   }
 
-  return candidate;
+  const currentRects = cards.map((card) => localRect(card.node));
+  return {
+    x: Math.min(...currentRects.map((rect) => rect.x)),
+    y: Math.min(...currentRects.map((rect) => rect.y)),
+  };
+}
+
+function getExistingAnnotationCardRects(container: FrameNode, card: FrameNode): Rect[] {
+  return container.children.filter(
+    (child): child is FrameNode =>
+      child !== card &&
+      child.type === 'FRAME' &&
+      child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === VISUAL_NODE_KINDS.annotationCard,
+  ).map(localRect);
+}
+
+function resolveContainer(ref: string, containers: Map<string, FrameNode>): FrameNode {
+  const container = containers.get(ref);
+  if (container === undefined) {
+    throw new Error(`Annotation plan references missing container ${ref}.`);
+  }
+  return container;
+}
+
+function resolvePlanTarget(
+  target: DocumentNodeTarget,
+  refs: {
+    containers: Map<string, FrameNode>;
+    createdNodes: Map<string, SceneNode>;
+    existingNodes: Map<string, BaseNode>;
+  },
+): BaseNode {
+  if (target.kind === 'container') {
+    return resolveContainer(target.ref, refs.containers);
+  }
+
+  if (target.kind === 'created-node') {
+    const node = refs.createdNodes.get(target.ref);
+    if (node === undefined) {
+      throw new Error(`Annotation plan references missing created node ${target.ref}.`);
+    }
+    return node;
+  }
+
+  const node = refs.existingNodes.get(target.nodeId);
+  if (node === undefined) {
+    throw new Error(`Annotation plan references missing existing node ${target.nodeId}.`);
+  }
+  return node;
+}
+
+function writeSharedPluginData(node: BaseNode, operation: SetSharedPluginDataOperation): void {
+  node.setSharedPluginData(
+    NAMESPACE,
+    operation.key,
+    serializeSharedPluginDataValue(operation.value),
+  );
+}
+
+function appendAnnotationReference(
+  existingNodes: Map<string, BaseNode>,
+  operation: AppendSharedReferenceOperation,
+): void {
+  if (operation.key !== SHARED_PLUGIN_DATA.keys.annotationRefs || operation.listKey !== 'annotationIds') {
+    throw new Error('Annotation adapter can only apply annotation reverse references.');
+  }
+
+  const node = existingNodes.get(operation.targetNodeId);
+  if (node === undefined) {
+    throw new Error(`Annotation plan references missing Subject Node ${operation.targetNodeId}.`);
+  }
+  const record = mergeAnnotationReferenceIds(
+    readReferenceIds(node, SHARED_PLUGIN_DATA.keys.annotationRefs, 'annotationIds'),
+    operation.id,
+  );
+  node.setSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotationRefs, JSON.stringify(record));
+}
+
+function moveExistingNode(existingNodes: Map<string, BaseNode>, operation: MoveNodeOperation): SceneNode {
+  const node = existingNodes.get(operation.targetNodeId);
+  if (node === undefined || !('x' in node) || !('y' in node)) {
+    throw new Error(`Annotation plan references missing movable node ${operation.targetNodeId}.`);
+  }
+  node.x = operation.position.x;
+  node.y = operation.position.y;
+  return node as SceneNode;
 }
 
 function findAnnotationContextNode(subjects: SceneNode[]): ContextDataNode {
@@ -326,14 +989,6 @@ function frameAncestorChain(node: SceneNode): FrameNode[] {
   return chain;
 }
 
-function readableSubjectNames(subjects: SceneNode[]): string {
-  const names = subjects.map((subject) => readableName(subject.name));
-  if (names.length <= 3) {
-    return names.join(', ');
-  }
-  return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
-}
-
 function ensureContainer(name: string): FrameNode {
   const existing = findContainer(name);
   if (existing !== null) {
@@ -348,7 +1003,6 @@ function ensureContainer(name: string): FrameNode {
   container.resize(1, 1);
   container.x = 0;
   container.y = 0;
-  container.setSharedPluginData(NAMESPACE, 'kind', 'container');
   ensureLayerOrder();
   return container;
 }
@@ -358,12 +1012,30 @@ function findContainer(name: string): FrameNode | null {
     if (
       child.type === 'FRAME' &&
       child.name === name &&
-      child.getSharedPluginData(NAMESPACE, 'kind') === 'container'
+      child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === VISUAL_NODE_KINDS.container
     ) {
       return child;
     }
   }
   return null;
+}
+
+function collectCurrentPageNodes(): SceneNode[] {
+  const result: SceneNode[] = [];
+  const queue = [...figma.currentPage.children];
+
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (node === undefined) {
+      continue;
+    }
+    result.push(node);
+    if ('children' in node) {
+      queue.push(...node.children);
+    }
+  }
+
+  return result;
 }
 
 function ensureLayerOrder(): void {
@@ -385,23 +1057,21 @@ function ensureLayerOrder(): void {
 
 function bringBadgesToFront(container: FrameNode): void {
   const badges = container.children.filter(
-    (child) => child.getSharedPluginData(NAMESPACE, 'kind') === 'annotation-badge',
+    (child) => child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === VISUAL_NODE_KINDS.annotationBadge,
   );
   badges.forEach((badge) => {
     container.appendChild(badge);
   });
 }
 
-function allocateNextAnnotationNumber(contextNode: ContextDataNode): number {
+function getNextAnnotationNumber(contextNode: ContextDataNode): number {
   const contextFrameId = contextNode.id;
   const contextRecord = readContextRecord(contextNode, contextFrameId);
-  const annotationNumber = contextRecord?.nextAnnotationNumber ?? getSeededNextAnnotationNumber(contextFrameId);
-  writeContextRecord(contextNode, contextFrameId, annotationNumber + 1);
-  return annotationNumber;
+  return contextRecord?.nextAnnotationNumber ?? getSeededNextAnnotationNumber(contextFrameId);
 }
 
 function readContextRecord(contextNode: ContextDataNode, contextFrameId: string): ContextRecord | null {
-  const parsed = parseJson(contextNode.getSharedPluginData(NAMESPACE, 'context'));
+  const parsed = parseJson(contextNode.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.context));
   if (
     !isRecord(parsed) ||
     parsed.schemaVersion !== 1 ||
@@ -418,15 +1088,6 @@ function readContextRecord(contextNode: ContextDataNode, contextFrameId: string)
   };
 }
 
-function writeContextRecord(contextNode: ContextDataNode, contextFrameId: string, nextAnnotationNumber: number): void {
-  const record: ContextRecord = {
-    schemaVersion: 1,
-    contextFrameId,
-    nextAnnotationNumber,
-  };
-  contextNode.setSharedPluginData(NAMESPACE, 'context', JSON.stringify(record));
-}
-
 function getSeededNextAnnotationNumber(contextFrameId: string): number {
   const container = findContainer(ANNOTATIONS_CONTAINER_NAME);
   if (container === null) {
@@ -435,11 +1096,11 @@ function getSeededNextAnnotationNumber(contextFrameId: string): number {
 
   let maxNumber = 0;
   container.children.forEach((node) => {
-    if (node.getSharedPluginData(NAMESPACE, 'kind') !== 'annotation-card') {
+    if (node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.annotationCard) {
       return;
     }
 
-    const annotation = parseJson(node.getSharedPluginData(NAMESPACE, 'annotation'));
+    const annotation = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation));
     if (
       isRecord(annotation) &&
       annotation.contextFrameId === contextFrameId &&
@@ -455,26 +1116,8 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1;
 }
 
-function appendSharedReference(
-  node: SceneNode,
-  dataKey: 'annotationRefs' | 'connectorRefs',
-  listKey: 'annotationIds' | 'connectorIds',
-  id: string,
-): void {
-  const existingIds = readReferenceIds(node, dataKey, listKey);
-  const nextIds = existingIds.includes(id) ? existingIds : [...existingIds, id];
-  node.setSharedPluginData(
-    NAMESPACE,
-    dataKey,
-    JSON.stringify({
-      schemaVersion: 1,
-      [listKey]: nextIds,
-    }),
-  );
-}
-
 function readReferenceIds(
-  node: SceneNode,
+  node: BaseNode,
   dataKey: 'annotationRefs' | 'connectorRefs',
   listKey: 'annotationIds' | 'connectorIds',
 ): string[] {
@@ -527,15 +1170,6 @@ function localRect(node: SceneNode): Rect {
   };
 }
 
-function rectsOverlap(first: Rect, second: Rect): boolean {
-  return (
-    first.x < second.x + second.width &&
-    first.x + first.width > second.x &&
-    first.y < second.y + second.height &&
-    first.y + first.height > second.y
-  );
-}
-
 function findContextFrameId(node: SceneNode): string {
   let current: BaseNode | null = node;
   while (current !== null) {
@@ -550,7 +1184,7 @@ function findContextFrameId(node: SceneNode): string {
 function hasGeneratedAncestor(node: SceneNode): boolean {
   let current: BaseNode | null = node;
   while (current !== null && current.type !== 'PAGE') {
-    if (current.getSharedPluginData(NAMESPACE, 'kind') !== '') {
+    if (current.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !== '') {
       return true;
     }
     current = current.parent;
@@ -596,6 +1230,17 @@ function selectAndZoom(nodes: SceneNode[]): void {
   figma.viewport.scrollAndZoomIntoView(nodes);
 }
 
+async function getExistingSceneNodes(nodeIds: string[]): Promise<SceneNode[]> {
+  const nodes: SceneNode[] = [];
+  for (const nodeId of nodeIds) {
+    const node = await figma.getNodeByIdAsync(nodeId);
+    if (node !== null && node.type !== 'PAGE' && 'absoluteBoundingBox' in node) {
+      nodes.push(node as SceneNode);
+    }
+  }
+  return nodes;
+}
+
 function postStatus(tone: StatusTone, message: string): void {
   figma.ui.postMessage({
     type: 'status',
@@ -607,13 +1252,39 @@ function postStatus(tone: StatusTone, message: string): void {
   }
 }
 
+function postValidationReport(report: ValidationReport): void {
+  figma.ui.postMessage({
+    type: 'validation-report',
+    report,
+  });
+}
+
+function formatRefreshConnectorsStatus(result: {
+  failedCount: number;
+  failures: string[];
+  refreshedCount: number;
+  selectedOnly: boolean;
+}): string {
+  const scope = result.selectedOnly ? 'selected' : 'current-page';
+  if (result.failedCount === 0) {
+    return `Refreshed ${result.refreshedCount} ${scope} Flow Connector(s).`;
+  }
+  const firstFailure = result.failures[0] ?? 'Unknown connector refresh failure.';
+  return `Refreshed ${result.refreshedCount} ${scope} Flow Connector(s); ${result.failedCount} failed. ${firstFailure}`;
+}
+
 function postSelectionState(): void {
   const selected = figma.currentPage.selection;
   const eligibleCount = selected.filter((node) => !hasGeneratedAncestor(node)).length;
-  const pendingConnectorEndpointCount = getPendingConnectorEndpointNodes(connectRuntime).length;
+  const selectedAnnotationCardCount = selected.filter(isAnnotationCardNode).length;
+  const connectState = getConnectSelectionState(connectRuntime);
   figma.ui.postMessage({
     type: 'selection-state',
-    totalCount: pendingConnectorEndpointCount,
+    totalCount: connectState.endpoints.length,
     eligibleCount,
+    selectedAnnotationCardCount,
+    connectorEndpoints: connectState.endpoints,
+    existingConnector: connectState.existingConnector,
+    routingStatus: connectState.routingStatus,
   });
 }

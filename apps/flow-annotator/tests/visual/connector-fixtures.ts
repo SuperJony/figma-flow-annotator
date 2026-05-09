@@ -1,8 +1,12 @@
 import {
   buildConnectorVisualModel,
-  buildOrthogonalRoute,
   type ConnectorVisualModel,
 } from '../../connect';
+import {
+  createFlowConnectorRecord,
+  planConnectorTrunks,
+  routeOrthogonalConnector,
+} from '../../../../packages/core/src/index';
 
 interface FixtureRect {
   x: number;
@@ -12,6 +16,11 @@ interface FixtureRect {
 }
 
 interface ConnectorFixtureDefinition {
+  additionalConnectors?: Array<{
+    end: FixtureRect;
+    flowAction: string;
+    start: FixtureRect;
+  }>;
   description: string;
   end: FixtureRect;
   flowAction: string;
@@ -25,6 +34,7 @@ interface ConnectorFixture {
   html: string;
   routePoints: Array<{ x: number; y: number }>;
   visual: ConnectorVisualModel;
+  visuals: ConnectorVisualModel[];
 }
 
 const SCENE_PADDING = 32;
@@ -48,38 +58,101 @@ export const connectorFixtureDefinitions: ConnectorFixtureDefinition[] = [
     ],
     start: { x: 70, y: 230, width: 120, height: 86 },
   },
+  {
+    additionalConnectors: [
+      {
+        end: { x: 500, y: 200, width: 120, height: 86 },
+        flowAction: 'Choose B',
+        start: { x: 70, y: 318, width: 120, height: 86 },
+      },
+    ],
+    description: 'Two Flow Connectors share the final Connector Trunk and keep labels on branch segments.',
+    end: { x: 500, y: 200, width: 120, height: 86 },
+    flowAction: 'Choose A',
+    name: 'connector-trunk',
+    obstacles: [],
+    start: { x: 70, y: 82, width: 120, height: 86 },
+  },
 ];
 
 export function buildConnectorFixture(definition: ConnectorFixtureDefinition): ConnectorFixture {
-  const routePoints = buildOrthogonalRoute(definition.start, definition.end, definition.obstacles);
-  const visual = buildConnectorVisualModel(routePoints, definition.flowAction);
+  const connectorDefinitions = [
+    { start: definition.start, end: definition.end, flowAction: definition.flowAction },
+    ...(definition.additionalConnectors ?? []),
+  ];
+  const obstacles = definition.obstacles.map((obstacle, index) => ({
+    id: `fixture-obstacle-${index + 1}`,
+    kind: 'annotation-card' as const,
+    rect: obstacle,
+  }));
+  const routePointSets = connectorDefinitions.map((connector) =>
+    routeOrthogonalConnector({
+      startRect: connector.start,
+      endRect: connector.end,
+      obstacles,
+    }).points,
+  );
+  const connectorRecords = connectorDefinitions.map((connector, index) =>
+    createFlowConnectorRecord({
+      connectorId: `fixture-connector-${index + 1}`,
+      end: { contextFrameId: `fixture-end-${index + 1}`, nodeId: rectsEqual(connector.end, definition.end) ? 'fixture-end-main' : `fixture-end-${index + 1}` },
+      flowAction: connector.flowAction,
+      now: '2026-05-09T00:00:00.000Z',
+      ownerContextFrameId: `fixture-start-${index + 1}`,
+      routePoints: routePointSets[index],
+      start: { contextFrameId: `fixture-start-${index + 1}`, nodeId: `fixture-start-${index + 1}` },
+    }),
+  );
+  const trunkAssignments = new Map(
+    planConnectorTrunks({
+      connectors: connectorRecords.map((record) => ({ record })),
+    }).assignments.map((assignment) => [assignment.connectorId, assignment]),
+  );
+  const visuals = connectorDefinitions.map((connector, index) =>
+    buildConnectorVisualModel(routePointSets[index], connector.flowAction, {
+      obstacles,
+      sharedTrunkSegment: trunkAssignments.get(connectorRecords[index].id)?.segment,
+    }),
+  );
+  const routePoints = routePointSets[0];
+  const visual = visuals[0];
   return {
     definition,
-    html: renderConnectorFixture(definition, routePoints, visual),
+    html: renderConnectorFixture(definition, routePointSets, visuals),
     routePoints,
     visual,
+    visuals,
   };
 }
 
 function renderConnectorFixture(
   definition: ConnectorFixtureDefinition,
-  routePoints: Array<{ x: number; y: number }>,
-  visual: ConnectorVisualModel,
+  routePointSets: Array<Array<{ x: number; y: number }>>,
+  visuals: ConnectorVisualModel[],
 ): string {
-  const sceneBounds = calculateSceneBounds(definition, visual);
-  const routeLeft = visual.route.bounds.x - sceneBounds.x;
-  const routeTop = visual.route.bounds.y - sceneBounds.y;
+  const sceneBounds = calculateSceneBounds(definition, visuals);
+  const connectorDefinitions = [
+    { start: definition.start, end: definition.end },
+    ...(definition.additionalConnectors ?? []),
+  ];
+  const routeHtml = visuals.map((visual) => {
+    const routeLeft = visual.route.bounds.x - sceneBounds.x;
+    const routeTop = visual.route.bounds.y - sceneBounds.y;
+    return `<div class="route-layer" style="left:${routeLeft}px;top:${routeTop}px;">${visual.route.svg}</div>`;
+  }).join('');
   const endpointHtml = [
-    renderEndpoint('Start', definition.start, sceneBounds),
+    ...connectorDefinitions.map((connector, index) =>
+      renderEndpoint(connectorDefinitions.length === 1 ? 'Start' : `Start ${index + 1}`, connector.start, sceneBounds),
+    ),
     renderEndpoint('End', definition.end, sceneBounds),
   ].join('');
   const obstacleHtml = definition.obstacles
     .map((obstacle) => renderObstacle(obstacle, sceneBounds))
     .join('');
-  const labelHtml = visual.label === null
+  const labelHtml = visuals.map((visual) => visual.label === null
     ? ''
-    : `<div class="flow-action-label" style="left:${visual.label.center.x - sceneBounds.x}px;top:${visual.label.center.y - sceneBounds.y}px;min-width:${visual.label.minWidth}px;min-height:${visual.label.minHeight}px;max-width:${visual.label.maxTextWidth}px;padding:${visual.label.paddingY}px ${visual.label.paddingX}px;border-radius:${visual.label.radius}px;border-color:${visual.label.stroke};background:${visual.label.fill};color:${visual.label.textColor};font-size:${visual.label.fontSize}px;">${escapeHtml(visual.label.text)}</div>`;
-  const routePointsJson = escapeHtml(JSON.stringify(routePoints));
+    : `<div class="flow-action-label" style="left:${visual.label.center.x - sceneBounds.x}px;top:${visual.label.center.y - sceneBounds.y}px;min-width:${visual.label.minWidth}px;min-height:${visual.label.minHeight}px;max-width:${visual.label.maxTextWidth}px;padding:${visual.label.paddingY}px ${visual.label.paddingX}px;border-radius:${visual.label.radius}px;border-color:${visual.label.stroke};background:${visual.label.fill};color:${visual.label.textColor};font-size:${visual.label.fontSize}px;">${escapeHtml(visual.label.text)}</div>`).join('');
+  const routePointsJson = escapeHtml(JSON.stringify(routePointSets));
 
   return `<!doctype html>
 <html>
@@ -138,11 +211,6 @@ function renderConnectorFixture(
         background: rgba(251, 191, 36, 0.2);
       }
 
-      .route-layer {
-        left: ${routeLeft}px;
-        top: ${routeTop}px;
-      }
-
       .route-layer svg {
         display: block;
       }
@@ -161,7 +229,7 @@ function renderConnectorFixture(
   <body>
     <main aria-label="${escapeHtml(definition.description)}" class="scene" data-fixture="${definition.name}" data-route-points="${routePointsJson}">
       ${obstacleHtml}
-      <div class="route-layer">${visual.route.svg}</div>
+      ${routeHtml}
       ${labelHtml}
       ${endpointHtml}
     </main>
@@ -169,12 +237,15 @@ function renderConnectorFixture(
 </html>`;
 }
 
-function calculateSceneBounds(definition: ConnectorFixtureDefinition, visual: ConnectorVisualModel): FixtureRect {
+function calculateSceneBounds(definition: ConnectorFixtureDefinition, visuals: ConnectorVisualModel[]): FixtureRect {
+  const connectorDefinitions = [
+    { start: definition.start, end: definition.end },
+    ...(definition.additionalConnectors ?? []),
+  ];
   const rects = [
-    definition.start,
-    definition.end,
+    ...connectorDefinitions.flatMap((connector) => [connector.start, connector.end]),
     ...definition.obstacles,
-    visual.route.bounds,
+    ...visuals.map((visual) => visual.route.bounds),
   ];
   const minX = Math.min(...rects.map((rect) => rect.x)) - SCENE_PADDING;
   const minY = Math.min(...rects.map((rect) => rect.y)) - SCENE_PADDING;
@@ -198,6 +269,15 @@ function renderObstacle(rect: FixtureRect, sceneBounds: FixtureRect): string {
 
 function rectStyle(rect: FixtureRect, sceneBounds: FixtureRect): string {
   return `left:${rect.x - sceneBounds.x}px;top:${rect.y - sceneBounds.y}px;width:${rect.width}px;height:${rect.height}px;`;
+}
+
+function rectsEqual(first: FixtureRect, second: FixtureRect): boolean {
+  return (
+    first.x === second.x &&
+    first.y === second.y &&
+    first.width === second.width &&
+    first.height === second.height
+  );
 }
 
 function escapeHtml(value: string): string {
