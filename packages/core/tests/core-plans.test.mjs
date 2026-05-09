@@ -340,6 +340,63 @@ test('upserts Flow Connectors by directed endpoint pair and keeps reverse direct
   );
 });
 
+test('routes horizontal Context Frames around a middle Connector Obstacle', async () => {
+  const core = await importCoreModule();
+  const middleFrame = { x: 180, y: 0, width: 120, height: 100 };
+  const result = core.routeOrthogonalConnector({
+    startRect: { x: 0, y: 0, width: 100, height: 100 },
+    endRect: { x: 380, y: 0, width: 100, height: 100 },
+    obstacles: [
+      {
+        id: 'frame-2',
+        kind: 'context-frame',
+        rect: middleFrame,
+      },
+    ],
+    preferredStartSide: 'right',
+    preferredEndSide: 'left',
+  });
+
+  assert.deepEqual(Object.keys(result), ['points']);
+  assert.ok(result.points.length >= 4);
+  assert.equal(routeIsOrthogonal(result.points), true);
+  assert.equal(routeIntersectsRect(result.points, expandRect(middleFrame, 24)), false);
+  assert.deepEqual(result.points[0], { x: 100, y: 50 });
+  assert.deepEqual(result.points.at(-1), { x: 380, y: 50 });
+});
+
+test('routes around Annotation Cards and fails when no legal route exists', async () => {
+  const core = await importCoreModule();
+  const annotationCard = { x: 170, y: 66, width: 120, height: 100 };
+  const success = core.routeOrthogonalConnector({
+    startRect: { x: 0, y: 80, width: 100, height: 80 },
+    endRect: { x: 360, y: 80, width: 100, height: 80 },
+    obstacles: [
+      {
+        id: 'card-1',
+        kind: 'annotation-card',
+        rect: annotationCard,
+      },
+    ],
+  });
+
+  assert.equal(routeIsOrthogonal(success.points), true);
+  assert.equal(routeIntersectsRect(success.points, expandRect(annotationCard, 24)), false);
+  assert.throws(
+    () => core.routeOrthogonalConnector({
+      startRect: { x: 0, y: 0, width: 80, height: 80 },
+      endRect: { x: 320, y: 0, width: 80, height: 80 },
+      obstacles: [
+        { id: 'left-wall', kind: 'context-frame', rect: { x: -60, y: -60, width: 50, height: 200 } },
+        { id: 'right-wall', kind: 'context-frame', rect: { x: 80, y: -60, width: 50, height: 200 } },
+        { id: 'top-wall', kind: 'context-frame', rect: { x: -60, y: -60, width: 190, height: 50 } },
+        { id: 'bottom-wall', kind: 'context-frame', rect: { x: -60, y: 80, width: 190, height: 50 } },
+      ],
+    }),
+    (error) => error instanceof core.ConnectorRouteFailure && error.code === 'no-legal-route',
+  );
+});
+
 test('validates Annotation bindings by impact severity without repair plans', async () => {
   const core = await importCoreModule();
   const report = core.validateAnnotationBindings({
@@ -454,4 +511,46 @@ test('validates Annotation bindings by impact severity without repair plans', as
 
 async function importCoreModule() {
   return import(`${resolve(packageRoot, 'src/index.ts')}?cache=${Date.now()}-${Math.random()}`);
+}
+
+function routeIsOrthogonal(points) {
+  return points.every((point, index) => {
+    if (index === points.length - 1) {
+      return true;
+    }
+    const next = points[index + 1];
+    return point.x === next.x || point.y === next.y;
+  });
+}
+
+function routeIntersectsRect(points, rect) {
+  return points.some((point, index) => {
+    if (index === points.length - 1) {
+      return false;
+    }
+    return segmentIntersectsRect(point, points[index + 1], rect);
+  });
+}
+
+function segmentIntersectsRect(start, end, rect) {
+  if (start.y === end.y) {
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    return start.y >= rect.y && start.y <= rect.y + rect.height && maxX >= rect.x && minX <= rect.x + rect.width;
+  }
+  if (start.x === end.x) {
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    return start.x >= rect.x && start.x <= rect.x + rect.width && maxY >= rect.y && minY <= rect.y + rect.height;
+  }
+  return true;
+}
+
+function expandRect(rect, padding) {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
 }

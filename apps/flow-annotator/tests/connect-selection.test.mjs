@@ -283,6 +283,115 @@ test('creates a Flow Connector without scanning children of unrelated frame obst
   }
 });
 
+test('collects Context Frames and Annotation Cards as obstacles while excluding Annotation Badges', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const start = createNode(page, 'start', 0);
+    const end = createNode(page, 'end', 520);
+    const middleFrame = createNode(page, 'middle-frame', 220);
+    const annotationCard = createNode(page, 'annotation-card', 360);
+    const annotationBadge = createNode(page, 'annotation-badge', 460);
+    const runtime = createRuntime(page);
+
+    annotationCard.setSharedPluginData('figma_flow_annotator', 'kind', 'annotation-card');
+    annotationBadge.setSharedPluginData('figma_flow_annotator', 'kind', 'annotation-badge');
+    page.children = [start, middleFrame, annotationCard, annotationBadge, end];
+    globalThis.figma = { currentPage: page };
+
+    const obstacles = connect.collectConnectorObstacles(start, end, runtime);
+
+    assert.deepEqual(
+      obstacles.map((obstacle) => [obstacle.id, obstacle.kind]),
+      [
+        ['middle-frame', 'context-frame'],
+        ['annotation-card', 'annotation-card'],
+      ],
+    );
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('routes around a middle Context Frame and writes only the successful route cache', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const start = createNode(page, 'start', 0);
+    const middleFrame = createNode(page, 'middle-frame', 180);
+    const end = createNode(page, 'end', 380);
+    const connectorGroups = [];
+    const runtime = createRuntime(page, connectorGroups);
+
+    page.children = [start, middleFrame, end];
+    globalThis.figma = createFigmaStub(page, connectorGroups);
+
+    connect.resetObservedEndpointSelection(runtime);
+    page.selection = [start];
+    connect.handleSelectionChange(runtime);
+    page.selection = [start, end];
+    connect.handleSelectionChange(runtime);
+
+    connect.createFlowConnector('', runtime);
+
+    const routePoints = readConnector(connectorGroups[0]).routeCache.points;
+    assert.equal(routeIsOrthogonal(routePoints), true);
+    assert.equal(routeIntersectsRect(routePoints, expandRect(middleFrame.absoluteBoundingBox, 24)), false);
+    assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ['start', 'end']);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
+test('fails connector creation atomically when no legal route exists', async () => {
+  try {
+    const connect = await importConnectModule();
+    const page = { type: 'PAGE', id: 'page', children: [], selection: [] };
+    const start = createNode(page, 'start', 0);
+    const walls = [
+      createNode(page, 'left-wall', -60),
+      createNode(page, 'right-wall', 80),
+      createNode(page, 'top-wall', -60),
+      createNode(page, 'bottom-wall', -60),
+    ];
+    const end = createNode(page, 'end', 320);
+    const connectorGroups = [];
+    const runtime = createRuntime(page, connectorGroups);
+
+    [
+      { x: -60, y: -60, width: 50, height: 200 },
+      { x: 80, y: -60, width: 50, height: 200 },
+      { x: -60, y: -60, width: 190, height: 50 },
+      { x: -60, y: 80, width: 190, height: 50 },
+    ].forEach((rect, index) => {
+      walls[index].absoluteBoundingBox = rect;
+      walls[index].x = rect.x;
+      walls[index].y = rect.y;
+      walls[index].width = rect.width;
+      walls[index].height = rect.height;
+    });
+    page.children = [start, ...walls, end];
+    globalThis.figma = createFigmaStub(page, connectorGroups);
+
+    connect.resetObservedEndpointSelection(runtime);
+    page.selection = [start];
+    connect.handleSelectionChange(runtime);
+    page.selection = [start, end];
+    connect.handleSelectionChange(runtime);
+
+    assert.throws(
+      () => connect.createFlowConnector('', runtime),
+      /No legal Orthogonal Route avoids Connector Obstacles/,
+    );
+    assert.equal(connectorGroups.length, 0);
+    assert.equal(page.children.some((node) => node.name === 'FFA Connectors'), false);
+    assert.deepEqual(readConnectorRefs(start), []);
+    assert.deepEqual(readConnectorRefs(end), []);
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 test('upserts an existing directed Flow Connector and keeps reverse direction separate', async () => {
   try {
     const connect = await importConnectModule();
@@ -506,4 +615,46 @@ function readConnector(connectorGroup) {
 function readConnectorRefs(node) {
   const data = node.getSharedPluginData('figma_flow_annotator', 'connectorRefs');
   return data.length === 0 ? [] : JSON.parse(data).connectorIds;
+}
+
+function routeIsOrthogonal(points) {
+  return points.every((point, index) => {
+    if (index === points.length - 1) {
+      return true;
+    }
+    const next = points[index + 1];
+    return point.x === next.x || point.y === next.y;
+  });
+}
+
+function routeIntersectsRect(points, rect) {
+  return points.some((point, index) => {
+    if (index === points.length - 1) {
+      return false;
+    }
+    return segmentIntersectsRect(point, points[index + 1], rect);
+  });
+}
+
+function segmentIntersectsRect(start, end, rect) {
+  if (start.y === end.y) {
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    return start.y >= rect.y && start.y <= rect.y + rect.height && maxX >= rect.x && minX <= rect.x + rect.width;
+  }
+  if (start.x === end.x) {
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    return start.x >= rect.x && start.x <= rect.x + rect.width && maxY >= rect.y && minY <= rect.y + rect.height;
+  }
+  return true;
+}
+
+function expandRect(rect, padding) {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
 }

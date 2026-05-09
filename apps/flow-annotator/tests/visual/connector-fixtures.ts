@@ -1,8 +1,8 @@
 import {
   buildConnectorVisualModel,
-  buildOrthogonalRoute,
   type ConnectorVisualModel,
 } from '../../connect';
+import { routeOrthogonalConnector } from '../../../../packages/core/src/index';
 
 interface FixtureRect {
   x: number;
@@ -51,7 +51,15 @@ export const connectorFixtureDefinitions: ConnectorFixtureDefinition[] = [
 ];
 
 export function buildConnectorFixture(definition: ConnectorFixtureDefinition): ConnectorFixture {
-  const routePoints = buildOrthogonalRoute(definition.start, definition.end, definition.obstacles);
+  const routePoints = routeOrthogonalConnector({
+    startRect: definition.start,
+    endRect: definition.end,
+    obstacles: definition.obstacles.map((obstacle, index) => ({
+      id: `fixture-obstacle-${index + 1}`,
+      kind: 'annotation-card',
+      rect: obstacle,
+    })),
+  }).points;
   const visual = buildConnectorVisualModel(routePoints, definition.flowAction);
   return {
     definition,
