@@ -285,6 +285,96 @@ test('validates Annotation bindings and locates validation issue nodes without s
   }
 });
 
+test('validates Flow Connector references, locates issues, and cleans stale indexes', async () => {
+  try {
+    const page = createPage();
+    const start = createNode(page, 'start-endpoint', 0);
+    const end = createNode(page, 'end-endpoint', 160);
+    const invalidEndpoint = createNode(page, 'annotation-card-endpoint', 320);
+    const formerEndpoint = createNode(page, 'former-endpoint', 480);
+    const connectorsContainer = createNode(page, 'FFA Connectors', 800);
+    const orphanConnector = createNode(connectorsContainer, 'connector-orphan-root', 840);
+    const invalidConnector = createNode(connectorsContainer, 'connector-invalid-root', 880);
+    const duplicateConnectorA = createNode(connectorsContainer, 'connector-duplicate-root-a', 920);
+    const duplicateConnectorB = createNode(connectorsContainer, 'connector-duplicate-root-b', 960);
+    const messages = [];
+    const scrollEvents = [];
+
+    invalidEndpoint.setSharedPluginData(namespace, 'kind', 'annotation-card');
+    setConnectorRefs(start, ['connector-duplicate-a', 'connector-deleted-root']);
+    setConnectorRefs(end, ['connector-duplicate-a', 'connector-duplicate-b']);
+    setConnectorRefs(invalidEndpoint, ['connector-invalid']);
+    setConnectorRefs(formerEndpoint, ['connector-deleted-root', 'connector-invalid']);
+    connectorsContainer.setSharedPluginData(namespace, 'kind', 'container');
+    setConnectorRecord(orphanConnector, 'connector-orphan', 'deleted-start', end.id, 'open');
+    setConnectorRecord(invalidConnector, 'connector-invalid', invalidEndpoint.id, end.id, 'open');
+    setConnectorRecord(duplicateConnectorA, 'connector-duplicate-a', start.id, end.id, null);
+    setConnectorRecord(duplicateConnectorB, 'connector-duplicate-b', start.id, end.id, 'open');
+
+    connectorsContainer.children = [
+      orphanConnector,
+      invalidConnector,
+      duplicateConnectorA,
+      duplicateConnectorB,
+    ];
+    page.children = [start, end, invalidEndpoint, formerEndpoint, connectorsContainer];
+    globalThis.figma = createFigmaStub(page, messages, scrollEvents);
+
+    await importCodeModule();
+
+    globalThis.figma.ui.onmessage({ type: 'validate-bindings' });
+    await flushPluginMessage(messages);
+
+    const reportMessage = messages.find((message) => message.type === 'validation-report');
+    assert.ok(reportMessage);
+    assert.deepEqual(reportMessage.report.summary, {
+      all: 5,
+      errors: 3,
+      warnings: 2,
+      info: 0,
+    });
+    assert.deepEqual(
+      reportMessage.report.issues.map((issue) => issue.code),
+      [
+        'flow-connector-orphaned',
+        'flow-endpoint-invalid',
+        'flow-connector-duplicate',
+        'flow-action-empty',
+        'connector-reverse-index-stale',
+      ],
+    );
+
+    const staleIssue = reportMessage.report.issues.find((issue) => issue.code === 'connector-reverse-index-stale');
+    messages.length = 0;
+    globalThis.figma.ui.onmessage({ type: 'locate-validation-issue', issueId: staleIssue.id });
+    await flushPluginMessage(messages);
+
+    assert.deepEqual(page.selection.map((node) => node.id), ['start-endpoint', 'former-endpoint']);
+    assert.deepEqual(scrollEvents.at(-1).map((node) => node.id), ['start-endpoint', 'former-endpoint']);
+
+    messages.length = 0;
+    globalThis.figma.ui.onmessage({ type: 'clean-stale-indexes' });
+    await flushPluginMessage(messages);
+
+    const cleanReport = messages.filter((message) => message.type === 'validation-report').at(-1).report;
+    const cleanStatus = messages.find((message) => message.type === 'status' && message.tone === 'success');
+    assert.deepEqual(readConnectorRefs(start), ['connector-duplicate-a']);
+    assert.deepEqual(readConnectorRefs(end), ['connector-duplicate-a', 'connector-duplicate-b']);
+    assert.deepEqual(readConnectorRefs(invalidEndpoint), ['connector-invalid']);
+    assert.deepEqual(readConnectorRefs(formerEndpoint), ['connector-invalid']);
+    assert.equal(cleanReport.issues.some((issue) => issue.code === 'connector-reverse-index-stale'), false);
+    assert.equal(cleanReport.issues.some((issue) => issue.code === 'flow-endpoint-invalid'), true);
+    assert.equal(connectorsContainer.children.length, 4);
+    assert.equal(connectorsContainer.children.some((node) => readConnectorId(node) === 'connector-deleted-root'), false);
+    assert.equal(
+      cleanStatus.message,
+      'Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).',
+    );
+  } finally {
+    await rm(buildDir, { force: true, recursive: true });
+  }
+});
+
 async function flushPluginMessage(messages) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if (messages.some((message) => message.type === 'status')) {
@@ -383,6 +473,16 @@ function readAnnotationRefs(node) {
   return data.length === 0 ? [] : JSON.parse(data).annotationIds;
 }
 
+function readConnectorRefs(node) {
+  const data = node.getSharedPluginData(namespace, 'connectorRefs');
+  return data.length === 0 ? [] : JSON.parse(data).connectorIds;
+}
+
+function readConnectorId(node) {
+  const data = node.getSharedPluginData(namespace, 'connector');
+  return data.length === 0 ? null : JSON.parse(data).id;
+}
+
 function setBadgeRecord(badge, annotationNumber, subjectNodeId, contextFrameId) {
   badge.setSharedPluginData(namespace, 'kind', 'annotation-badge');
   badge.setSharedPluginData(namespace, 'badgeRef', JSON.stringify({
@@ -404,6 +504,34 @@ function setCardRecord(card, annotationNumber, contextFrameId) {
     body: `body ${annotationNumber}`,
     contextFrameId,
     subjectNodeIds: ['subject-a'],
+    createdAt: '2026-05-07T00:00:00.000Z',
+    updatedAt: '2026-05-07T00:00:00.000Z',
+  }));
+}
+
+function setConnectorRefs(node, connectorIds) {
+  node.setSharedPluginData(namespace, 'connectorRefs', JSON.stringify({
+    schemaVersion: 1,
+    connectorIds,
+  }));
+}
+
+function setConnectorRecord(connector, connectorId, startNodeId, endNodeId, flowAction) {
+  connector.type = 'GROUP';
+  connector.setSharedPluginData(namespace, 'kind', 'flow-connector');
+  connector.setSharedPluginData(namespace, 'connector', JSON.stringify({
+    schemaVersion: 1,
+    id: connectorId,
+    start: {
+      nodeId: startNodeId,
+      contextFrameId: 'context-frame',
+    },
+    end: {
+      nodeId: endNodeId,
+      contextFrameId: 'context-frame',
+    },
+    ownerContextFrameId: 'context-frame',
+    flowAction,
     createdAt: '2026-05-07T00:00:00.000Z',
     updatedAt: '2026-05-07T00:00:00.000Z',
   }));

@@ -106,7 +106,12 @@ export type ValidationIssueCode =
   | 'annotation-missing-body'
   | 'annotation-card-outside-design-notes-area'
   | 'annotation-cards-unsorted'
-  | 'annotation-badges-unarranged';
+  | 'annotation-badges-unarranged'
+  | 'flow-connector-orphaned'
+  | 'flow-endpoint-invalid'
+  | 'flow-connector-duplicate'
+  | 'flow-action-empty'
+  | 'connector-reverse-index-stale';
 
 export interface ValidationIssue {
   id: string;
@@ -167,6 +172,27 @@ export interface ValidateAnnotationBindingsInput {
   cards: AnnotationValidationCardInput[];
   contexts: AnnotationValidationContextInput[];
   subjects: AnnotationValidationSubjectInput[];
+}
+
+export interface FlowConnectorValidationConnectorInput {
+  nodeId: string;
+  record: FlowConnectorRecord;
+}
+
+export interface FlowConnectorValidationEndpointInput {
+  nodeId: string;
+  connectorIds: string[];
+  isEligibleFlowEndpoint: boolean;
+}
+
+export interface ValidateFlowConnectorReferencesInput {
+  connectors: FlowConnectorValidationConnectorInput[];
+  endpoints: FlowConnectorValidationEndpointInput[];
+}
+
+export interface BuildCleanStaleIndexesPlanInput {
+  endpoints: FlowConnectorValidationEndpointInput[];
+  liveConnectorIds: string[];
 }
 
 export type SharedPluginDataValue =
@@ -266,7 +292,8 @@ export interface DocumentChangePlan {
     | 'arrange-annotation-badges'
     | 'arrange-annotation-cards'
     | 'create-flow-connector'
-    | 'refresh-flow-connector';
+    | 'refresh-flow-connector'
+    | 'clean-stale-indexes';
   operations: DocumentChangeOperation[];
 }
 
@@ -294,6 +321,12 @@ export interface RefreshFlowConnectorPlan extends DocumentChangePlan {
   mode: 'update' | 'idempotent';
   existingNodeRefs: string[];
   record: FlowConnectorRecord;
+}
+
+export interface CleanStaleIndexesPlan extends DocumentChangePlan {
+  kind: 'clean-stale-indexes';
+  cleanedEndpointNodeIds: string[];
+  removedConnectorIds: string[];
 }
 
 export interface AddAnnotationSubjectsPlan extends DocumentChangePlan {
@@ -1208,6 +1241,154 @@ export function validateAnnotationBindings(input: ValidateAnnotationBindingsInpu
     locationNodeIds: unarrangedBadgeTargets,
   });
 
+  return {
+    schemaVersion: 1,
+    issues,
+    summary: summarizeValidationIssues(issues),
+  };
+}
+
+export function validateFlowConnectorReferences(input: ValidateFlowConnectorReferencesInput): ValidationReport {
+  const issues: ValidationIssue[] = [];
+  const endpointsById = new Map(input.endpoints.map((endpoint) => [endpoint.nodeId, endpoint]));
+  const liveConnectorIds = new Set(input.connectors.map((connector) => connector.record.id));
+
+  const orphanTargets: string[] = [];
+  const orphanConnectorNodeIds: string[] = [];
+  input.connectors.forEach((connector) => {
+    const endpointIds = [connector.record.start.nodeId, connector.record.end.nodeId];
+    if (endpointIds.every((endpointId) => endpointsById.has(endpointId))) {
+      return;
+    }
+
+    orphanConnectorNodeIds.push(connector.nodeId);
+    orphanTargets.push(
+      connector.nodeId,
+      ...endpointIds.filter((endpointId) => endpointsById.has(endpointId)),
+    );
+  });
+  addIssue(issues, {
+    code: 'flow-connector-orphaned',
+    severity: 'error',
+    title: 'Orphaned Flow Connector',
+    affectedObjectCount: countUnique(orphanConnectorNodeIds),
+    description: 'A Flow Connector is missing its start or end Flow Endpoint.',
+    locationNodeIds: orphanTargets,
+  });
+
+  const invalidEndpointTargets: string[] = [];
+  const invalidConnectorNodeIds: string[] = [];
+  input.connectors.forEach((connector) => {
+    const invalidEndpointIds = [connector.record.start.nodeId, connector.record.end.nodeId]
+      .filter((endpointId) => endpointsById.get(endpointId)?.isEligibleFlowEndpoint === false);
+    if (invalidEndpointIds.length === 0) {
+      return;
+    }
+
+    invalidConnectorNodeIds.push(connector.nodeId);
+    invalidEndpointTargets.push(connector.nodeId, ...invalidEndpointIds);
+  });
+  addIssue(issues, {
+    code: 'flow-endpoint-invalid',
+    severity: 'error',
+    title: 'Invalid Flow Endpoint',
+    affectedObjectCount: countUnique(invalidConnectorNodeIds),
+    description: 'A Flow Connector points to a node that is not a valid Flow Endpoint.',
+    locationNodeIds: invalidEndpointTargets,
+  });
+
+  const duplicateTargets: string[] = [];
+  const duplicateConnectorNodeIds: string[] = [];
+  groupBy(input.connectors, (connector) =>
+    `${connector.record.start.nodeId}\u0000${connector.record.end.nodeId}`,
+  ).forEach((connectors) => {
+    if (connectors.length <= 1) {
+      return;
+    }
+
+    duplicateConnectorNodeIds.push(...connectors.map((connector) => connector.nodeId));
+    duplicateTargets.push(
+      ...connectors.map((connector) => connector.nodeId),
+      ...[connectors[0].record.start.nodeId, connectors[0].record.end.nodeId]
+        .filter((endpointId) => endpointsById.has(endpointId)),
+    );
+  });
+  addIssue(issues, {
+    code: 'flow-connector-duplicate',
+    severity: 'error',
+    title: 'Duplicate Flow Connector',
+    affectedObjectCount: countUnique(duplicateConnectorNodeIds),
+    description: 'Multiple Flow Connectors use the same ordered start and end Flow Endpoints.',
+    locationNodeIds: duplicateTargets,
+  });
+
+  const emptyActionTargets = input.connectors
+    .filter((connector) => connector.record.flowAction === null || connector.record.flowAction.trim().length === 0)
+    .map((connector) => connector.nodeId);
+  addIssue(issues, {
+    code: 'flow-action-empty',
+    severity: 'warning',
+    title: 'Empty Flow Action',
+    affectedObjectCount: emptyActionTargets.length,
+    description: 'A Flow Connector has no Flow Action label.',
+    locationNodeIds: emptyActionTargets,
+  });
+
+  const staleReverseIndexTargets = input.endpoints
+    .filter((endpoint) => endpoint.connectorIds.some((connectorId) => !liveConnectorIds.has(connectorId)))
+    .map((endpoint) => endpoint.nodeId);
+  addIssue(issues, {
+    code: 'connector-reverse-index-stale',
+    severity: 'warning',
+    title: 'Stale Reverse Index',
+    affectedObjectCount: staleReverseIndexTargets.length,
+    description: 'A Flow Endpoint has connectorRefs pointing to deleted Flow Connectors.',
+    locationNodeIds: staleReverseIndexTargets,
+  });
+
+  return {
+    schemaVersion: 1,
+    issues,
+    summary: summarizeValidationIssues(issues),
+  };
+}
+
+export function buildCleanStaleIndexesPlan(input: BuildCleanStaleIndexesPlanInput): CleanStaleIndexesPlan {
+  const liveConnectorIds = new Set(input.liveConnectorIds);
+  const operations: SetSharedPluginDataOperation[] = [];
+  const cleanedEndpointNodeIds: string[] = [];
+  const removedConnectorIds: string[] = [];
+
+  input.endpoints.forEach((endpoint) => {
+    const staleConnectorIds = endpoint.connectorIds.filter((connectorId) => !liveConnectorIds.has(connectorId));
+    if (staleConnectorIds.length === 0) {
+      return;
+    }
+
+    cleanedEndpointNodeIds.push(endpoint.nodeId);
+    removedConnectorIds.push(...staleConnectorIds);
+    operations.push({
+      type: 'set-shared-plugin-data',
+      target: { kind: 'existing-node', nodeId: endpoint.nodeId },
+      key: SHARED_PLUGIN_DATA.keys.connectorRefs,
+      value: {
+        schemaVersion: 1,
+        connectorIds: endpoint.connectorIds.filter((connectorId) => liveConnectorIds.has(connectorId)),
+      },
+    });
+  });
+
+  return {
+    schemaVersion: 1,
+    kind: 'clean-stale-indexes',
+    cleanedEndpointNodeIds,
+    removedConnectorIds,
+    operations,
+  };
+}
+
+export function mergeValidationReports(reports: ValidationReport[]): ValidationReport {
+  const issues = reports.flatMap((report) => report.issues);
   return {
     schemaVersion: 1,
     issues,

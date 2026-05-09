@@ -15,8 +15,10 @@ import {
   buildAddAnnotationSubjectsPlan,
   buildArrangeAnnotationBadgesPlan,
   buildArrangeAnnotationCardsPlan,
+  buildCleanStaleIndexesPlan,
   buildCreateAnnotationPlan,
   mergeAnnotationReferenceIds,
+  mergeValidationReports,
   planAnnotationCardPosition,
   serializeSharedPluginDataValue,
   type AddAnnotationSubjectsPlan,
@@ -30,16 +32,22 @@ import {
   type ArrangeAnnotationCardsPlan,
   type AppendSharedReferenceOperation,
   type BadgeRefRecord,
+  type CleanStaleIndexesPlan,
   type ContextRecord,
   type CreateAnnotationBadgeOperation,
   type CreateAnnotationCardOperation,
   type CreateAnnotationPlan,
   type DocumentNodeTarget,
+  type FlowConnectorRecord,
+  type FlowConnectorValidationConnectorInput,
+  type FlowConnectorValidationEndpointInput,
   type MoveNodeOperation,
   type Point,
   type SetSharedPluginDataOperation,
+  type ValidateFlowConnectorReferencesInput,
   type ValidationReport,
   validateAnnotationBindings,
+  validateFlowConnectorReferences,
 } from '../../packages/core/src/index';
 
 const NAMESPACE = SHARED_PLUGIN_DATA.namespace;
@@ -56,6 +64,7 @@ type PluginMessage =
   | { type: 'refresh-connectors' }
   | { type: 'swap-connector-endpoints' }
   | { type: 'validate-bindings' }
+  | { type: 'clean-stale-indexes' }
   | { type: 'locate-validation-issue'; issueId: string }
   | { type: 'close' }
   | { type: 'request-selection-state' };
@@ -78,6 +87,11 @@ interface AddSubjectsResult {
 interface ArrangeResult {
   movedCount: number;
   nodes: SceneNode[];
+}
+
+interface CleanStaleIndexesResult {
+  cleanedEndpointCount: number;
+  removedConnectorRefCount: number;
 }
 
 type ContextDataNode = FrameNode | PageNode;
@@ -195,6 +209,17 @@ async function handleMessage(message: PluginMessage): Promise<void> {
       return;
     }
 
+    if (message.type === 'clean-stale-indexes') {
+      const result = cleanStaleIndexes();
+      const report = validateCurrentPageBindings();
+      postValidationReport(report);
+      postStatus(
+        'success',
+        `Cleaned stale indexes on ${result.cleanedEndpointCount} Flow Endpoint(s); removed ${result.removedConnectorRefCount} stale connector reference(s).`,
+      );
+      return;
+    }
+
     if (message.type === 'locate-validation-issue') {
       await locateValidationIssue(message.issueId);
       return;
@@ -223,15 +248,47 @@ function validateCurrentPageBindings(): ValidationReport {
     nodeId: node.id,
     ...('absoluteBoundingBox' in node && node.absoluteBoundingBox !== null ? { rect: node.absoluteBoundingBox } : {}),
   }));
-  const report = validateAnnotationBindings({
+  const annotationReport = validateAnnotationBindings({
     badges,
     cards,
     contexts,
     subjects,
   });
+  const connectorReport = validateFlowConnectorReferences(getFlowConnectorReferenceValidationInput(pageNodes));
+  const report = mergeValidationReports([annotationReport, connectorReport]);
 
   validationTargetsByIssueId = new Map(report.issues.map((issue) => [issue.id, issue.locationNodeIds]));
   return report;
+}
+
+function cleanStaleIndexes(): CleanStaleIndexesResult {
+  const pageNodes = collectCurrentPageNodes();
+  const connectorInput = getFlowConnectorReferenceValidationInput(pageNodes);
+  const plan = buildCleanStaleIndexesPlan({
+    endpoints: connectorInput.endpoints,
+    liveConnectorIds: connectorInput.connectors.map((connector) => connector.record.id),
+  });
+
+  applyCleanStaleIndexesPlan(plan, new Map(pageNodes.map((node): [string, BaseNode] => [node.id, node])));
+  return {
+    cleanedEndpointCount: plan.cleanedEndpointNodeIds.length,
+    removedConnectorRefCount: plan.removedConnectorIds.length,
+  };
+}
+
+function applyCleanStaleIndexesPlan(plan: CleanStaleIndexesPlan, existingNodes: Map<string, BaseNode>): void {
+  plan.operations.forEach((operation) => {
+    if (operation.type !== 'set-shared-plugin-data') {
+      throw new Error(`Clean Stale Indexes cannot apply ${operation.type}.`);
+    }
+
+    const node = resolvePlanTarget(operation.target, {
+      containers: new Map(),
+      createdNodes: new Map(),
+      existingNodes,
+    });
+    writeSharedPluginData(node, operation);
+  });
 }
 
 async function locateValidationIssue(issueId: string): Promise<void> {
@@ -642,6 +699,79 @@ function readAnnotationValidationRecord(node: BaseNode): AnnotationValidationRec
     contextFrameId: parsed.contextFrameId,
     subjectNodeIds: parsed.subjectNodeIds.filter((value): value is string => typeof value === 'string'),
   };
+}
+
+function getFlowConnectorReferenceValidationInput(pageNodes: SceneNode[]): ValidateFlowConnectorReferencesInput {
+  const connectorsContainer = findContainer(CONNECTORS_CONTAINER_NAME);
+  const connectors: FlowConnectorValidationConnectorInput[] = connectorsContainer === null
+    ? []
+    : connectorsContainer.children.flatMap((child) => {
+        if (
+          child.type !== 'GROUP' ||
+          child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !== VISUAL_NODE_KINDS.flowConnector
+        ) {
+          return [];
+        }
+
+        const record = readFlowConnectorValidationRecord(child);
+        return record === null ? [] : [{ nodeId: child.id, record }];
+      });
+  const endpoints: FlowConnectorValidationEndpointInput[] = pageNodes.map((node) => ({
+    connectorIds: readReferenceIds(node, SHARED_PLUGIN_DATA.keys.connectorRefs, 'connectorIds'),
+    isEligibleFlowEndpoint: isFlowEndpointEligibleNode(node),
+    nodeId: node.id,
+  }));
+
+  return { connectors, endpoints };
+}
+
+function readFlowConnectorValidationRecord(node: BaseNode): FlowConnectorRecord | null {
+  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.connector));
+  if (
+    !isRecord(parsed) ||
+    parsed.schemaVersion !== 1 ||
+    typeof parsed.id !== 'string' ||
+    !isFlowEndpointRecordValue(parsed.start) ||
+    !isFlowEndpointRecordValue(parsed.end) ||
+    typeof parsed.ownerContextFrameId !== 'string' ||
+    !(typeof parsed.flowAction === 'string' || parsed.flowAction === null) ||
+    typeof parsed.createdAt !== 'string' ||
+    typeof parsed.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    id: parsed.id,
+    start: parsed.start,
+    end: parsed.end,
+    ownerContextFrameId: parsed.ownerContextFrameId,
+    flowAction: parsed.flowAction,
+    ...(isRouteCacheRecordValue(parsed.routeCache) ? { routeCache: parsed.routeCache } : {}),
+    createdAt: parsed.createdAt,
+    updatedAt: parsed.updatedAt,
+  };
+}
+
+function isFlowEndpointEligibleNode(node: SceneNode): boolean {
+  return (
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === '' &&
+    !hasGeneratedAncestor(node)
+  );
+}
+
+function isFlowEndpointRecordValue(value: unknown): value is { nodeId: string; contextFrameId: string } {
+  return isRecord(value) && typeof value.nodeId === 'string' && typeof value.contextFrameId === 'string';
+}
+
+function isRouteCacheRecordValue(value: unknown): value is { schemaVersion: 1; points: Point[] } {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    Array.isArray(value.points) &&
+    value.points.every((point) => isRecord(point) && typeof point.x === 'number' && typeof point.y === 'number')
+  );
 }
 
 function groupCardsByContext(

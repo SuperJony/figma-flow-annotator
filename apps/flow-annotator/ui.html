@@ -306,6 +306,10 @@
       padding: 0 6px;
     }
 
+    #cleanStaleIndexes {
+      min-width: 126px;
+    }
+
     button {
       height: 28px;
       border: 1px solid #b8c1ce;
@@ -425,7 +429,10 @@
       <section id="panelValidate" class="tab-panel" data-tab-panel="validate" hidden>
         <div class="row">
           <h2>Validate</h2>
-          <button id="runValidation" class="primary" type="button">Validate Bindings</button>
+          <div class="actions">
+            <button id="runValidation" class="primary" type="button">Validate Bindings</button>
+            <button id="cleanStaleIndexes" type="button" disabled>Clean Stale Indexes</button>
+          </div>
         </div>
         <div class="validation-summary" aria-label="Validation summary">
           <div class="summary-cell"><div id="summaryAll" class="summary-count">0</div><div class="summary-label">All</div></div>
@@ -440,7 +447,7 @@
           <button class="filter" type="button" data-filter="info">Info</button>
         </div>
         <div id="validationIssues" class="issue-list">
-          <div class="empty-report">Run validation to inspect Annotation bindings.</div>
+          <div class="empty-report">Run validation to inspect bindings.</div>
         </div>
       </section>
     </main>
@@ -461,6 +468,7 @@
     const refreshConnectors = document.getElementById('refreshConnectors');
     const swapConnector = document.getElementById('swapConnector');
     const runValidation = document.getElementById('runValidation');
+    const cleanStaleIndexes = document.getElementById('cleanStaleIndexes');
     const closeButton = document.getElementById('close');
     const status = document.getElementById('status');
     const selection = document.getElementById('selection');
@@ -533,6 +541,11 @@
     runValidation.addEventListener('click', () => {
       setActiveTab('validate');
       post({ type: 'validate-bindings' });
+    });
+
+    cleanStaleIndexes.addEventListener('click', () => {
+      setActiveTab('validate');
+      post({ type: 'clean-stale-indexes' });
     });
 
     filterButtons.forEach((button) => {
@@ -628,6 +641,7 @@
       });
 
       const issues = Array.isArray(validationReport.issues) ? validationReport.issues : [];
+      cleanStaleIndexes.disabled = !issues.some((issue) => issue.code === 'connector-reverse-index-stale');
       const filtered = activeFilter === 'all'
         ? issues
         : issues.filter((issue) => issue.severity === activeFilter);

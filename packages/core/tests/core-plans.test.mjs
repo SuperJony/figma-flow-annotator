@@ -615,6 +615,143 @@ test('does not group Connector Trunks across different ends or opposite directio
   }).groups.length, 0);
 });
 
+test('validates Flow Connector references by impact severity', async () => {
+  const core = await importCoreModule();
+  const now = '2026-05-09T00:00:00.000Z';
+  const report = core.validateFlowConnectorReferences({
+    endpoints: [
+      {
+        connectorIds: ['connector-duplicate-a', 'connector-duplicate-b', 'connector-stale'],
+        isEligibleFlowEndpoint: true,
+        nodeId: 'start-live',
+      },
+      {
+        connectorIds: ['connector-duplicate-a', 'connector-duplicate-b'],
+        isEligibleFlowEndpoint: true,
+        nodeId: 'end-live',
+      },
+      {
+        connectorIds: ['connector-invalid-endpoint'],
+        isEligibleFlowEndpoint: false,
+        nodeId: 'annotation-card-endpoint',
+      },
+      {
+        connectorIds: ['connector-deleted-root'],
+        isEligibleFlowEndpoint: true,
+        nodeId: 'former-endpoint',
+      },
+    ],
+    connectors: [
+      {
+        nodeId: 'connector-orphan-root',
+        record: core.createFlowConnectorRecord({
+          connectorId: 'connector-orphan',
+          end: { contextFrameId: 'frame-1', nodeId: 'end-live' },
+          flowAction: 'open',
+          now,
+          ownerContextFrameId: 'frame-1',
+          start: { contextFrameId: 'frame-1', nodeId: 'deleted-start' },
+        }),
+      },
+      {
+        nodeId: 'connector-invalid-root',
+        record: core.createFlowConnectorRecord({
+          connectorId: 'connector-invalid-endpoint',
+          end: { contextFrameId: 'frame-1', nodeId: 'end-live' },
+          flowAction: 'open',
+          now,
+          ownerContextFrameId: 'frame-1',
+          start: { contextFrameId: 'frame-1', nodeId: 'annotation-card-endpoint' },
+        }),
+      },
+      {
+        nodeId: 'connector-duplicate-root-a',
+        record: core.createFlowConnectorRecord({
+          connectorId: 'connector-duplicate-a',
+          end: { contextFrameId: 'frame-1', nodeId: 'end-live' },
+          flowAction: null,
+          now,
+          ownerContextFrameId: 'frame-1',
+          start: { contextFrameId: 'frame-1', nodeId: 'start-live' },
+        }),
+      },
+      {
+        nodeId: 'connector-duplicate-root-b',
+        record: core.createFlowConnectorRecord({
+          connectorId: 'connector-duplicate-b',
+          end: { contextFrameId: 'frame-1', nodeId: 'end-live' },
+          flowAction: 'open',
+          now,
+          ownerContextFrameId: 'frame-1',
+          start: { contextFrameId: 'frame-1', nodeId: 'start-live' },
+        }),
+      },
+    ],
+  });
+
+  assert.deepEqual(report.summary, {
+    all: 5,
+    errors: 3,
+    warnings: 2,
+    info: 0,
+  });
+  assert.deepEqual(
+    report.issues.map((issue) => [issue.code, issue.severity, issue.title]),
+    [
+      ['flow-connector-orphaned', 'error', 'Orphaned Flow Connector'],
+      ['flow-endpoint-invalid', 'error', 'Invalid Flow Endpoint'],
+      ['flow-connector-duplicate', 'error', 'Duplicate Flow Connector'],
+      ['flow-action-empty', 'warning', 'Empty Flow Action'],
+      ['connector-reverse-index-stale', 'warning', 'Stale Reverse Index'],
+    ],
+  );
+  assert.deepEqual(
+    report.issues.find((issue) => issue.code === 'flow-endpoint-invalid').locationNodeIds,
+    ['connector-invalid-root', 'annotation-card-endpoint'],
+  );
+  assert.deepEqual(
+    report.issues.find((issue) => issue.code === 'connector-reverse-index-stale').locationNodeIds,
+    ['start-live', 'former-endpoint'],
+  );
+});
+
+test('plans Clean Stale Indexes without rebuilding or rebinding Flow Connectors', async () => {
+  const core = await importCoreModule();
+  const plan = core.buildCleanStaleIndexesPlan({
+    liveConnectorIds: ['connector-live', 'connector-semantic-invalid'],
+    endpoints: [
+      {
+        connectorIds: ['connector-live', 'connector-deleted', 'connector-semantic-invalid'],
+        isEligibleFlowEndpoint: true,
+        nodeId: 'endpoint-a',
+      },
+      {
+        connectorIds: ['connector-live'],
+        isEligibleFlowEndpoint: true,
+        nodeId: 'endpoint-b',
+      },
+    ],
+  });
+
+  assert.equal(plan.schemaVersion, 1);
+  assert.equal(plan.kind, 'clean-stale-indexes');
+  assert.deepEqual(plan.cleanedEndpointNodeIds, ['endpoint-a']);
+  assert.deepEqual(plan.removedConnectorIds, ['connector-deleted']);
+  assert.deepEqual(
+    plan.operations.map((operation) => operation.type),
+    ['set-shared-plugin-data'],
+  );
+  assert.deepEqual(plan.operations[0], {
+    type: 'set-shared-plugin-data',
+    target: { kind: 'existing-node', nodeId: 'endpoint-a' },
+    key: 'connectorRefs',
+    value: {
+      schemaVersion: 1,
+      connectorIds: ['connector-live', 'connector-semantic-invalid'],
+    },
+  });
+});
+
 test('validates Annotation bindings by impact severity without repair plans', async () => {
   const core = await importCoreModule();
   const report = core.validateAnnotationBindings({

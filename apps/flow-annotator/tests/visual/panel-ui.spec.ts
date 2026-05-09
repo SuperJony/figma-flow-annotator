@@ -39,10 +39,34 @@ test.describe('Plugin panel browser visuals', () => {
       if (definition.name === 'validate-report') {
         await expect(page.locator('#summaryAll')).toHaveText('3');
         await expect(page.locator('.issue-row')).toHaveCount(3);
+        await expect(page.locator('#cleanStaleIndexes')).toBeDisabled();
         await page.locator('[data-filter="warning"]').click();
         await expect(page.locator('.issue-row')).toHaveCount(1);
         await expect(page.locator('.issue-title')).toHaveText('Missing Annotation Badge');
         await page.locator('[data-filter="all"]').click();
+      }
+
+      if (definition.name === 'validate-connector-report') {
+        await expect(page.locator('#summaryAll')).toHaveText('5');
+        await expect(page.locator('#summaryErrors')).toHaveText('3');
+        await expect(page.locator('#summaryWarnings')).toHaveText('2');
+        await expect(page.locator('#cleanStaleIndexes')).toBeEnabled();
+        await expect(page.locator('.issue-title')).toHaveText([
+          'Orphaned Flow Connector',
+          'Invalid Flow Endpoint',
+          'Duplicate Flow Connector',
+          'Empty Flow Action',
+          'Stale Reverse Index',
+        ]);
+        await page.locator('[data-filter="warning"]').click();
+        await expect(page.locator('.issue-row')).toHaveCount(2);
+        await page.locator('[data-filter="all"]').click();
+      }
+
+      if (definition.name === 'validate-clean-complete') {
+        await expect(page.locator('#summaryAll')).toHaveText('1');
+        await expect(page.locator('#cleanStaleIndexes')).toBeDisabled();
+        await expect(page.locator('#status')).toHaveText('Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).');
       }
 
       await expect(page.locator('.shell')).toHaveScreenshot(`${definition.name}.png`, {

@@ -27,6 +27,7 @@ interface PanelFixtureDefinition {
   validationReport?: {
     issues: {
       affectedObjectCount: number;
+      code?: string;
       description: string;
       id: string;
       severity: 'error' | 'info' | 'warning';
@@ -164,6 +165,90 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           id: 'annotation-badges-unarranged-3',
           severity: 'info',
           title: 'Unarranged Annotation Badges',
+        },
+      ],
+    },
+  },
+  {
+    activeTab: 'validate',
+    description: 'Validate tab report with Flow Connector reference issues and stale cleanup enabled.',
+    name: 'validate-connector-report',
+    validationReport: {
+      schemaVersion: 1,
+      summary: {
+        all: 5,
+        errors: 3,
+        warnings: 2,
+        info: 0,
+      },
+      issues: [
+        {
+          affectedObjectCount: 1,
+          code: 'flow-connector-orphaned',
+          description: 'A Flow Connector is missing its start or end Flow Endpoint.',
+          id: 'flow-connector-orphaned-1',
+          severity: 'error',
+          title: 'Orphaned Flow Connector',
+        },
+        {
+          affectedObjectCount: 1,
+          code: 'flow-endpoint-invalid',
+          description: 'A Flow Connector points to a node that is not a valid Flow Endpoint.',
+          id: 'flow-endpoint-invalid-2',
+          severity: 'error',
+          title: 'Invalid Flow Endpoint',
+        },
+        {
+          affectedObjectCount: 2,
+          code: 'flow-connector-duplicate',
+          description: 'Multiple Flow Connectors use the same ordered start and end Flow Endpoints.',
+          id: 'flow-connector-duplicate-3',
+          severity: 'error',
+          title: 'Duplicate Flow Connector',
+        },
+        {
+          affectedObjectCount: 1,
+          code: 'flow-action-empty',
+          description: 'A Flow Connector has no Flow Action label.',
+          id: 'flow-action-empty-4',
+          severity: 'warning',
+          title: 'Empty Flow Action',
+        },
+        {
+          affectedObjectCount: 2,
+          code: 'connector-reverse-index-stale',
+          description: 'A Flow Endpoint has connectorRefs pointing to deleted Flow Connectors.',
+          id: 'connector-reverse-index-stale-5',
+          severity: 'warning',
+          title: 'Stale Reverse Index',
+        },
+      ],
+    },
+  },
+  {
+    activeTab: 'validate',
+    description: 'Validate tab after Clean Stale Indexes removes stale connectorRefs.',
+    name: 'validate-clean-complete',
+    status: {
+      message: 'Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).',
+      tone: 'success',
+    },
+    validationReport: {
+      schemaVersion: 1,
+      summary: {
+        all: 1,
+        errors: 0,
+        warnings: 1,
+        info: 0,
+      },
+      issues: [
+        {
+          affectedObjectCount: 1,
+          code: 'flow-action-empty',
+          description: 'A Flow Connector has no Flow Action label.',
+          id: 'flow-action-empty-1',
+          severity: 'warning',
+          title: 'Empty Flow Action',
         },
       ],
     },
