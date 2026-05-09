@@ -9,6 +9,10 @@ importers:
   .: {}
 
   apps/flow-annotator:
+    dependencies:
+      '@figma-flow-annotator/core':
+        specifier: workspace:*
+        version: link:../../packages/core
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.4

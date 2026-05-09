@@ -5,7 +5,8 @@
     "moduleResolution": "bundler",
     "noEmit": true,
     "lib": ["es2020"],
-    "strict": true
+    "strict": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["src/**/*.ts"]
 }

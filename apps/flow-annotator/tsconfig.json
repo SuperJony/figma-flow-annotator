@@ -4,6 +4,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "lib": ["es2020"],
     "strict": true,
     "typeRoots": [

@@ -1,12 +1,12 @@
 import {
   buildConnectorVisualModel,
   type ConnectorVisualModel,
-} from '../../connect';
+} from '../../connector-visual';
 import {
   createFlowConnectorRecord,
   planConnectorTrunks,
   routeOrthogonalConnector,
-} from '../../../../packages/core/src/index';
+} from '@figma-flow-annotator/core';
 
 interface FixtureRect {
   x: number;

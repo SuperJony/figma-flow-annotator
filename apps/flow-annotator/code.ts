@@ -21,7 +21,6 @@ import {
   mergeAnnotationReferenceIds,
   mergeValidationReports,
   planAnnotationCardPosition,
-  serializeSharedPluginDataValue,
   type AddAnnotationSubjectsPlan,
   type AnnotationValidationBadgeInput,
   type AnnotationValidationCardInput,
@@ -38,21 +37,24 @@ import {
   type CreateAnnotationBadgeOperation,
   type CreateAnnotationCardOperation,
   type CreateAnnotationPlan,
-  type DocumentNodeTarget,
   type FlowConnectorRecord,
   type FlowConnectorRouteValidationConnectorInput,
   type FlowConnectorValidationConnectorInput,
   type FlowConnectorValidationEndpointInput,
   type MoveNodeOperation,
   type Point,
-  type SetSharedPluginDataOperation,
   type ValidateFlowConnectorRouteGeometryInput,
   type ValidateFlowConnectorReferencesInput,
   type ValidationReport,
   validateAnnotationBindings,
   validateFlowConnectorReferences,
   validateFlowConnectorRouteGeometry,
-} from '../../packages/core/src/index';
+} from '@figma-flow-annotator/core';
+import {
+  resolveContainer,
+  resolvePlanTarget,
+  writeSharedPluginData,
+} from './figma-plan-adapter';
 
 const NAMESPACE = SHARED_PLUGIN_DATA.namespace;
 const FONT: FontName = { family: 'Inter', style: 'Regular' };
@@ -296,7 +298,7 @@ function applyCleanStaleIndexesPlan(plan: CleanStaleIndexesPlan, existingNodes: 
       createdNodes: new Map(),
       existingNodes,
     });
-    writeSharedPluginData(node, operation);
+    writeSharedPluginData(node, operation, NAMESPACE);
   });
 }
 
@@ -455,7 +457,7 @@ function applyAnnotationPlan(
 
     if (operation.type === 'set-shared-plugin-data') {
       const node = resolvePlanTarget(operation.target, { containers, createdNodes, existingNodes });
-      writeSharedPluginData(node, operation);
+      writeSharedPluginData(node, operation, NAMESPACE);
       return;
     }
 
@@ -878,49 +880,6 @@ function getExistingAnnotationCardRects(container: FrameNode, card: FrameNode): 
       child.type === 'FRAME' &&
       child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === VISUAL_NODE_KINDS.annotationCard,
   ).map(localRect);
-}
-
-function resolveContainer(ref: string, containers: Map<string, FrameNode>): FrameNode {
-  const container = containers.get(ref);
-  if (container === undefined) {
-    throw new Error(`Annotation plan references missing container ${ref}.`);
-  }
-  return container;
-}
-
-function resolvePlanTarget(
-  target: DocumentNodeTarget,
-  refs: {
-    containers: Map<string, FrameNode>;
-    createdNodes: Map<string, SceneNode>;
-    existingNodes: Map<string, BaseNode>;
-  },
-): BaseNode {
-  if (target.kind === 'container') {
-    return resolveContainer(target.ref, refs.containers);
-  }
-
-  if (target.kind === 'created-node') {
-    const node = refs.createdNodes.get(target.ref);
-    if (node === undefined) {
-      throw new Error(`Annotation plan references missing created node ${target.ref}.`);
-    }
-    return node;
-  }
-
-  const node = refs.existingNodes.get(target.nodeId);
-  if (node === undefined) {
-    throw new Error(`Annotation plan references missing existing node ${target.nodeId}.`);
-  }
-  return node;
-}
-
-function writeSharedPluginData(node: BaseNode, operation: SetSharedPluginDataOperation): void {
-  node.setSharedPluginData(
-    NAMESPACE,
-    operation.key,
-    serializeSharedPluginDataValue(operation.value),
-  );
 }
 
 function appendAnnotationReference(

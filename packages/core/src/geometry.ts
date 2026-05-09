@@ -1,9 +1,17 @@
+
 export interface Point {
   x: number;
   y: number;
 }
 
-export function unionRects(rects: Rect[]): Rect {
+export interface RectLike {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function unionRects(rects: RectLike[]): RectLike {
   if (rects.length === 0) {
     return { x: 0, y: 0, width: 0, height: 0 };
   }

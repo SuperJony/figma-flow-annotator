@@ -5,7 +5,7 @@
   "description": "Figma Flow Annotator plugin",
   "main": "code.js",
   "scripts": {
-    "build": "tsc --noEmit --target es2019 --module esnext --moduleResolution bundler --lib es2020 --strict --typeRoots ./node_modules/@types,./node_modules/@figma code.ts connect.ts geometry.ts && esbuild code.ts --bundle --target=es2017 --outfile=code.js && pnpm run check:figma-syntax",
+    "build": "tsc --noEmit --target es2019 --module esnext --moduleResolution bundler --lib es2020 --strict --allowImportingTsExtensions --typeRoots ./node_modules/@types,./node_modules/@figma code.ts connect.ts connector-visual.ts && esbuild code.ts --bundle --target=es2017 --outfile=code.js && pnpm run check:figma-syntax",
     "check:figma-syntax": "eslint --no-config-lookup --parser-options '{\"ecmaVersion\":2017,\"sourceType\":\"script\"}' code.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -19,6 +19,9 @@
   },
   "author": "",
   "license": "",
+  "dependencies": {
+    "@figma-flow-annotator/core": "workspace:*"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@figma/eslint-plugin-figma-plugins": "*",
