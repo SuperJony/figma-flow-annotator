@@ -1,5 +1,4 @@
 import {
-  type CreateFlowConnectorOperation,
   type CreateFlowConnectorOperationBatch,
   type FlowConnectorRouteRenderPlan,
   PANEL_EMPTY_ROUTING_STATUS,
@@ -8,7 +7,6 @@ import {
   planFlowConnectorRouteLayoutSet,
   planFlowConnectorRouteRenderSet,
   type RefreshFlowConnectorOperationBatch,
-  type UpdateFlowConnectorOperation,
 } from "@figma-flow-annotator/core";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
@@ -20,12 +18,16 @@ import {
   getSelectedFlowConnectorRoots,
 } from "./current-page-snapshot";
 import {
+  createFlowConnectorVisualWriter,
+  renderFlowConnectorVisuals,
+  resolveFlowConnectorVisualRoot,
+} from "./flow-connector-visual-writer";
+import {
   getPendingConnectorEndpointNodes,
   handleSelectionChange,
   resetObservedEndpointSelection,
   swapPendingConnectorEndpoints,
 } from "./selection";
-import { createConnectorVisualNodes } from "./visual";
 
 export interface RefreshConnectorsResult {
   failedCount: number;
@@ -193,17 +195,7 @@ function applyCreateFlowConnectorOperationBatch(
     batch,
     existingNodes,
     namespace: runtime.namespace,
-    writer: {
-      createFlowConnector: (container, operation) =>
-        createFlowConnectorRoot(container, operation, runtime),
-      ensureContainer: runtime.ensureContainer,
-      updateFlowConnector: (operation) =>
-        updateFlowConnectorRoot(
-          resolveExistingConnectorRoot(operation.targetNodeId, existingNodes),
-          operation,
-          runtime,
-        ),
-    },
+    writer: createFlowConnectorVisualWriter(runtime, existingNodes),
   });
 
   if (batch.mode === "create") {
@@ -214,7 +206,7 @@ function applyCreateFlowConnectorOperationBatch(
     return connectorRoot;
   }
 
-  return resolveExistingConnectorRoot(batch.existingNodeRefs[0], existingNodes);
+  return resolveFlowConnectorVisualRoot(batch.existingNodeRefs[0], existingNodes);
 }
 
 function applyRefreshFlowConnectorOperationBatch(
@@ -226,38 +218,10 @@ function applyRefreshFlowConnectorOperationBatch(
     batch,
     existingNodes,
     namespace: runtime.namespace,
-    writer: {
-      updateFlowConnector: (operation) =>
-        updateFlowConnectorRoot(
-          resolveExistingConnectorRoot(operation.targetNodeId, existingNodes),
-          operation,
-          runtime,
-        ),
-    },
+    writer: createFlowConnectorVisualWriter(runtime, existingNodes),
   });
 
-  return resolveExistingConnectorRoot(batch.existingNodeRefs[0], existingNodes);
-}
-
-function createFlowConnectorRoot(
-  container: FrameNode,
-  operation: CreateFlowConnectorOperation,
-  runtime: ConnectRuntime,
-): GroupNode {
-  const visualNodes = createConnectorVisualNodes(operation.visual, runtime);
-  const connectorRoot = figma.group(visualNodes, container);
-  connectorRoot.name = operation.name;
-  return connectorRoot;
-}
-
-function updateFlowConnectorRoot(
-  connectorRoot: GroupNode,
-  operation: UpdateFlowConnectorOperation,
-  runtime: ConnectRuntime,
-): void {
-  const nextVisualNodes = createConnectorVisualNodes(operation.visual, runtime);
-  replaceConnectorVisualNodes(connectorRoot, nextVisualNodes);
-  connectorRoot.name = operation.name;
+  return resolveFlowConnectorVisualRoot(batch.existingNodeRefs[0], existingNodes);
 }
 
 function renderPlannedConnectorSet(
@@ -266,7 +230,7 @@ function renderPlannedConnectorSet(
   connectorNodesById?: Map<string, GroupNode>,
 ): void {
   if (renderConnectors !== undefined && connectorNodesById !== undefined) {
-    renderConnectorVisuals(renderConnectors, connectorNodesById, runtime);
+    renderFlowConnectorVisuals(renderConnectors, connectorNodesById, runtime);
     return;
   }
 
@@ -277,46 +241,11 @@ function renderPlannedConnectorSet(
       record: connector.record,
     })),
   });
-  renderConnectorVisuals(
+  renderFlowConnectorVisuals(
     renderSet.renderConnectors,
     new Map(connectors.map((connector) => [connector.node.id, connector.node])),
     runtime,
   );
-}
-
-function renderConnectorVisuals(
-  renderConnectors: FlowConnectorRouteRenderPlan[],
-  connectorNodesById: Map<string, GroupNode>,
-  runtime: ConnectRuntime,
-): void {
-  renderConnectors.forEach((connector) => {
-    const connectorRoot = connectorNodesById.get(connector.connectorNodeId);
-    if (connectorRoot === undefined) {
-      return;
-    }
-    const nextVisualNodes = createConnectorVisualNodes(connector.visual, runtime);
-    replaceConnectorVisualNodes(connectorRoot, nextVisualNodes);
-  });
-}
-
-function replaceConnectorVisualNodes(connectorRoot: GroupNode, nextVisualNodes: SceneNode[]): void {
-  [...connectorRoot.children].forEach((child) => {
-    child.remove();
-  });
-  nextVisualNodes.forEach((node) => {
-    connectorRoot.appendChild(node);
-  });
-}
-
-function resolveExistingConnectorRoot(
-  nodeId: string,
-  existingNodes: Map<string, BaseNode>,
-): GroupNode {
-  const node = existingNodes.get(nodeId);
-  if (node === undefined || node.type !== "GROUP") {
-    throw new Error(`Flow Connector operation batch references missing connector root ${nodeId}.`);
-  }
-  return node;
 }
 
 export {
