@@ -1,13 +1,132 @@
 import {
+  type AppendSharedReferenceOperation,
+  type CreateAnnotationBadgeOperation,
+  type CreateAnnotationCardOperation,
+  type CreateFlowConnectorOperation,
+  decodeAnnotationReferenceIds,
+  decodeConnectorReferenceIds,
+  type FigmaFileOperationBatch,
   type FigmaFileOperationTarget,
+  type MoveNodeOperation,
+  mergeAnnotationReferenceIds,
+  mergeConnectorReferenceIds,
   type SetSharedPluginDataOperation,
+  SHARED_PLUGIN_DATA,
   serializeSharedPluginDataValue,
+  type UpdateFlowConnectorOperation,
 } from "@figma-flow-annotator/core";
 
 export interface OperationNodeRefs {
   containers: Map<string, FrameNode>;
   createdNodes: Map<string, SceneNode>;
   existingNodes: Map<string, BaseNode>;
+}
+
+export interface FigmaFileOperationWriter {
+  createAnnotationBadge?(
+    container: FrameNode,
+    operation: CreateAnnotationBadgeOperation,
+  ): SceneNode;
+  createAnnotationCard?(container: FrameNode, operation: CreateAnnotationCardOperation): SceneNode;
+  createFlowConnector?(container: FrameNode, operation: CreateFlowConnectorOperation): SceneNode;
+  ensureContainer?(name: string): FrameNode;
+  updateFlowConnector?(operation: UpdateFlowConnectorOperation): void;
+}
+
+export interface ApplyFigmaFileOperationBatchInput {
+  batch: FigmaFileOperationBatch;
+  existingNodes: Map<string, BaseNode>;
+  namespace: string;
+  writer?: FigmaFileOperationWriter;
+}
+
+export interface AppliedFigmaFileOperationBatch {
+  containers: Map<string, FrameNode>;
+  createdNodes: Map<string, SceneNode>;
+  movedNodes: SceneNode[];
+}
+
+export function applyFigmaFileOperationBatch(
+  input: ApplyFigmaFileOperationBatchInput,
+): AppliedFigmaFileOperationBatch {
+  const containers = new Map<string, FrameNode>();
+  const createdNodes = new Map<string, SceneNode>();
+  const movedNodes: SceneNode[] = [];
+  const writer = input.writer ?? {};
+
+  input.batch.operations.forEach((operation) => {
+    if (operation.type === "ensure-container") {
+      if (writer.ensureContainer === undefined) {
+        throw new Error("Figma File Operation writer cannot ensure containers.");
+      }
+      containers.set(operation.ref, writer.ensureContainer(operation.name));
+      return;
+    }
+
+    if (operation.type === "set-shared-plugin-data") {
+      const node = resolveOperationTarget(operation.target, {
+        containers,
+        createdNodes,
+        existingNodes: input.existingNodes,
+      });
+      writeSharedPluginData(node, operation, input.namespace);
+      return;
+    }
+
+    if (operation.type === "append-shared-reference") {
+      appendSharedReference(input.existingNodes, operation, input.namespace);
+      return;
+    }
+
+    if (operation.type === "move-node") {
+      movedNodes.push(moveExistingNode(input.existingNodes, operation));
+      return;
+    }
+
+    if (operation.type === "create-annotation-card") {
+      if (writer.createAnnotationCard === undefined) {
+        throw new Error("Figma File Operation writer cannot create Annotation Cards.");
+      }
+      const container = resolveContainer(operation.containerRef, containers);
+      createdNodes.set(operation.ref, writer.createAnnotationCard(container, operation));
+      return;
+    }
+
+    if (operation.type === "create-annotation-badge") {
+      if (writer.createAnnotationBadge === undefined) {
+        throw new Error("Figma File Operation writer cannot create Annotation Badges.");
+      }
+      const container = resolveContainer(operation.containerRef, containers);
+      createdNodes.set(operation.ref, writer.createAnnotationBadge(container, operation));
+      return;
+    }
+
+    if (operation.type === "create-flow-connector") {
+      if (writer.createFlowConnector === undefined) {
+        throw new Error("Figma File Operation writer cannot create Flow Connectors.");
+      }
+      const container = resolveContainer(operation.containerRef, containers);
+      createdNodes.set(operation.ref, writer.createFlowConnector(container, operation));
+      return;
+    }
+
+    if (operation.type === "update-flow-connector") {
+      if (writer.updateFlowConnector === undefined) {
+        throw new Error("Figma File Operation writer cannot update Flow Connectors.");
+      }
+      writer.updateFlowConnector(operation);
+      return;
+    }
+
+    const unsupportedOperation = operation as { type: string };
+    throw new Error(`Figma File Operation writer cannot apply ${unsupportedOperation.type}.`);
+  });
+
+  return {
+    containers,
+    createdNodes,
+    movedNodes,
+  };
 }
 
 export function resolveContainer(ref: string, containers: Map<string, FrameNode>): FrameNode {
@@ -55,4 +174,78 @@ export function writeSharedPluginData(
     operation.key,
     serializeSharedPluginDataValue(operation.value),
   );
+}
+
+function appendSharedReference(
+  existingNodes: Map<string, BaseNode>,
+  operation: AppendSharedReferenceOperation,
+  namespace: string,
+): void {
+  const node = existingNodes.get(operation.targetNodeId);
+  if (node === undefined) {
+    throw new Error(
+      `Figma File Operation Batch references missing node ${operation.targetNodeId}.`,
+    );
+  }
+
+  if (
+    operation.key === SHARED_PLUGIN_DATA.keys.annotationRefs &&
+    operation.listKey === "annotationIds"
+  ) {
+    node.setSharedPluginData(
+      namespace,
+      operation.key,
+      serializeSharedPluginDataValue(
+        mergeAnnotationReferenceIds(readReferenceIds(node, namespace, operation), operation.id),
+      ),
+    );
+    return;
+  }
+
+  if (
+    operation.key === SHARED_PLUGIN_DATA.keys.connectorRefs &&
+    operation.listKey === "connectorIds"
+  ) {
+    node.setSharedPluginData(
+      namespace,
+      operation.key,
+      serializeSharedPluginDataValue(
+        mergeConnectorReferenceIds(readReferenceIds(node, namespace, operation), operation.id),
+      ),
+    );
+    return;
+  }
+
+  throw new Error(
+    `Figma File Operation Batch cannot append ${operation.key}.${operation.listKey}.`,
+  );
+}
+
+function moveExistingNode(
+  existingNodes: Map<string, BaseNode>,
+  operation: MoveNodeOperation,
+): SceneNode {
+  const node = existingNodes.get(operation.targetNodeId);
+  if (node === undefined || !("x" in node) || !("y" in node)) {
+    throw new Error(
+      `Figma File Operation Batch references missing movable node ${operation.targetNodeId}.`,
+    );
+  }
+  node.x = operation.position.x;
+  node.y = operation.position.y;
+  return node as SceneNode;
+}
+
+function readReferenceIds(
+  node: BaseNode,
+  namespace: string,
+  operation: AppendSharedReferenceOperation,
+): string[] {
+  if (operation.key === SHARED_PLUGIN_DATA.keys.annotationRefs) {
+    return decodeAnnotationReferenceIds(node.getSharedPluginData(namespace, operation.key));
+  }
+  if (operation.key === SHARED_PLUGIN_DATA.keys.connectorRefs) {
+    return decodeConnectorReferenceIds(node.getSharedPluginData(namespace, operation.key));
+  }
+  return [];
 }

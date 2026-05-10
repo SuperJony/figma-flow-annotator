@@ -2,12 +2,12 @@ import {
   buildCleanStaleIndexesOperationBatch,
   type CleanStaleIndexesOperationBatch,
   CONNECTORS_CONTAINER_NAME,
+  decodeFlowConnectorRecord,
   type FlowConnectorRecord,
   type FlowConnectorRouteValidationConnectorInput,
   type FlowConnectorValidationConnectorInput,
   type FlowConnectorValidationEndpointInput,
   mergeValidationReports,
-  type Point,
   SHARED_PLUGIN_DATA,
   type ValidateFlowConnectorReferencesInput,
   type ValidateFlowConnectorRouteGeometryInput,
@@ -23,15 +23,13 @@ import {
 } from "../annotations/records";
 import type { ConnectRuntime } from "../connectors/commands";
 import { collectConnectorObstacles } from "../connectors/commands";
-import { resolveOperationTarget, writeSharedPluginData } from "../figma/file-operations";
+import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
   collectCurrentPageNodes,
   findContainer,
   getVisibleBounds,
   hasGeneratedAncestor,
-  isRecord,
   NAMESPACE,
-  parseJson,
   readReferenceIds,
 } from "../figma/runtime";
 
@@ -110,17 +108,10 @@ function applyCleanStaleIndexesOperationBatch(
   batch: CleanStaleIndexesOperationBatch,
   existingNodes: Map<string, BaseNode>,
 ): void {
-  batch.operations.forEach((operation) => {
-    if (operation.type !== "set-shared-plugin-data") {
-      throw new Error(`Clean Stale Indexes cannot apply ${operation.type}.`);
-    }
-
-    const node = resolveOperationTarget(operation.target, {
-      containers: new Map(),
-      createdNodes: new Map(),
-      existingNodes,
-    });
-    writeSharedPluginData(node, operation, NAMESPACE);
+  applyFigmaFileOperationBatch({
+    batch,
+    existingNodes,
+    namespace: NAMESPACE,
   });
 }
 
@@ -219,56 +210,14 @@ function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {
 }
 
 function readFlowConnectorValidationRecord(node: BaseNode): FlowConnectorRecord | null {
-  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.connector));
-  if (
-    !isRecord(parsed) ||
-    parsed.schemaVersion !== 1 ||
-    typeof parsed.id !== "string" ||
-    !isFlowEndpointRecordValue(parsed.start) ||
-    !isFlowEndpointRecordValue(parsed.end) ||
-    typeof parsed.ownerContextFrameId !== "string" ||
-    !(typeof parsed.flowAction === "string" || parsed.flowAction === null) ||
-    typeof parsed.createdAt !== "string" ||
-    typeof parsed.updatedAt !== "string"
-  ) {
-    return null;
-  }
-
-  return {
-    schemaVersion: 1,
-    id: parsed.id,
-    start: parsed.start,
-    end: parsed.end,
-    ownerContextFrameId: parsed.ownerContextFrameId,
-    flowAction: parsed.flowAction,
-    ...(isRouteCacheRecordValue(parsed.routeCache) ? { routeCache: parsed.routeCache } : {}),
-    createdAt: parsed.createdAt,
-    updatedAt: parsed.updatedAt,
-  };
+  return decodeFlowConnectorRecord(
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.connector),
+  );
 }
 
 function isFlowEndpointEligibleNode(node: SceneNode): boolean {
   return (
     node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === "" &&
     !hasGeneratedAncestor(node)
-  );
-}
-
-function isFlowEndpointRecordValue(
-  value: unknown,
-): value is { nodeId: string; contextFrameId: string } {
-  return (
-    isRecord(value) && typeof value.nodeId === "string" && typeof value.contextFrameId === "string"
-  );
-}
-
-function isRouteCacheRecordValue(value: unknown): value is { schemaVersion: 1; points: Point[] } {
-  return (
-    isRecord(value) &&
-    value.schemaVersion === 1 &&
-    Array.isArray(value.points) &&
-    value.points.every(
-      (point) => isRecord(point) && typeof point.x === "number" && typeof point.y === "number",
-    )
   );
 }

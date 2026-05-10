@@ -2,7 +2,6 @@ import {
   type AddAnnotationSubjectsOperationBatch,
   ANNOTATIONS_CONTAINER_NAME,
   type AnnotationRecord,
-  type AppendSharedReferenceOperation,
   type ArrangeAnnotationBadgesOperationBatch,
   type ArrangeAnnotationCardsOperationBatch,
   buildAddAnnotationSubjectsOperationBatch,
@@ -13,17 +12,11 @@ import {
   type CreateAnnotationCardOperation,
   type CreateAnnotationOperationBatch,
   getAnnotationCardBasePosition,
-  type MoveNodeOperation,
-  mergeAnnotationReferenceIds,
   type Point,
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
-import {
-  resolveContainer,
-  resolveOperationTarget,
-  writeSharedPluginData,
-} from "../figma/file-operations";
+import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
   bringBadgesToFront,
   createId,
@@ -216,52 +209,18 @@ function applyAnnotationOperationBatch(
     | ArrangeAnnotationCardsOperationBatch,
   existingNodes: Map<string, BaseNode>,
 ): { nodes: SceneNode[] } {
-  const containers = new Map<string, FrameNode>();
-  const createdNodes = new Map<string, SceneNode>();
-  const movedNodes: SceneNode[] = [];
-
-  batch.operations.forEach((operation) => {
-    if (operation.type === "ensure-container") {
-      containers.set(operation.ref, ensureContainer(operation.name));
-      return;
-    }
-
-    if (operation.type === "set-shared-plugin-data") {
-      const node = resolveOperationTarget(operation.target, {
-        containers,
-        createdNodes,
-        existingNodes,
-      });
-      writeSharedPluginData(node, operation, NAMESPACE);
-      return;
-    }
-
-    if (operation.type === "create-annotation-card") {
-      const container = resolveContainer(operation.containerRef, containers);
-      createdNodes.set(operation.ref, createAnnotationCard(container, operation));
-      return;
-    }
-
-    if (operation.type === "create-annotation-badge") {
-      const container = resolveContainer(operation.containerRef, containers);
-      createdNodes.set(operation.ref, createAnnotationBadge(container, operation));
-      return;
-    }
-
-    if (operation.type === "append-shared-reference") {
-      appendAnnotationReference(existingNodes, operation);
-      return;
-    }
-
-    if (operation.type === "move-node") {
-      movedNodes.push(moveExistingNode(existingNodes, operation));
-      return;
-    }
-
-    throw new Error(`Annotation command writer cannot apply ${operation.type}.`);
+  const applied = applyFigmaFileOperationBatch({
+    batch,
+    existingNodes,
+    namespace: NAMESPACE,
+    writer: {
+      createAnnotationBadge,
+      createAnnotationCard,
+      ensureContainer,
+    },
   });
 
-  const container = containers.get("annotations");
+  const container = applied.containers.get("annotations");
   if (container !== undefined) {
     bringBadgesToFront(container);
   }
@@ -269,13 +228,13 @@ function applyAnnotationOperationBatch(
     nodes:
       "createdNodeRefs" in batch
         ? batch.createdNodeRefs.map((ref) => {
-            const node = createdNodes.get(ref);
+            const node = applied.createdNodes.get(ref);
             if (node === undefined) {
               throw new Error(`Annotation operation batch did not create ${ref}.`);
             }
             return node;
           })
-        : movedNodes,
+        : applied.movedNodes,
   };
 }
 
@@ -379,49 +338,6 @@ function getExistingAnnotationCardRects(container: FrameNode, card: FrameNode): 
           VISUAL_NODE_KINDS.annotationCard,
     )
     .map(localRect);
-}
-
-function appendAnnotationReference(
-  existingNodes: Map<string, BaseNode>,
-  operation: AppendSharedReferenceOperation,
-): void {
-  if (
-    operation.key !== SHARED_PLUGIN_DATA.keys.annotationRefs ||
-    operation.listKey !== "annotationIds"
-  ) {
-    throw new Error("Annotation command writer can only apply annotation reverse references.");
-  }
-
-  const node = existingNodes.get(operation.targetNodeId);
-  if (node === undefined) {
-    throw new Error(
-      `Annotation operation batch references missing Subject Node ${operation.targetNodeId}.`,
-    );
-  }
-  const record = mergeAnnotationReferenceIds(
-    readReferenceIds(node, SHARED_PLUGIN_DATA.keys.annotationRefs, "annotationIds"),
-    operation.id,
-  );
-  node.setSharedPluginData(
-    NAMESPACE,
-    SHARED_PLUGIN_DATA.keys.annotationRefs,
-    JSON.stringify(record),
-  );
-}
-
-function moveExistingNode(
-  existingNodes: Map<string, BaseNode>,
-  operation: MoveNodeOperation,
-): SceneNode {
-  const node = existingNodes.get(operation.targetNodeId);
-  if (node === undefined || !("x" in node) || !("y" in node)) {
-    throw new Error(
-      `Annotation operation batch references missing movable node ${operation.targetNodeId}.`,
-    );
-  }
-  node.x = operation.position.x;
-  node.y = operation.position.y;
-  return node as SceneNode;
 }
 
 function groupCardsByContext(

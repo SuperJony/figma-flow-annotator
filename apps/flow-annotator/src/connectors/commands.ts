@@ -1,28 +1,20 @@
 import {
-  type AppendSharedReferenceOperation,
   buildCreateFlowConnectorOperationBatch,
   buildRefreshFlowConnectorOperationBatch,
   type CreateFlowConnectorOperation,
   type CreateFlowConnectorOperationBatch,
   type FlowConnectorRecord,
   groupConnectorTrunks,
-  mergeConnectorReferenceIds,
   type RefreshFlowConnectorOperationBatch,
   routeOrthogonalConnector,
-  SHARED_PLUGIN_DATA,
   type UpdateFlowConnectorOperation,
 } from "@figma-flow-annotator/core";
-import {
-  resolveContainer,
-  resolveOperationTarget,
-  writeSharedPluginData,
-} from "../figma/file-operations";
+import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import { collectConnectorObstacles } from "./obstacles";
 import {
   findExistingDirectedConnector,
   getFlowConnectorRecords,
   getSelectedFlowConnectorRoots,
-  readConnectorReferenceIds,
   readFlowConnectorRecord,
 } from "./records";
 import {
@@ -255,50 +247,25 @@ function applyCreateFlowConnectorOperationBatch(
   runtime: ConnectRuntime,
   existingNodes: Map<string, BaseNode>,
 ): GroupNode {
-  const containers = new Map<string, FrameNode>();
-  const createdNodes = new Map<string, SceneNode>();
-
-  batch.operations.forEach((operation) => {
-    if (operation.type === "ensure-container") {
-      containers.set(operation.ref, runtime.ensureContainer(operation.name));
-      return;
-    }
-
-    if (operation.type === "set-shared-plugin-data") {
-      const node = resolveOperationTarget(operation.target, {
-        containers,
-        createdNodes,
-        existingNodes,
-      });
-      writeSharedPluginData(node, operation, runtime.namespace);
-      return;
-    }
-
-    if (operation.type === "create-flow-connector") {
-      const container = resolveContainer(operation.containerRef, containers);
-      createdNodes.set(operation.ref, createFlowConnectorRoot(container, operation, runtime));
-      return;
-    }
-
-    if (operation.type === "update-flow-connector") {
-      updateFlowConnectorRoot(
-        resolveExistingConnectorRoot(operation.targetNodeId, existingNodes),
-        operation,
-        runtime,
-      );
-      return;
-    }
-
-    if (operation.type === "append-shared-reference") {
-      appendConnectorReference(existingNodes, runtime, operation);
-      return;
-    }
-
-    throw new Error(`Flow Connector command writer cannot apply ${operation.type}.`);
+  const applied = applyFigmaFileOperationBatch({
+    batch,
+    existingNodes,
+    namespace: runtime.namespace,
+    writer: {
+      createFlowConnector: (container, operation) =>
+        createFlowConnectorRoot(container, operation, runtime),
+      ensureContainer: runtime.ensureContainer,
+      updateFlowConnector: (operation) =>
+        updateFlowConnectorRoot(
+          resolveExistingConnectorRoot(operation.targetNodeId, existingNodes),
+          operation,
+          runtime,
+        ),
+    },
   });
 
   if (batch.mode === "create") {
-    const connectorRoot = createdNodes.get(batch.createdNodeRefs[0]);
+    const connectorRoot = applied.createdNodes.get(batch.createdNodeRefs[0]);
     if (connectorRoot === undefined || connectorRoot.type !== "GROUP") {
       throw new Error("Flow Connector operation batch did not create a connector root.");
     }
@@ -313,27 +280,18 @@ function applyRefreshFlowConnectorOperationBatch(
   runtime: ConnectRuntime,
   existingNodes: Map<string, BaseNode>,
 ): GroupNode {
-  batch.operations.forEach((operation) => {
-    if (operation.type === "update-flow-connector") {
-      updateFlowConnectorRoot(
-        resolveExistingConnectorRoot(operation.targetNodeId, existingNodes),
-        operation,
-        runtime,
-      );
-      return;
-    }
-
-    if (operation.type === "set-shared-plugin-data") {
-      const node = resolveOperationTarget(operation.target, {
-        containers: new Map(),
-        createdNodes: new Map(),
-        existingNodes,
-      });
-      writeSharedPluginData(node, operation, runtime.namespace);
-      return;
-    }
-
-    throw new Error(`Flow Connector refresh writer cannot apply ${operation.type}.`);
+  applyFigmaFileOperationBatch({
+    batch,
+    existingNodes,
+    namespace: runtime.namespace,
+    writer: {
+      updateFlowConnector: (operation) =>
+        updateFlowConnectorRoot(
+          resolveExistingConnectorRoot(operation.targetNodeId, existingNodes),
+          operation,
+          runtime,
+        ),
+    },
   });
 
   return resolveExistingConnectorRoot(batch.existingNodeRefs[0], existingNodes);
@@ -415,32 +373,6 @@ function resolveExistingConnectorRoot(
     throw new Error(`Flow Connector operation batch references missing connector root ${nodeId}.`);
   }
   return node;
-}
-
-function appendConnectorReference(
-  existingNodes: Map<string, BaseNode>,
-  runtime: ConnectRuntime,
-  operation: AppendSharedReferenceOperation,
-): void {
-  if (
-    operation.key !== SHARED_PLUGIN_DATA.keys.connectorRefs ||
-    operation.listKey !== "connectorIds"
-  ) {
-    throw new Error("Flow Connector command writer can only apply connector reverse references.");
-  }
-
-  const node = existingNodes.get(operation.targetNodeId);
-  if (node === undefined) {
-    throw new Error(
-      `Flow Connector operation batch references missing Flow Endpoint ${operation.targetNodeId}.`,
-    );
-  }
-  const record = mergeConnectorReferenceIds(readConnectorReferenceIds(node, runtime), operation.id);
-  node.setSharedPluginData(
-    runtime.namespace,
-    SHARED_PLUGIN_DATA.keys.connectorRefs,
-    JSON.stringify(record),
-  );
 }
 
 export {
