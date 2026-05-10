@@ -7,12 +7,14 @@ import {
   buildAddAnnotationSubjectsOperationBatch,
   buildArrangeAnnotationBadgesOperationBatch,
   buildArrangeAnnotationCardsOperationBatch,
-  buildCreateAnnotationOperationBatch,
   type CreateAnnotationBadgeOperation,
   type CreateAnnotationCardOperation,
   type CreateAnnotationOperationBatch,
+  decodeAnnotationNumberSeedRecord,
+  decodeContextRecord,
   getAnnotationCardBasePosition,
   type Point,
+  planCreateAnnotationAuthoring,
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
@@ -23,9 +25,7 @@ import {
   createText,
   ensureContainer,
   ensureLayerOrder,
-  findAnnotationContextNode,
   findContainer,
-  getNextAnnotationNumber,
   getVisibleBounds,
   hasGeneratedAncestor,
   localRect,
@@ -64,17 +64,19 @@ export interface ArrangeResult {
 
 export function createAnnotations(bodyValue: string): AnnotationCreationResult {
   const subjects = figma.currentPage.selection.filter((node) => !hasGeneratedAncestor(node));
-  const contextNode = findAnnotationContextNode(subjects);
-  const contextFrameId = contextNode.id;
-  const annotationNumber = getNextAnnotationNumber(contextNode);
+  const contextNodes = collectAnnotationContextNodes(subjects);
   const now = new Date().toISOString();
-  const batch = buildCreateAnnotationOperationBatch({
+  const plan = planCreateAnnotationAuthoring({
     annotationId: createId("annotation"),
-    annotationNumber,
     body: bodyValue,
-    contextFrameId,
+    contextRecords: getContextRecords(contextNodes),
+    existingAnnotationNumberSeeds: getAnnotationNumberSeeds(
+      findContainer(ANNOTATIONS_CONTAINER_NAME),
+    ),
     now,
+    pageId: figma.currentPage.id,
     subjects: subjects.map((subject) => ({
+      ancestorFrameIds: getFrameAncestorIds(subject),
       bounds: getVisibleBounds(subject),
       existingAnnotationRefCount: readReferenceIds(subject, "annotationRefs", "annotationIds")
         .length,
@@ -82,6 +84,11 @@ export function createAnnotations(bodyValue: string): AnnotationCreationResult {
       name: subject.name,
     })),
   });
+  const batch = plan.batch;
+  const contextNode = contextNodes.get(plan.contextFrameId);
+  if (contextNode === undefined) {
+    throw new Error(`Missing Annotation context ${plan.contextFrameId}.`);
+  }
   const applied = applyAnnotationOperationBatch(
     batch,
     new Map([
@@ -338,6 +345,64 @@ function getExistingAnnotationCardRects(container: FrameNode, card: FrameNode): 
           VISUAL_NODE_KINDS.annotationCard,
     )
     .map(localRect);
+}
+
+function collectAnnotationContextNodes(subjects: SceneNode[]): Map<string, FrameNode | PageNode> {
+  const contextNodes = new Map<string, FrameNode | PageNode>([
+    [figma.currentPage.id, figma.currentPage],
+  ]);
+  subjects.forEach((subject) => {
+    let current: BaseNode | null = subject;
+    while (current !== null && current.type !== "PAGE") {
+      if (current.type === "FRAME") {
+        contextNodes.set(current.id, current);
+      }
+      current = current.parent;
+    }
+  });
+  return contextNodes;
+}
+
+function getContextRecords(contextNodes: Map<string, FrameNode | PageNode>) {
+  return [...contextNodes.values()].flatMap((node) => {
+    const record = decodeContextRecord(
+      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.context),
+      node.id,
+    );
+    return record === null ? [] : [record];
+  });
+}
+
+function getAnnotationNumberSeeds(container: FrameNode | null) {
+  if (container === null) {
+    return [];
+  }
+
+  return container.children.flatMap((node) => {
+    if (
+      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !==
+      VISUAL_NODE_KINDS.annotationCard
+    ) {
+      return [];
+    }
+
+    const seed = decodeAnnotationNumberSeedRecord(
+      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation),
+    );
+    return seed === null ? [] : [seed];
+  });
+}
+
+function getFrameAncestorIds(node: SceneNode): string[] {
+  const chain: string[] = [];
+  let current: BaseNode | null = node;
+  while (current !== null && current.type !== "PAGE") {
+    if (current.type === "FRAME") {
+      chain.unshift(current.id);
+    }
+    current = current.parent;
+  }
+  return chain;
 }
 
 function groupCardsByContext(

@@ -1,19 +1,14 @@
 import {
   ANNOTATIONS_CONTAINER_NAME,
   CONNECTORS_CONTAINER_NAME,
-  type ContextRecord,
-  decodeAnnotationNumberSeedRecord,
   decodeAnnotationReferenceIds,
   decodeConnectorReferenceIds,
-  decodeContextRecord,
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
 
 export const NAMESPACE = SHARED_PLUGIN_DATA.namespace;
 export const FONT: FontName = { family: "Inter", style: "Regular" };
-
-export type ContextDataNode = FrameNode | PageNode;
 
 let loadedFonts = false;
 
@@ -159,20 +154,6 @@ export function hasGeneratedAncestor(node: SceneNode): boolean {
   return false;
 }
 
-export function findAnnotationContextNode(subjects: SceneNode[]): ContextDataNode {
-  const commonFrame = findNearestCommonFrame(subjects);
-  if (commonFrame === null) {
-    return figma.currentPage;
-  }
-  return commonFrame;
-}
-
-export function getNextAnnotationNumber(contextNode: ContextDataNode): number {
-  const contextFrameId = contextNode.id;
-  const contextRecord = readContextRecord(contextNode, contextFrameId);
-  return contextRecord?.nextAnnotationNumber ?? getSeededNextAnnotationNumber(contextFrameId);
-}
-
 export function readReferenceIds(
   node: BaseNode,
   dataKey: "annotationRefs" | "connectorRefs",
@@ -212,68 +193,4 @@ export async function getExistingSceneNodes(nodeIds: string[]): Promise<SceneNod
     }
   }
   return nodes;
-}
-
-function findNearestCommonFrame(subjects: SceneNode[]): FrameNode | null {
-  const chains = subjects.map(frameAncestorChain);
-  const firstChain = chains[0] ?? [];
-  let commonFrame: FrameNode | null = null;
-
-  for (let index = 0; index < firstChain.length; index += 1) {
-    const candidate = firstChain[index];
-    if (chains.every((chain) => chain[index]?.id === candidate.id)) {
-      commonFrame = candidate;
-      continue;
-    }
-    break;
-  }
-
-  return commonFrame;
-}
-
-function frameAncestorChain(node: SceneNode): FrameNode[] {
-  const chain: FrameNode[] = [];
-  let current: BaseNode | null = node;
-  while (current !== null && current.type !== "PAGE") {
-    if (current.type === "FRAME") {
-      chain.unshift(current);
-    }
-    current = current.parent;
-  }
-  return chain;
-}
-
-function readContextRecord(
-  contextNode: ContextDataNode,
-  contextFrameId: string,
-): ContextRecord | null {
-  return decodeContextRecord(
-    contextNode.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.context),
-    contextFrameId,
-  );
-}
-
-function getSeededNextAnnotationNumber(contextFrameId: string): number {
-  const container = findContainer(ANNOTATIONS_CONTAINER_NAME);
-  if (container === null) {
-    return 1;
-  }
-
-  let maxNumber = 0;
-  container.children.forEach((node) => {
-    if (
-      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !==
-      VISUAL_NODE_KINDS.annotationCard
-    ) {
-      return;
-    }
-
-    const annotation = decodeAnnotationNumberSeedRecord(
-      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation),
-    );
-    if (annotation !== null && annotation.contextFrameId === contextFrameId) {
-      maxNumber = Math.max(maxNumber, annotation.annotationNumber);
-    }
-  });
-  return maxNumber + 1;
 }

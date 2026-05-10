@@ -1,12 +1,11 @@
 import {
-  buildCreateFlowConnectorOperationBatch,
-  buildRefreshFlowConnectorOperationBatch,
   type CreateFlowConnectorOperation,
   type CreateFlowConnectorOperationBatch,
   type FlowConnectorRecord,
   groupConnectorTrunks,
+  planCreateFlowConnectorAuthoring,
+  planRefreshFlowConnectorAuthoring,
   type RefreshFlowConnectorOperationBatch,
-  routeOrthogonalConnector,
   type UpdateFlowConnectorOperation,
 } from "@figma-flow-annotator/core";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
@@ -71,61 +70,32 @@ export interface ConnectRuntime {
 
 export function createFlowConnector(flowActionValue: string, runtime: ConnectRuntime): GroupNode {
   const endpoints = getPendingConnectorEndpointNodes(runtime);
-  if (endpoints.length !== 2) {
-    throw new Error("Create Flow Connector requires exactly two runtime-selected Flow Endpoints.");
-  }
-
-  const [startNode, endNode] = endpoints;
-  if (runtime.hasGeneratedAncestor(startNode) || runtime.hasGeneratedAncestor(endNode)) {
-    throw new Error("Flow Endpoints must be non-generated Figma nodes.");
-  }
-
-  const startBounds = runtime.getVisibleBounds(startNode);
-  const endBounds = runtime.getVisibleBounds(endNode);
-  const startContextFrameId = runtime.findContextFrameId(startNode);
-  const endContextFrameId = runtime.findContextFrameId(endNode);
-  const routePoints = routeOrthogonalConnector({
-    startRect: startBounds,
-    endRect: endBounds,
-    obstacles: collectConnectorObstacles(startNode, endNode, runtime),
-  }).points;
-  const existingConnector = findExistingDirectedConnector(startNode.id, endNode.id, runtime);
-  const connectorId = existingConnector?.record.id ?? runtime.createId("connector");
+  const existingConnectors = getFlowConnectorRecords(runtime);
   const now = new Date().toISOString();
-  const batch = buildCreateFlowConnectorOperationBatch({
-    connectorId,
-    ...(existingConnector === null
-      ? {}
-      : {
-          existingConnector: {
-            nodeId: existingConnector.node.id,
-            record: existingConnector.record,
-          },
-        }),
-    start: {
-      id: startNode.id,
-      name: startNode.name,
-      contextFrameId: startContextFrameId,
-    },
-    end: {
-      id: endNode.id,
-      name: endNode.name,
-      contextFrameId: endContextFrameId,
-    },
-    ownerContextFrameId: startContextFrameId,
+  const plan = planCreateFlowConnectorAuthoring({
+    createConnectorId: () => runtime.createId("connector"),
+    endpoints: endpoints.map((endpoint) => toAuthoringEndpoint(endpoint, runtime)),
+    existingConnectors: existingConnectors.map((connector) => ({
+      nodeId: connector.node.id,
+      record: connector.record,
+    })),
     flowAction: flowActionValue,
-    routePoints,
     now,
+    obstacles:
+      endpoints.length === 2 ? collectConnectorObstacles(endpoints[0], endpoints[1], runtime) : [],
   });
+  const [startNode, endNode] = endpoints;
+  const batch = plan.batch;
   const connectorRoot = applyCreateFlowConnectorOperationBatch(
     batch,
     runtime,
     new Map([
       [startNode.id, startNode],
       [endNode.id, endNode],
-      ...(existingConnector === null
-        ? []
-        : [[existingConnector.node.id, existingConnector.node] as [string, BaseNode]]),
+      ...existingConnectors.map((connector): [string, BaseNode] => [
+        connector.node.id,
+        connector.node,
+      ]),
     ]),
   );
   regenerateConnectorVisuals(runtime);
@@ -213,19 +183,15 @@ async function refreshOneFlowConnector(
 ): Promise<GroupNode> {
   const startNode = await getLiveSceneNode(connector.record.start.nodeId, "start Flow Endpoint");
   const endNode = await getLiveSceneNode(connector.record.end.nodeId, "end Flow Endpoint");
-  const routePoints = routeOrthogonalConnector({
-    startRect: runtime.getVisibleBounds(startNode),
-    endRect: runtime.getVisibleBounds(endNode),
-    obstacles: collectConnectorObstacles(startNode, endNode, runtime),
-  }).points;
-  const batch = buildRefreshFlowConnectorOperationBatch({
+  const plan = planRefreshFlowConnectorAuthoring({
     connectorNodeId: connector.node.id,
-    endName: endNode.name,
+    end: toAuthoringEndpoint(endNode, runtime),
     now: new Date().toISOString(),
+    obstacles: collectConnectorObstacles(startNode, endNode, runtime),
     record: connector.record,
-    routePoints,
-    startName: startNode.name,
+    start: toAuthoringEndpoint(startNode, runtime),
   });
+  const batch = plan.batch;
 
   return applyRefreshFlowConnectorOperationBatch(
     batch,
@@ -240,6 +206,16 @@ async function getLiveSceneNode(nodeId: string, role: string): Promise<SceneNode
     throw new Error(`Missing ${role} ${nodeId}.`);
   }
   return node as SceneNode;
+}
+
+function toAuthoringEndpoint(node: SceneNode, runtime: ConnectRuntime) {
+  return {
+    bounds: runtime.getVisibleBounds(node),
+    contextFrameId: runtime.findContextFrameId(node),
+    hasGeneratedAncestor: runtime.hasGeneratedAncestor(node),
+    id: node.id,
+    name: node.name,
+  };
 }
 
 function applyCreateFlowConnectorOperationBatch(
