@@ -14,7 +14,8 @@
       "!!**/.next",
       "!!**/.turbo",
       "!!**/coverage",
-      "!!apps/flow-annotator/ui.html"
+      "!!apps/flow-annotator/ui.html",
+      "!!apps/flow-annotator/code.js"
     ]
   },
   "formatter": {
