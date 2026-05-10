@@ -2,6 +2,7 @@ export * from "./annotations/authoring-plan.ts";
 export * from "./annotations/operations.ts";
 export * from "./connectors/authoring-plan.ts";
 export * from "./connectors/operations.ts";
+export * from "./connectors/route-layout-plan.ts";
 export type {
   ConnectorObstacle,
   ConnectorObstacleKind,

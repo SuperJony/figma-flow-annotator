@@ -2,9 +2,11 @@ import {
   type CreateFlowConnectorOperation,
   type CreateFlowConnectorOperationBatch,
   type FlowConnectorRecord,
-  groupConnectorTrunks,
+  type FlowConnectorRouteLayoutConnectorInput,
+  type FlowConnectorRouteRenderPlan,
   planCreateFlowConnectorAuthoring,
-  planRefreshFlowConnectorAuthoring,
+  planFlowConnectorRouteLayoutSet,
+  planFlowConnectorRouteRenderSet,
   type RefreshFlowConnectorOperationBatch,
   type UpdateFlowConnectorOperation,
 } from "@figma-flow-annotator/core";
@@ -98,7 +100,7 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
       ]),
     ]),
   );
-  regenerateConnectorVisuals(runtime);
+  renderPlannedConnectorSet(runtime);
   runtime.ensureLayerOrder();
   return connectorRoot;
 }
@@ -107,39 +109,63 @@ export async function refreshFlowConnectors(
   runtime: ConnectRuntime,
 ): Promise<RefreshConnectorsResult> {
   const refreshedNodes: GroupNode[] = [];
-  const failures: string[] = [];
+  const applyFailures: string[] = [];
   const selectedConnectorRoots = getSelectedFlowConnectorRoots(runtime);
   const selectedOnly = selectedConnectorRoots.length > 0;
-  const connectorRecords = selectedOnly
-    ? selectedConnectorRoots.flatMap((node) => {
-        const record = readFlowConnectorRecord(node, runtime);
-        if (record === null) {
-          failures.push(`${node.name}: Missing Flow Connector record.`);
-          return [];
-        }
-        return [{ node, record }];
-      })
-    : getFlowConnectorRecords(runtime);
+  const connectorRecords = getFlowConnectorRecords(runtime);
+  const layoutConnectors = await collectRouteLayoutConnectors(
+    connectorRecords,
+    selectedConnectorRoots,
+    runtime,
+  );
 
-  if (connectorRecords.length === 0 && failures.length === 0) {
+  if (layoutConnectors.length === 0) {
     throw new Error("No Flow Connectors found to refresh.");
   }
 
-  for (const connector of connectorRecords) {
+  const layoutPlan = planFlowConnectorRouteLayoutSet({
+    connectors: layoutConnectors,
+    now: new Date().toISOString(),
+    ...(selectedOnly
+      ? { selectedConnectorNodeIds: selectedConnectorRoots.map((node) => node.id) }
+      : {}),
+  });
+  const connectorNodesById = buildConnectorNodeMap(connectorRecords, selectedConnectorRoots);
+
+  for (const refresh of layoutPlan.refreshes) {
     try {
-      const refreshed = await refreshOneFlowConnector(connector, runtime);
+      const connectorNode = connectorNodesById.get(refresh.connectorNodeId);
+      if (connectorNode === undefined) {
+        throw new Error(`Missing Flow Connector root ${refresh.connectorNodeId}.`);
+      }
+      const refreshed = applyRefreshFlowConnectorOperationBatch(
+        refresh.batch,
+        runtime,
+        new Map([[refresh.connectorNodeId, connectorNode]]),
+      );
       refreshedNodes.push(refreshed);
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown connector refresh failure.";
-      failures.push(`${connector.node.name}: ${errorMessage}`);
+      const connectorName =
+        connectorNodesById.get(refresh.connectorNodeId)?.name ?? refresh.connectorNodeId;
+      applyFailures.push(`${connectorName}: ${errorMessage}`);
     }
   }
 
   if (refreshedNodes.length > 0) {
-    regenerateConnectorVisuals(runtime);
+    if (applyFailures.length === 0) {
+      renderPlannedConnectorSet(runtime, layoutPlan.renderConnectors, connectorNodesById);
+    } else {
+      renderPlannedConnectorSet(runtime);
+    }
     runtime.ensureLayerOrder();
   }
+
+  const failures = [
+    ...layoutPlan.failures.map((failure) => `${failure.connectorName}: ${failure.message}`),
+    ...applyFailures,
+  ];
 
   return {
     failedCount: failures.length,
@@ -177,33 +203,10 @@ export function getConnectSelectionState(runtime: ConnectRuntime): ConnectSelect
   };
 }
 
-async function refreshOneFlowConnector(
-  connector: { node: GroupNode; record: FlowConnectorRecord },
-  runtime: ConnectRuntime,
-): Promise<GroupNode> {
-  const startNode = await getLiveSceneNode(connector.record.start.nodeId, "start Flow Endpoint");
-  const endNode = await getLiveSceneNode(connector.record.end.nodeId, "end Flow Endpoint");
-  const plan = planRefreshFlowConnectorAuthoring({
-    connectorNodeId: connector.node.id,
-    end: toAuthoringEndpoint(endNode, runtime),
-    now: new Date().toISOString(),
-    obstacles: collectConnectorObstacles(startNode, endNode, runtime),
-    record: connector.record,
-    start: toAuthoringEndpoint(startNode, runtime),
-  });
-  const batch = plan.batch;
-
-  return applyRefreshFlowConnectorOperationBatch(
-    batch,
-    runtime,
-    new Map([[connector.node.id, connector.node]]),
-  );
-}
-
-async function getLiveSceneNode(nodeId: string, role: string): Promise<SceneNode> {
+async function getLiveSceneNodeOrNull(nodeId: string): Promise<SceneNode | null> {
   const node = await figma.getNodeByIdAsync(nodeId);
   if (node === null || node.type === "PAGE" || !("absoluteBoundingBox" in node) || node.removed) {
-    throw new Error(`Missing ${role} ${nodeId}.`);
+    return null;
   }
   return node as SceneNode;
 }
@@ -302,32 +305,125 @@ function updateFlowConnectorRoot(
   connectorRoot.name = operation.name;
 }
 
-function regenerateConnectorVisuals(runtime: ConnectRuntime): void {
-  const connectors = getFlowConnectorRecords(runtime).filter(
-    (connector) => connector.record.routeCache !== undefined,
+async function collectRouteLayoutConnectors(
+  connectorRecords: { node: GroupNode; record: FlowConnectorRecord }[],
+  selectedConnectorRoots: GroupNode[],
+  runtime: ConnectRuntime,
+): Promise<FlowConnectorRouteLayoutConnectorInput[]> {
+  if (selectedConnectorRoots.length === 0) {
+    return Promise.all(
+      connectorRecords.map((connector) => toRouteLayoutConnector(connector, true, runtime)),
+    );
+  }
+
+  const recordsByNodeId = new Map(
+    connectorRecords.map((connector) => [connector.node.id, connector]),
   );
-  const trunkLayout = groupConnectorTrunks({
+  const selectedNodeIds = new Set(selectedConnectorRoots.map((node) => node.id));
+  const selectedConnectors = selectedConnectorRoots.map((node) => ({
+    node,
+    record: recordsByNodeId.get(node.id)?.record ?? readFlowConnectorRecord(node, runtime),
+  }));
+  const remainingConnectors = connectorRecords.filter(
+    (connector) => !selectedNodeIds.has(connector.node.id),
+  );
+
+  return [
+    ...(await Promise.all(
+      selectedConnectors.map((connector) => toRouteLayoutConnector(connector, true, runtime)),
+    )),
+    ...remainingConnectors.map((connector) => toRouteLayoutConnectorWithoutRuntimeFacts(connector)),
+  ];
+}
+
+async function toRouteLayoutConnector(
+  connector: { node: GroupNode; record: FlowConnectorRecord | null },
+  includeRuntimeFacts: boolean,
+  runtime: ConnectRuntime,
+): Promise<FlowConnectorRouteLayoutConnectorInput> {
+  if (!includeRuntimeFacts || connector.record === null) {
+    return toRouteLayoutConnectorWithoutRuntimeFacts(connector);
+  }
+
+  const startNode = await getLiveSceneNodeOrNull(connector.record.start.nodeId);
+  const endNode = await getLiveSceneNodeOrNull(connector.record.end.nodeId);
+
+  return {
+    ...toRouteLayoutConnectorWithoutRuntimeFacts(connector),
+    ...(startNode === null ? {} : { start: toAuthoringEndpoint(startNode, runtime) }),
+    ...(endNode === null ? {} : { end: toAuthoringEndpoint(endNode, runtime) }),
+    obstacles:
+      startNode === null || endNode === null
+        ? []
+        : collectConnectorObstacles(startNode, endNode, runtime),
+  };
+}
+
+function toRouteLayoutConnectorWithoutRuntimeFacts(connector: {
+  node: GroupNode;
+  record: FlowConnectorRecord | null;
+}): FlowConnectorRouteLayoutConnectorInput {
+  return {
+    name: connector.node.name,
+    nodeId: connector.node.id,
+    record: connector.record,
+  };
+}
+
+function buildConnectorNodeMap(
+  connectorRecords: { node: GroupNode; record: FlowConnectorRecord }[],
+  selectedConnectorRoots: GroupNode[],
+): Map<string, GroupNode> {
+  return new Map(
+    [...connectorRecords.map((connector) => connector.node), ...selectedConnectorRoots].map(
+      (node) => [node.id, node],
+    ),
+  );
+}
+
+function renderPlannedConnectorSet(
+  runtime: ConnectRuntime,
+  renderConnectors?: FlowConnectorRouteRenderPlan[],
+  connectorNodesById?: Map<string, GroupNode>,
+): void {
+  if (renderConnectors !== undefined && connectorNodesById !== undefined) {
+    renderConnectorVisuals(renderConnectors, connectorNodesById, runtime);
+    return;
+  }
+
+  const connectors = getFlowConnectorRecords(runtime);
+  const renderSet = planFlowConnectorRouteRenderSet({
     connectors: connectors.map((connector) => ({
+      nodeId: connector.node.id,
       record: connector.record,
     })),
   });
-  const assignmentByConnectorId = new Map(
-    trunkLayout.assignments.map((assignment) => [assignment.connectorId, assignment]),
+  renderConnectorVisuals(
+    renderSet.renderConnectors,
+    new Map(connectors.map((connector) => [connector.node.id, connector.node])),
+    runtime,
   );
+}
 
-  connectors.forEach((connector) => {
-    const routePoints = connector.record.routeCache?.points;
-    if (routePoints === undefined) {
+function renderConnectorVisuals(
+  renderConnectors: FlowConnectorRouteRenderPlan[],
+  connectorNodesById: Map<string, GroupNode>,
+  runtime: ConnectRuntime,
+): void {
+  renderConnectors.forEach((connector) => {
+    const connectorRoot = connectorNodesById.get(connector.connectorNodeId);
+    if (connectorRoot === undefined) {
       return;
     }
-    const assignment = assignmentByConnectorId.get(connector.record.id);
     const nextVisualNodes = createConnectorVisualNodes(
-      routePoints,
-      connector.record.flowAction ?? "",
+      connector.routePoints,
+      connector.flowAction ?? "",
       runtime,
-      assignment === undefined ? {} : { sharedTrunkSegment: assignment.segment },
+      connector.sharedTrunkSegment === undefined
+        ? {}
+        : { sharedTrunkSegment: connector.sharedTrunkSegment },
     );
-    replaceConnectorVisualNodes(connector.node, nextVisualNodes);
+    replaceConnectorVisualNodes(connectorRoot, nextVisualNodes);
   });
 }
 
