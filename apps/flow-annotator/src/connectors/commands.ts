@@ -4,6 +4,8 @@ import {
   type FlowConnectorRecord,
   type FlowConnectorRouteLayoutConnectorInput,
   type FlowConnectorRouteRenderPlan,
+  PANEL_EMPTY_ROUTING_STATUS,
+  type PanelConnectorSelectionState,
   planCreateFlowConnectorAuthoring,
   planFlowConnectorRouteLayoutSet,
   planFlowConnectorRouteRenderSet,
@@ -25,23 +27,6 @@ import {
   swapPendingConnectorEndpoints,
 } from "./selection";
 import { createConnectorVisualNodes } from "./visual";
-
-export interface ConnectEndpointPreview {
-  id: string;
-  name: string;
-}
-
-export interface ExistingConnectorPreview {
-  flowAction: string | null;
-  id: string;
-  nodeId: string;
-}
-
-export interface ConnectSelectionState {
-  endpoints: ConnectEndpointPreview[];
-  existingConnector: ExistingConnectorPreview | null;
-  routingStatus: string;
-}
 
 export interface RefreshConnectorsResult {
   failedCount: number;
@@ -176,7 +161,7 @@ export async function refreshFlowConnectors(
   };
 }
 
-export function getConnectSelectionState(runtime: ConnectRuntime): ConnectSelectionState {
+export function getConnectSelectionState(runtime: ConnectRuntime): PanelConnectorSelectionState {
   const endpoints = getPendingConnectorEndpointNodes(runtime);
   const existingConnector =
     endpoints.length === 2
@@ -199,7 +184,7 @@ export function getConnectSelectionState(runtime: ConnectRuntime): ConnectSelect
     routingStatus:
       endpoints.length === 2
         ? "Route preview pending router validation."
-        : "Select two Flow Endpoints to preview a Connector Route.",
+        : PANEL_EMPTY_ROUTING_STATUS,
   };
 }
 

@@ -1,20 +1,28 @@
 import { readFileSync } from "node:fs";
 
+import {
+  buildPanelSelectionStateMessage,
+  buildPanelStatusMessage,
+  buildPanelValidationReportMessage,
+  PANEL_EMPTY_ROUTING_STATUS,
+  type PanelConnectorSelectionState,
+  type PanelOutboundMessage,
+  type PanelSelectionNodeInput,
+  type PanelStatusMessage,
+  type ValidationReport,
+} from "@figma-flow-annotator/core";
 import type { Page } from "@playwright/test";
 
 interface PanelSelectionState {
-  connectorEndpoints?: { id: string; name: string }[];
+  connectorEndpoints?: PanelConnectorSelectionState["endpoints"];
   eligibleCount: number;
-  existingConnector?: { flowAction: string | null; id: string; nodeId: string } | null;
+  existingConnector?: PanelConnectorSelectionState["existingConnector"];
   routingStatus?: string;
   selectedAnnotationCardCount?: number;
   totalCount: number;
 }
 
-interface PanelStatusState {
-  message: string;
-  tone: "error" | "success";
-}
+type PanelStatusState = Omit<PanelStatusMessage, "type">;
 
 interface PanelFixtureDefinition {
   activeTab?: "annotate" | "connect" | "validate";
@@ -24,23 +32,7 @@ interface PanelFixtureDefinition {
   name: string;
   selection?: PanelSelectionState;
   status?: PanelStatusState;
-  validationReport?: {
-    issues: {
-      affectedObjectCount: number;
-      code?: string;
-      description: string;
-      id: string;
-      severity: "error" | "info" | "warning";
-      title: string;
-    }[];
-    schemaVersion: 1;
-    summary: {
-      all: number;
-      errors: number;
-      info: number;
-      warnings: number;
-    };
-  };
+  validationReport?: ValidationReport;
 }
 
 const PANEL_VIEWPORT = {
@@ -147,23 +139,29 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
       issues: [
         {
           affectedObjectCount: 1,
+          code: "annotation-missing-body",
           description: "An Annotation Card has an empty required Annotation Body.",
           id: "annotation-missing-body-1",
+          locationNodeIds: ["annotation-card-1"],
           severity: "error",
           title: "Missing Required Annotation Body",
         },
         {
           affectedObjectCount: 2,
+          code: "annotation-missing-badge",
           description: "Some bound Subject Nodes do not have a matching Annotation Badge.",
           id: "annotation-missing-badge-2",
+          locationNodeIds: ["subject-node-1", "subject-node-2"],
           severity: "warning",
           title: "Missing Annotation Badge",
         },
         {
           affectedObjectCount: 2,
+          code: "annotation-badges-unarranged",
           description:
             "Annotation Badges beside a Subject Node are not arranged by Annotation Number.",
           id: "annotation-badges-unarranged-3",
+          locationNodeIds: ["subject-node-3", "subject-node-4"],
           severity: "info",
           title: "Unarranged Annotation Badges",
         },
@@ -189,6 +187,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           code: "flow-connector-orphaned",
           description: "A Flow Connector is missing its start or end Flow Endpoint.",
           id: "flow-connector-orphaned-1",
+          locationNodeIds: ["connector-node-1"],
           severity: "error",
           title: "Orphaned Flow Connector",
         },
@@ -197,6 +196,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           code: "flow-endpoint-invalid",
           description: "A Flow Connector points to a node that is not a valid Flow Endpoint.",
           id: "flow-endpoint-invalid-2",
+          locationNodeIds: ["connector-node-2"],
           severity: "error",
           title: "Invalid Flow Endpoint",
         },
@@ -206,6 +206,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           description:
             "Multiple Flow Connectors use the same ordered start and end Flow Endpoints.",
           id: "flow-connector-duplicate-3",
+          locationNodeIds: ["connector-node-3", "connector-node-4"],
           severity: "error",
           title: "Duplicate Flow Connector",
         },
@@ -214,6 +215,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           code: "flow-action-empty",
           description: "A Flow Connector has no Flow Action label.",
           id: "flow-action-empty-4",
+          locationNodeIds: ["connector-node-5"],
           severity: "warning",
           title: "Empty Flow Action",
         },
@@ -222,6 +224,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           code: "connector-reverse-index-stale",
           description: "A Flow Endpoint has connectorRefs pointing to deleted Flow Connectors.",
           id: "connector-reverse-index-stale-5",
+          locationNodeIds: ["endpoint-node-1", "endpoint-node-2"],
           severity: "warning",
           title: "Stale Reverse Index",
         },
@@ -246,6 +249,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           code: "connector-route-crosses-obstacle",
           description: "A Connector Route crosses a Connector Obstacle.",
           id: "connector-route-crosses-obstacle-1",
+          locationNodeIds: ["connector-node-1"],
           severity: "error",
           title: "Connector Route Crosses Obstacle",
         },
@@ -254,6 +258,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           code: "flow-action-label-overlap",
           description: "Visible Flow Action labels overlap each other.",
           id: "flow-action-label-overlap-3",
+          locationNodeIds: ["connector-node-2", "connector-node-3"],
           severity: "warning",
           title: "Flow Action Label Overlap",
         },
@@ -263,6 +268,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           description:
             "Flow Connectors entering the same Flow Endpoint from the same direction do not share a Connector Trunk.",
           id: "connector-trunk-missing-5",
+          locationNodeIds: ["connector-node-4", "connector-node-5"],
           severity: "warning",
           title: "Missing Connector Trunk",
         },
@@ -272,6 +278,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           description:
             "A Flow Connector cannot produce a legal Orthogonal Route around current Connector Obstacles.",
           id: "connector-routing-failure-2",
+          locationNodeIds: ["connector-node-6"],
           severity: "error",
           title: "Connector Routing Failure",
         },
@@ -281,6 +288,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           description:
             "A stored Connector Route differs from the route generated from current endpoints and Connector Obstacles.",
           id: "connector-route-refreshable-4",
+          locationNodeIds: ["connector-node-7"],
           severity: "info",
           title: "Connector Route Can Be Refreshed",
         },
@@ -290,6 +298,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           description:
             "Flow Connectors with different Flow Endpoints or opposite directions share a Connector Trunk.",
           id: "connector-trunk-unexpected-6",
+          locationNodeIds: ["connector-node-8", "connector-node-9"],
           severity: "error",
           title: "Unexpected Connector Trunk",
         },
@@ -319,6 +328,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           code: "flow-action-empty",
           description: "A Flow Connector has no Flow Action label.",
           id: "flow-action-empty-1",
+          locationNodeIds: ["connector-node-1"],
           severity: "warning",
           title: "Empty Flow Action",
         },
@@ -335,10 +345,7 @@ export async function loadPanelFixture(
   await page.setContent(panelHtml);
 
   if (definition.selection !== undefined) {
-    await postPluginMessage(page, {
-      type: "selection-state",
-      ...definition.selection,
-    });
+    await postPluginMessage(page, buildFixtureSelectionStateMessage(definition.selection));
   }
 
   if (definition.annotationBody !== undefined) {
@@ -354,17 +361,14 @@ export async function loadPanelFixture(
   }
 
   if (definition.validationReport !== undefined) {
-    await postPluginMessage(page, {
-      type: "validation-report",
-      report: definition.validationReport,
-    });
+    await postPluginMessage(page, buildPanelValidationReportMessage(definition.validationReport));
   }
 
   if (definition.status !== undefined) {
-    await postPluginMessage(page, {
-      type: "status",
-      ...definition.status,
-    });
+    await postPluginMessage(
+      page,
+      buildPanelStatusMessage(definition.status.tone, definition.status.message),
+    );
   }
 
   await page.evaluate(async () => {
@@ -377,11 +381,37 @@ export async function loadPanelFixture(
   });
 }
 
-async function postPluginMessage(
-  page: Page,
-  pluginMessage: Record<string, unknown>,
-): Promise<void> {
+async function postPluginMessage(page: Page, pluginMessage: PanelOutboundMessage): Promise<void> {
   await page.evaluate((message) => {
     window.postMessage({ pluginMessage: message }, "*");
   }, pluginMessage);
+}
+
+function buildFixtureSelectionStateMessage(selection: PanelSelectionState) {
+  const selectedNodes = createFixtureSelectionNodes(selection);
+  return buildPanelSelectionStateMessage({
+    connector: {
+      endpoints: selection.connectorEndpoints ?? [],
+      existingConnector: selection.existingConnector ?? null,
+      routingStatus: selection.routingStatus ?? PANEL_EMPTY_ROUTING_STATUS,
+    },
+    selectedNodes,
+  });
+}
+
+function createFixtureSelectionNodes(selection: PanelSelectionState): PanelSelectionNodeInput[] {
+  const selectedAnnotationCardCount = selection.selectedAnnotationCardCount ?? 0;
+  const eligibleNodes = Array.from({ length: selection.eligibleCount }, (_, index) => ({
+    hasGeneratedAncestor: false,
+    isAnnotationCard: index < selectedAnnotationCardCount,
+  }));
+  const generatedNodes = Array.from(
+    { length: Math.max(0, selection.totalCount - selection.eligibleCount) },
+    () => ({
+      hasGeneratedAncestor: true,
+      isAnnotationCard: false,
+    }),
+  );
+
+  return [...eligibleNodes, ...generatedNodes];
 }

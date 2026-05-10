@@ -1,4 +1,15 @@
-import type { ValidationReport } from "@figma-flow-annotator/core";
+import {
+  buildPanelSelectionStateMessage,
+  buildPanelStatusMessage,
+  buildPanelValidationReportMessage,
+  classifyPanelMessage,
+  formatCleanStaleIndexesPanelStatus,
+  formatRefreshConnectorsPanelStatus,
+  type PanelCommandMessage,
+  type PanelMessageDispatch,
+  type PanelStatusTone,
+  type ValidationReport,
+} from "@figma-flow-annotator/core";
 import {
   addSubjectNodesToAnnotation,
   arrangeAnnotationCards,
@@ -30,22 +41,6 @@ import {
 } from "../figma/runtime";
 import { cleanStaleIndexes, validateCurrentPageBindings } from "../validation/commands";
 
-type PluginMessage =
-  | { type: "create-annotation"; body: string }
-  | { type: "add-subject-nodes" }
-  | { type: "arrange-badges" }
-  | { type: "arrange-cards" }
-  | { type: "create-connector"; flowAction: string }
-  | { type: "refresh-connectors" }
-  | { type: "swap-connector-endpoints" }
-  | { type: "validate-bindings" }
-  | { type: "clean-stale-indexes" }
-  | { type: "locate-validation-issue"; issueId: string }
-  | { type: "close" }
-  | { type: "request-selection-state" };
-
-type StatusTone = "success" | "error";
-
 let validationTargetsByIssueId = new Map<string, string[]>();
 
 const connectRuntime: ConnectRuntime = {
@@ -74,24 +69,35 @@ figma.on("selectionchange", () => {
   handleSelectionChange(connectRuntime);
 });
 
-figma.ui.onmessage = (message: PluginMessage) => {
+figma.ui.onmessage = (message: unknown) => {
   void handleMessage(message);
 };
 
-async function handleMessage(message: PluginMessage): Promise<void> {
-  if (message.type === "close") {
+async function handleMessage(message: unknown): Promise<void> {
+  let dispatch: PanelMessageDispatch;
+  try {
+    dispatch = classifyPanelMessage(message);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown plugin error.";
+    figma.notify(errorMessage);
+    postStatus("error", errorMessage);
+    postSelectionState();
+    return;
+  }
+
+  if (dispatch.kind === "close") {
     figma.closePlugin();
     return;
   }
 
-  if (message.type === "request-selection-state") {
+  if (dispatch.kind === "request-selection-state") {
     postSelectionState();
     return;
   }
 
   try {
     await ensureFont();
-    await dispatchMessage(message);
+    await dispatchMessage(dispatch.command);
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown plugin error.";
     figma.notify(errorMessage);
@@ -101,7 +107,7 @@ async function handleMessage(message: PluginMessage): Promise<void> {
   }
 }
 
-async function dispatchMessage(message: Exclude<PluginMessage, { type: "close" }>): Promise<void> {
+async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   if (message.type === "create-annotation") {
     const created = createAnnotations(message.body);
     selectAndZoom(created.nodes);
@@ -150,7 +156,7 @@ async function dispatchMessage(message: Exclude<PluginMessage, { type: "close" }
     }
     postStatus(
       result.failedCount === 0 ? "success" : "error",
-      formatRefreshConnectorsStatus(result),
+      formatRefreshConnectorsPanelStatus(result),
     );
     return;
   }
@@ -174,10 +180,7 @@ async function dispatchMessage(message: Exclude<PluginMessage, { type: "close" }
     const { report, targetsByIssueId } = validateCurrentPageBindings(connectRuntime);
     validationTargetsByIssueId = targetsByIssueId;
     postValidationReport(report);
-    postStatus(
-      "success",
-      `Cleaned stale indexes on ${result.cleanedEndpointCount} Flow Endpoint(s); removed ${result.removedConnectorRefCount} stale connector reference(s).`,
-    );
+    postStatus("success", formatCleanStaleIndexesPanelStatus(result));
     return;
   }
 
@@ -207,50 +210,28 @@ function selectAndZoom(nodes: SceneNode[]): void {
   figma.viewport.scrollAndZoomIntoView(nodes);
 }
 
-function postStatus(tone: StatusTone, message: string): void {
-  figma.ui.postMessage({
-    type: "status",
-    tone,
-    message,
-  });
-  if (tone === "success") {
+function postStatus(tone: PanelStatusTone, message: string): void {
+  const statusMessage = buildPanelStatusMessage(tone, message);
+  figma.ui.postMessage(statusMessage);
+  if (statusMessage.tone === "success") {
     figma.notify(message);
   }
 }
 
 function postValidationReport(report: ValidationReport): void {
-  figma.ui.postMessage({
-    type: "validation-report",
-    report,
-  });
-}
-
-function formatRefreshConnectorsStatus(result: {
-  failedCount: number;
-  failures: string[];
-  refreshedCount: number;
-  selectedOnly: boolean;
-}): string {
-  const scope = result.selectedOnly ? "selected" : "current-page";
-  if (result.failedCount === 0) {
-    return `Refreshed ${result.refreshedCount} ${scope} Flow Connector(s).`;
-  }
-  const firstFailure = result.failures[0] ?? "Unknown connector refresh failure.";
-  return `Refreshed ${result.refreshedCount} ${scope} Flow Connector(s); ${result.failedCount} failed. ${firstFailure}`;
+  figma.ui.postMessage(buildPanelValidationReportMessage(report));
 }
 
 function postSelectionState(): void {
   const selected = figma.currentPage.selection;
-  const eligibleCount = selected.filter((node) => !hasGeneratedAncestor(node)).length;
-  const selectedAnnotationCardCount = selected.filter(isAnnotationCardNode).length;
   const connectState = getConnectSelectionState(connectRuntime);
-  figma.ui.postMessage({
-    type: "selection-state",
-    totalCount: connectState.endpoints.length,
-    eligibleCount,
-    selectedAnnotationCardCount,
-    connectorEndpoints: connectState.endpoints,
-    existingConnector: connectState.existingConnector,
-    routingStatus: connectState.routingStatus,
-  });
+  figma.ui.postMessage(
+    buildPanelSelectionStateMessage({
+      connector: connectState,
+      selectedNodes: selected.map((node) => ({
+        hasGeneratedAncestor: hasGeneratedAncestor(node),
+        isAnnotationCard: isAnnotationCardNode(node),
+      })),
+    }),
+  );
 }

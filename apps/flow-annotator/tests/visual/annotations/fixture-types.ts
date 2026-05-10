@@ -1,3 +1,9 @@
+import type {
+  PanelOutboundMessage,
+  PanelSelectionStateMessage,
+  PanelStatusMessage,
+} from "@figma-flow-annotator/core";
+
 export interface FixtureRect {
   x: number;
   y: number;
@@ -23,19 +29,9 @@ export interface AnnotationFixture {
   statusMessage: string;
 }
 
-export interface PostedStatusMessage {
-  message: string;
-  tone: "error" | "success";
-  type: "status";
-}
-
-export interface PostedSelectionMessage {
-  eligibleCount: number;
-  totalCount: number;
-  type: "selection-state";
-}
-
-export type PostedMessage = PostedSelectionMessage | PostedStatusMessage;
+export type PostedStatusMessage = PanelStatusMessage;
+export type PostedSelectionMessage = PanelSelectionStateMessage;
+export type PostedMessage = PanelOutboundMessage;
 
 export interface FigmaStub {
   closePlugin(): void;
