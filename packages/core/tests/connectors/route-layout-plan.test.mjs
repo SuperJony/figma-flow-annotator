@@ -64,6 +64,11 @@ test("plans selected Flow Connector refreshes with page-level Connector Trunk as
   assert.deepEqual(plan.failures, []);
   assert.equal(plan.refreshes.length, 1);
   assert.equal(plan.refreshes[0].connectorNodeId, "connector-node-a");
+  assert.equal(plan.refreshes[0].batch.kind, "refresh-flow-connector");
+  assert.equal(plan.refreshes[0].batch.mode, "update");
+  assert.deepEqual(plan.refreshes[0].record.start, recordA.start);
+  assert.deepEqual(plan.refreshes[0].record.end, recordA.end);
+  assert.equal(plan.refreshes[0].record.flowAction, "choose");
   assert.deepEqual(plan.refreshes[0].record.routeCache.points, routeA);
   assert.equal(plan.refreshes[0].record.updatedAt, "2026-05-10T01:00:00.000Z");
   assert.equal(plan.trunkLayout.groups.length, 1);

@@ -1,13 +1,9 @@
-import type {
-  CreateFlowConnectorOperationBatch,
-  RefreshFlowConnectorOperationBatch,
-} from "../figma-file/operation-types.ts";
+import type { CreateFlowConnectorOperationBatch } from "../figma-file/operation-types.ts";
 import type { RectLike } from "../shared/geometry.ts";
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
 import { flowConnectorMatchesDirectedPair } from "../shared/plugin-data.ts";
 import {
   buildCreateFlowConnectorOperationBatch,
-  buildRefreshFlowConnectorOperationBatch,
   type FlowEndpointInput,
 } from "./operations.ts";
 import type { ConnectorObstacle } from "./routing.ts";
@@ -38,20 +34,6 @@ export interface CreateFlowConnectorAuthoringPlan {
   routePoints: { x: number; y: number }[];
 }
 
-export interface PlanRefreshFlowConnectorAuthoringInput {
-  connectorNodeId: string;
-  end: FlowConnectorAuthoringEndpointInput;
-  now: string;
-  obstacles: ConnectorObstacle[];
-  record: FlowConnectorRecord;
-  start: FlowConnectorAuthoringEndpointInput;
-}
-
-export interface RefreshFlowConnectorAuthoringPlan {
-  batch: RefreshFlowConnectorOperationBatch;
-  routePoints: { x: number; y: number }[];
-}
-
 export function planCreateFlowConnectorAuthoring(
   input: PlanCreateFlowConnectorAuthoringInput,
 ): CreateFlowConnectorAuthoringPlan {
@@ -79,38 +61,6 @@ export function planCreateFlowConnectorAuthoring(
   return {
     batch,
     existingConnector,
-    routePoints,
-  };
-}
-
-export function planRefreshFlowConnectorAuthoring(
-  input: PlanRefreshFlowConnectorAuthoringInput,
-): RefreshFlowConnectorAuthoringPlan {
-  if (input.start.id !== input.record.start.nodeId) {
-    throw new Error(`Refresh start Flow Endpoint does not match ${input.record.start.nodeId}.`);
-  }
-  if (input.end.id !== input.record.end.nodeId) {
-    throw new Error(`Refresh end Flow Endpoint does not match ${input.record.end.nodeId}.`);
-  }
-  validateEndpoint(input.start);
-  validateEndpoint(input.end);
-
-  const routePoints = routeOrthogonalConnector({
-    startRect: input.start.bounds,
-    endRect: input.end.bounds,
-    obstacles: input.obstacles,
-  }).points;
-  const batch = buildRefreshFlowConnectorOperationBatch({
-    connectorNodeId: input.connectorNodeId,
-    endName: input.end.name,
-    now: input.now,
-    record: input.record,
-    routePoints,
-    startName: input.start.name,
-  });
-
-  return {
-    batch,
     routePoints,
   };
 }
