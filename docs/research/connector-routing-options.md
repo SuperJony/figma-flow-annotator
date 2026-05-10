@@ -6,17 +6,19 @@ This research compares routing options for **Flow Connectors** in Figma Design. 
 
 Build a small pure TypeScript router for the first demo. Use existing libraries and products as references and benchmark cases, but do not adopt a full diagram SDK or a WASM/LGPL router as the first implementation dependency.
 
-The first router should return route points only:
+The current first-demo router returns route points only:
 
 ```ts
-routeConnector({
+routeOrthogonalConnector({
   startRect,
   endRect,
   obstacles,
-  preferredSides,
-  trunkGroup,
-}): { points: Point[]; labelSegment?: Segment } | RoutingFailure
+  preferredStartSide,
+  preferredEndSide,
+}): RouteOrthogonalConnectorResult
 ```
+
+`RouteOrthogonalConnectorResult` contains `{ points: Point[] }`. When no legal route exists, `routeOrthogonalConnector` throws `ConnectorRouteFailure` instead of returning a failure union.
 
 Figma node creation, shared plugin data, connector records, route cache, badge/card layers, and validation remain owned by this project. The first demo applies them through the plugin; a later agent skill should reuse the same core rules and data contract rather than introduce a parallel model.
 
@@ -40,19 +42,18 @@ Figma's `ConnectorNode` and `figma.createConnector()` are for FigJam relationshi
 | React Flow Smart Edge | MIT, archived | Low | Useful A* grid reference, but React Flow-specific, archived, and lacks shared trunk semantics. |
 | mxGraph / maxGraph | Apache-2.0 | Low | Useful historical references for edge styles, but not a robust obstacle-avoiding route-only engine for this use case. |
 
-## First-Demo Router Shape
+## Current First-Demo Router Shape
 
 1. Extract absolute bounding rectangles for Context Frames and Annotation Cards.
 2. Inflate obstacle rectangles by connector clearance.
 3. Compute boundary Connection Points for start and end Flow Endpoints.
-4. Build a coordinate-compressed orthogonal grid from endpoint coordinates, obstacle edges, obstacle edges plus clearance, and page bounds.
-5. Connect adjacent grid points when the horizontal or vertical segment does not intersect inflated obstacles.
-6. Run A* with length cost, bend penalty, reverse penalty, and small near-obstacle penalty.
-7. Compress collinear points into route points.
-8. Render Rounded Corners from route points without changing semantic route points.
-9. Group connectors by same end endpoint and incoming side to create shared Connector Trunks.
-10. Place Flow Action labels on readable non-trunk segments when possible.
-11. If no legal route exists, fail visibly rather than drawing through Context Frames or Annotation Cards.
+4. Build candidate Orthogonal Routes from preferred/dominant side pairs and horizontal/vertical lane values derived from endpoint centers, endpoint edges, obstacle edges, and relevant bounds.
+5. Reject route candidates that cross inflated Connector Obstacles or pass through Flow Endpoint interiors.
+6. Score remaining candidates by Manhattan length, bend count, and side-preference penalty, then return the lowest-cost points.
+7. Render Rounded Corners from route points without changing semantic route points.
+8. Group connectors by same end endpoint and incoming side to create shared Connector Trunks.
+9. Place Flow Action labels on readable non-trunk segments when possible.
+10. If no legal route exists, fail visibly rather than drawing through Context Frames or Annotation Cards.
 
 ## Evidence
 

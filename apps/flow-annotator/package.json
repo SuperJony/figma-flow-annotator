@@ -9,7 +9,7 @@
     "check:figma-syntax": "node --check code.js",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
-    "test": "node --test tests/annotations/*.test.mjs tests/connectors/*.test.mjs tests/figma/*.test.mjs",
+    "test": "node --test tests/annotations/*.test.mjs tests/connectors/*.test.mjs tests/figma/*.test.mjs tests/validation/*.test.mjs",
     "test:visual": "playwright test -c playwright.config.ts",
     "test:visual:annotate": "playwright test -c playwright.config.ts annotations/visual.spec.ts",
     "test:visual:connect": "playwright test -c playwright.config.ts connectors/visual.spec.ts",

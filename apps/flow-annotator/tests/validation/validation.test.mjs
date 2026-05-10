@@ -16,7 +16,7 @@ import {
   setCardRecord,
   setConnectorRecord,
   setConnectorRefs,
-} from "./test-helpers.mjs";
+} from "../support/plugin-test-helpers.mjs";
 
 test("validates Annotation bindings and locates validation issue nodes without shared report data", async () => {
   const page = createPage();

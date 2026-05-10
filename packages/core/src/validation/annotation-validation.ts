@@ -1,4 +1,4 @@
-import { ANNOTATION_CARD_LAYOUT, getAnnotationBadgePosition } from "../visual-model.ts";
+import { ANNOTATION_CARD_LAYOUT, getAnnotationBadgePosition } from "../annotations/visual-model.ts";
 import {
   addIssue,
   arraysEqual,

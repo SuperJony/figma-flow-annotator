@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-export const buildDir = resolve(appRoot, ".test-build-annotation");
+export const buildDir = resolve(appRoot, ".test-build-plugin");
 export const namespace = "figma_flow_annotator";
 
 export async function flushPluginMessage(messages) {

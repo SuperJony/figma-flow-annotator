@@ -26,7 +26,7 @@ import {
   buildAnnotationCardVisualModel,
   getAnnotationBadgePosition,
   getAnnotationCardCreationBasePosition,
-} from "../visual-model.ts";
+} from "./visual-model.ts";
 
 export interface AnnotationSubjectInput {
   id: string;

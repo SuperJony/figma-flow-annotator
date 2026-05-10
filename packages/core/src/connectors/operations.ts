@@ -13,7 +13,7 @@ import {
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "../shared/plugin-data.ts";
-import { buildFlowConnectorVisualModel } from "../visual-model.ts";
+import { buildFlowConnectorVisualModel } from "./visual-model.ts";
 
 export interface FlowEndpointInput {
   id: string;

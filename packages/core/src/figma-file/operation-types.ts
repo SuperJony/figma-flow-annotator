@@ -1,3 +1,8 @@
+import type {
+  AnnotationBadgeVisualModel,
+  AnnotationCardVisualModel,
+} from "../annotations/visual-model.ts";
+import type { FlowConnectorVisualModel } from "../connectors/visual-model.ts";
 import type { Point } from "../shared/geometry.ts";
 import type {
   AnnotationRecord,
@@ -5,11 +10,6 @@ import type {
   SharedPluginDataKey,
   SharedPluginDataValue,
 } from "../shared/plugin-data.ts";
-import type {
-  AnnotationBadgeVisualModel,
-  AnnotationCardVisualModel,
-  FlowConnectorVisualModel,
-} from "../visual-model.ts";
 
 export type FigmaFileOperationTarget =
   | { kind: "existing-node"; nodeId: string }

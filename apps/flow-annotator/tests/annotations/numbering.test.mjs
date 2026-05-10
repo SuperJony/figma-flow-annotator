@@ -11,7 +11,7 @@ import {
   readAnnotationRefs,
   setBadgeRecord,
   setCardRecord,
-} from "./test-helpers.mjs";
+} from "../support/plugin-test-helpers.mjs";
 
 test("creates an Annotation without scanning unrelated frame descendants for numbering", async () => {
   const page = createPage();

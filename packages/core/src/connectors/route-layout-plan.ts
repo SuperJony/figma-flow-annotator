@@ -1,7 +1,6 @@
 import type { RefreshFlowConnectorOperationBatch } from "../figma-file/operation-types.ts";
 import type { Point, RectLike } from "../shared/geometry.ts";
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
-import { buildFlowConnectorVisualModel, type FlowConnectorVisualModel } from "../visual-model.ts";
 import type { FlowEndpointInput } from "./operations.ts";
 import { buildRefreshFlowConnectorOperationBatch } from "./operations.ts";
 import {
@@ -11,6 +10,7 @@ import {
   groupConnectorTrunks,
   routeOrthogonalConnector,
 } from "./routing.ts";
+import { buildFlowConnectorVisualModel, type FlowConnectorVisualModel } from "./visual-model.ts";
 
 export interface FlowConnectorRouteLayoutEndpointInput extends FlowEndpointInput {
   bounds: RectLike;

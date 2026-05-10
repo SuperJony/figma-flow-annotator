@@ -2,10 +2,7 @@ import type { CreateFlowConnectorOperationBatch } from "../figma-file/operation-
 import type { RectLike } from "../shared/geometry.ts";
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
 import { flowConnectorMatchesDirectedPair } from "../shared/plugin-data.ts";
-import {
-  buildCreateFlowConnectorOperationBatch,
-  type FlowEndpointInput,
-} from "./operations.ts";
+import { buildCreateFlowConnectorOperationBatch, type FlowEndpointInput } from "./operations.ts";
 import type { ConnectorObstacle } from "./routing.ts";
 import { routeOrthogonalConnector } from "./routing.ts";
 

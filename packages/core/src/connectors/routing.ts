@@ -18,7 +18,7 @@ import {
   segmentMatches,
   segmentMidpoint,
   undirectedSegmentKey,
-} from "./routing-helpers.ts";
+} from "./candidate-lane-routing.ts";
 
 export type ConnectorRouteSide = "left" | "right" | "top" | "bottom";
 
