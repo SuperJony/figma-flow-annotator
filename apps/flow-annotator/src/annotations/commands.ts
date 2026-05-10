@@ -10,8 +10,6 @@ import {
   type CreateAnnotationBadgeOperation,
   type CreateAnnotationCardOperation,
   type CreateAnnotationOperationBatch,
-  decodeAnnotationNumberSeedRecord,
-  decodeContextRecord,
   getAnnotationCardBasePosition,
   getAnnotationCardRenderedHeight,
   getCenteredAnnotationBadgeNumberPosition,
@@ -33,13 +31,15 @@ import {
   hasGeneratedAncestor,
   localRect,
   NAMESPACE,
-  readReferenceIds,
   solidPaint,
 } from "../figma/runtime";
 import {
+  collectAddAnnotationSubjectsAuthoringSnapshot,
+  collectCreateAnnotationAuthoringSnapshot,
+} from "./authoring-snapshot";
+import {
   getAnnotationBadgeRecords,
   getAnnotationCardRecords,
-  getBadgeSubjectNodeIds,
   getSelectedAnnotationCard,
   readAnnotationRecord,
 } from "./records";
@@ -63,39 +63,14 @@ export interface ArrangeResult {
 }
 
 export function createAnnotations(bodyValue: string): AnnotationCreationResult {
-  const subjects = figma.currentPage.selection.filter((node) => !hasGeneratedAncestor(node));
-  const contextNodes = collectAnnotationContextNodes(subjects);
-  const now = new Date().toISOString();
-  const plan = planCreateAnnotationAuthoring({
+  const snapshot = collectCreateAnnotationAuthoringSnapshot({
     annotationId: createId("annotation"),
     body: bodyValue,
-    contextRecords: getContextRecords(contextNodes),
-    existingAnnotationNumberSeeds: getAnnotationNumberSeeds(
-      findContainer(ANNOTATIONS_CONTAINER_NAME),
-    ),
-    now,
-    pageId: figma.currentPage.id,
-    subjects: subjects.map((subject) => ({
-      ancestorFrameIds: getFrameAncestorIds(subject),
-      bounds: getVisibleBounds(subject),
-      existingAnnotationRefCount: readReferenceIds(subject, "annotationRefs", "annotationIds")
-        .length,
-      id: subject.id,
-      name: subject.name,
-    })),
+    now: new Date().toISOString(),
   });
+  const plan = planCreateAnnotationAuthoring(snapshot.input);
   const batch = plan.batch;
-  const contextNode = contextNodes.get(plan.contextFrameId);
-  if (contextNode === undefined) {
-    throw new Error(`Missing Annotation context ${plan.contextFrameId}.`);
-  }
-  const applied = applyAnnotationOperationBatch(
-    batch,
-    new Map([
-      [contextNode.id, contextNode],
-      ...subjects.map((subject): [string, BaseNode] => [subject.id, subject]),
-    ]),
-  );
+  const applied = applyAnnotationOperationBatch(batch, snapshot.existingNodesById);
 
   ensureLayerOrder();
   return {
@@ -108,29 +83,13 @@ export function createAnnotations(bodyValue: string): AnnotationCreationResult {
 export function addSubjectNodesToAnnotation(): AddSubjectsResult {
   const annotationCard = getSelectedAnnotationCard();
   const annotation = readAnnotationRecord(annotationCard);
-  const subjects = figma.currentPage.selection.filter(
-    (node) => node !== annotationCard && !hasGeneratedAncestor(node),
-  );
-  const annotationsContainer = ensureContainer(ANNOTATIONS_CONTAINER_NAME);
-  const now = new Date().toISOString();
-  const batch = buildAddAnnotationSubjectsOperationBatch({
+  const snapshot = collectAddAnnotationSubjectsAuthoringSnapshot({
     annotation,
-    annotationCardNodeId: annotationCard.id,
-    existingBadgeSubjectNodeIds: getBadgeSubjectNodeIds(annotationsContainer, annotation.id),
-    now,
-    subjects: subjects.map((subject) => ({
-      bounds: getVisibleBounds(subject),
-      existingAnnotationRefCount: readReferenceIds(subject, "annotationRefs", "annotationIds")
-        .length,
-      id: subject.id,
-      name: subject.name,
-    })),
+    annotationCard,
+    now: new Date().toISOString(),
   });
-  const existingNodes = new Map<string, BaseNode>([
-    [annotationCard.id, annotationCard],
-    ...subjects.map((subject): [string, BaseNode] => [subject.id, subject]),
-  ]);
-  const applied = applyAnnotationOperationBatch(batch, existingNodes);
+  const batch = buildAddAnnotationSubjectsOperationBatch(snapshot.input);
+  const applied = applyAnnotationOperationBatch(batch, snapshot.existingNodesById);
 
   ensureLayerOrder();
   return {
@@ -359,64 +318,6 @@ function getExistingAnnotationCardRects(container: FrameNode, card: FrameNode): 
           VISUAL_NODE_KINDS.annotationCard,
     )
     .map(localRect);
-}
-
-function collectAnnotationContextNodes(subjects: SceneNode[]): Map<string, FrameNode | PageNode> {
-  const contextNodes = new Map<string, FrameNode | PageNode>([
-    [figma.currentPage.id, figma.currentPage],
-  ]);
-  subjects.forEach((subject) => {
-    let current: BaseNode | null = subject;
-    while (current !== null && current.type !== "PAGE") {
-      if (current.type === "FRAME") {
-        contextNodes.set(current.id, current);
-      }
-      current = current.parent;
-    }
-  });
-  return contextNodes;
-}
-
-function getContextRecords(contextNodes: Map<string, FrameNode | PageNode>) {
-  return [...contextNodes.values()].flatMap((node) => {
-    const record = decodeContextRecord(
-      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.context),
-      node.id,
-    );
-    return record === null ? [] : [record];
-  });
-}
-
-function getAnnotationNumberSeeds(container: FrameNode | null) {
-  if (container === null) {
-    return [];
-  }
-
-  return container.children.flatMap((node) => {
-    if (
-      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !==
-      VISUAL_NODE_KINDS.annotationCard
-    ) {
-      return [];
-    }
-
-    const seed = decodeAnnotationNumberSeedRecord(
-      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation),
-    );
-    return seed === null ? [] : [seed];
-  });
-}
-
-function getFrameAncestorIds(node: SceneNode): string[] {
-  const chain: string[] = [];
-  let current: BaseNode | null = node;
-  while (current !== null && current.type !== "PAGE") {
-    if (current.type === "FRAME") {
-      chain.unshift(current.id);
-    }
-    current = current.parent;
-  }
-  return chain;
 }
 
 function groupCardsByContext(

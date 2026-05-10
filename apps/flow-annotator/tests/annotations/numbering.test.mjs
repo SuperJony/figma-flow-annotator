@@ -76,6 +76,78 @@ test("creates an Annotation without scanning unrelated frame descendants for num
   assert.equal(status.message, "Created annotation #5 with 2 badge(s).");
 });
 
+test("creates an Annotation in the shared Context Frame with existing subject ref offsets", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "context-frame", 0);
+  const subjectA = createNode(contextFrame, "subject-a", 20);
+  const subjectB = createNode(contextFrame, "subject-b", 180);
+  const annotationsContainer = createNode(page, "FFA Annotations", 800);
+  const messages = [];
+
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  contextFrame.setSharedPluginData(
+    namespace,
+    "context",
+    JSON.stringify({
+      schemaVersion: 1,
+      contextFrameId: contextFrame.id,
+      nextAnnotationNumber: 9,
+    }),
+  );
+  subjectA.setSharedPluginData(
+    namespace,
+    "annotationRefs",
+    JSON.stringify({
+      schemaVersion: 1,
+      annotationIds: ["annotation-existing-a", "annotation-existing-b"],
+    }),
+  );
+
+  contextFrame.children = [subjectA, subjectB];
+  page.children = [contextFrame, annotationsContainer];
+  page.selection = [subjectA, subjectB];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "Context note" });
+  await flushPluginMessage(messages);
+
+  const createdCard = annotationsContainer.children.find(
+    (child) => child.getSharedPluginData(namespace, "kind") === "annotation-card",
+  );
+  const createdRecord = JSON.parse(createdCard.getSharedPluginData(namespace, "annotation"));
+  const createdBadges = annotationsContainer.children.filter(
+    (child) => child.getSharedPluginData(namespace, "kind") === "annotation-badge",
+  );
+  const subjectABadge = createdBadges.find((badge) => {
+    const ref = JSON.parse(badge.getSharedPluginData(namespace, "badgeRef"));
+    return ref.subjectNodeId === subjectA.id;
+  });
+  const subjectBBadge = createdBadges.find((badge) => {
+    const ref = JSON.parse(badge.getSharedPluginData(namespace, "badgeRef"));
+    return ref.subjectNodeId === subjectB.id;
+  });
+  const contextRecord = JSON.parse(contextFrame.getSharedPluginData(namespace, "context"));
+
+  assert.equal(createdRecord.annotationNumber, 9);
+  assert.equal(createdRecord.contextFrameId, contextFrame.id);
+  assert.deepEqual(createdRecord.subjectNodeIds, ["subject-a", "subject-b"]);
+  assert.equal(createdCard.name, "FFA Annotation Card #9");
+  assert.equal(createdBadges.length, 2);
+  assert.equal(subjectABadge.x, 170);
+  assert.equal(subjectABadge.y, -14);
+  assert.equal(subjectBBadge.x, 266);
+  assert.equal(subjectBBadge.y, -14);
+  assert.deepEqual(readAnnotationRefs(subjectA), [
+    "annotation-existing-a",
+    "annotation-existing-b",
+    createdRecord.id,
+  ]);
+  assert.deepEqual(readAnnotationRefs(subjectB), [createdRecord.id]);
+  assert.equal(contextRecord.nextAnnotationNumber, 10);
+});
+
 test("adds Subject Nodes to a selected Annotation Card without renumbering or duplicate badges", async () => {
   const page = createPage();
   const subjectA = createNode(page, "subject-a", 0);
