@@ -13,6 +13,7 @@ import {
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "../shared/plugin-data.ts";
+import { buildFlowConnectorVisualModel } from "../visual-model.ts";
 
 export interface FlowEndpointInput {
   id: string;
@@ -100,6 +101,10 @@ export function buildCreateFlowConnectorOperationBatch(
         name: formatFlowConnectorName(input.start.name, input.end.name),
         routePoints: input.routePoints,
         flowAction: record.flowAction,
+        visual: buildFlowConnectorVisualModel({
+          flowAction: record.flowAction ?? "",
+          routePoints: input.routePoints,
+        }),
       },
       {
         type: "set-shared-plugin-data",
@@ -140,6 +145,10 @@ export function buildCreateFlowConnectorOperationBatch(
       name: formatFlowConnectorName(input.start.name, input.end.name),
       routePoints: input.routePoints,
       flowAction: record.flowAction,
+      visual: buildFlowConnectorVisualModel({
+        flowAction: record.flowAction ?? "",
+        routePoints: input.routePoints,
+      }),
     },
     {
       type: "set-shared-plugin-data",
@@ -220,6 +229,10 @@ export function buildRefreshFlowConnectorOperationBatch(
         name: formatFlowConnectorName(input.startName, input.endName),
         routePoints: input.routePoints,
         flowAction: input.record.flowAction,
+        visual: buildFlowConnectorVisualModel({
+          flowAction: input.record.flowAction ?? "",
+          routePoints: input.routePoints,
+        }),
       },
       {
         type: "set-shared-plugin-data",

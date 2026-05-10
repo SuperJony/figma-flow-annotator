@@ -20,6 +20,13 @@ import {
   summarizeSubjectNames,
   VISUAL_NODE_KINDS,
 } from "../shared/plugin-data.ts";
+import {
+  ANNOTATION_CARD_LAYOUT,
+  buildAnnotationBadgeVisualModel,
+  buildAnnotationCardVisualModel,
+  getAnnotationBadgePosition,
+  getAnnotationCardCreationBasePosition,
+} from "../visual-model.ts";
 
 export interface AnnotationSubjectInput {
   id: string;
@@ -71,10 +78,6 @@ export interface BuildArrangeAnnotationCardsOperationBatchInput {
   cards: AnnotationCardLayoutInput[];
 }
 
-const CARD_OFFSET_Y = 40;
-const BADGE_SIZE = 28;
-const CARD_GAP = 16;
-
 export function buildCreateAnnotationOperationBatch(
   input: BuildCreateAnnotationOperationBatchInput,
 ): CreateAnnotationOperationBatch {
@@ -97,6 +100,7 @@ export function buildCreateAnnotationOperationBatch(
   const contextRecord = createContextRecord(input.contextFrameId, input.annotationNumber + 1);
   const cardRef = "annotation-card";
   const annotationBounds = unionRects(input.subjects.map((subject) => subject.bounds));
+  const subjectSummary = summarizeSubjectNames(input.subjects.map((subject) => subject.name));
   const operations: FigmaFileOperation[] = [
     {
       type: "ensure-container",
@@ -122,11 +126,13 @@ export function buildCreateAnnotationOperationBatch(
       name: formatAnnotationCardName(input.annotationNumber),
       annotationNumber: input.annotationNumber,
       body,
-      subjectSummary: summarizeSubjectNames(input.subjects.map((subject) => subject.name)),
-      basePosition: {
-        x: annotationBounds.x,
-        y: annotationBounds.y + annotationBounds.height + CARD_OFFSET_Y,
-      },
+      subjectSummary,
+      basePosition: getAnnotationCardCreationBasePosition({ subjectBounds: annotationBounds }),
+      visual: buildAnnotationCardVisualModel({
+        annotationNumber: input.annotationNumber,
+        body,
+        subjectSummary,
+      }),
     },
     {
       type: "set-shared-plugin-data",
@@ -158,14 +164,11 @@ export function buildCreateAnnotationOperationBatch(
         name: formatAnnotationBadgeName(input.annotationNumber),
         annotationNumber: input.annotationNumber,
         subjectNodeId: subject.id,
-        position: {
-          x:
-            subject.bounds.x +
-            subject.bounds.width -
-            BADGE_SIZE / 2 +
-            subject.existingAnnotationRefCount * (BADGE_SIZE + 4),
-          y: subject.bounds.y - BADGE_SIZE / 2,
-        },
+        position: getAnnotationBadgePosition({
+          badgeIndex: subject.existingAnnotationRefCount,
+          subjectBounds: subject.bounds,
+        }),
+        visual: buildAnnotationBadgeVisualModel({ annotationNumber: input.annotationNumber }),
       },
       {
         type: "set-shared-plugin-data",
@@ -270,14 +273,13 @@ export function buildAddAnnotationSubjectsOperationBatch(
         name: formatAnnotationBadgeName(input.annotation.annotationNumber),
         annotationNumber: input.annotation.annotationNumber,
         subjectNodeId: subject.id,
-        position: {
-          x:
-            subject.bounds.x +
-            subject.bounds.width -
-            BADGE_SIZE / 2 +
-            subject.existingAnnotationRefCount * (BADGE_SIZE + 4),
-          y: subject.bounds.y - BADGE_SIZE / 2,
-        },
+        position: getAnnotationBadgePosition({
+          badgeIndex: subject.existingAnnotationRefCount,
+          subjectBounds: subject.bounds,
+        }),
+        visual: buildAnnotationBadgeVisualModel({
+          annotationNumber: input.annotation.annotationNumber,
+        }),
       },
       {
         type: "set-shared-plugin-data",
@@ -333,10 +335,10 @@ export function buildArrangeAnnotationBadgesOperationBatch(
       operations.push({
         type: "move-node",
         targetNodeId: badge.nodeId,
-        position: {
-          x: subject.bounds.x + subject.bounds.width - BADGE_SIZE / 2 + index * (BADGE_SIZE + 4),
-          y: subject.bounds.y - BADGE_SIZE / 2,
-        },
+        position: getAnnotationBadgePosition({
+          badgeIndex: index,
+          subjectBounds: subject.bounds,
+        }),
       });
     });
   });
@@ -366,7 +368,7 @@ export function buildArrangeAnnotationCardsOperationBatch(
         y: nextY,
       },
     };
-    nextY += card.rect.height + CARD_GAP;
+    nextY += card.rect.height + ANNOTATION_CARD_LAYOUT.gap;
     return operation;
   });
 
@@ -376,47 +378,6 @@ export function buildArrangeAnnotationCardsOperationBatch(
     movedCardNodeIds: operations.map((operation) => operation.targetNodeId),
     operations,
   };
-}
-
-export function getAnnotationCardBasePosition(input: {
-  basePosition: Point;
-  cardRect: RectLike;
-  existingCardRects: RectLike[];
-}): Point {
-  let candidate = {
-    x: input.basePosition.x,
-    y: input.basePosition.y,
-  };
-
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const candidateRect = {
-      x: candidate.x,
-      y: candidate.y,
-      width: input.cardRect.width,
-      height: input.cardRect.height,
-    };
-    const conflict = input.existingCardRects.find((existingCard) =>
-      rectsOverlap(candidateRect, existingCard),
-    );
-    if (conflict === undefined) {
-      return candidate;
-    }
-    candidate = {
-      x: candidate.x,
-      y: conflict.y + conflict.height + CARD_GAP,
-    };
-  }
-
-  return candidate;
-}
-
-function rectsOverlap(first: RectLike, second: RectLike): boolean {
-  return (
-    first.x < second.x + second.width &&
-    first.x + first.width > second.x &&
-    first.y < second.y + second.height &&
-    first.y + first.height > second.y
-  );
 }
 
 function compareAnnotationNumbersThenIds(

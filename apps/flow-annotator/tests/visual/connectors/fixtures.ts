@@ -1,12 +1,10 @@
 import {
+  buildFlowConnectorVisualModel,
   createFlowConnectorRecord,
+  type FlowConnectorVisualModel,
   groupConnectorTrunks,
   routeOrthogonalConnector,
 } from "@figma-flow-annotator/core";
-import {
-  buildConnectorVisualModel,
-  type ConnectorVisualModel,
-} from "../../../src/connectors/visual";
 
 interface FixtureRect {
   x: number;
@@ -33,8 +31,8 @@ interface ConnectorFixture {
   definition: ConnectorFixtureDefinition;
   html: string;
   routePoints: Array<{ x: number; y: number }>;
-  visual: ConnectorVisualModel;
-  visuals: ConnectorVisualModel[];
+  visual: FlowConnectorVisualModel;
+  visuals: FlowConnectorVisualModel[];
 }
 
 const SCENE_PADDING = 32;
@@ -115,7 +113,9 @@ export function buildConnectorFixture(definition: ConnectorFixtureDefinition): C
     }).assignments.map((assignment) => [assignment.connectorId, assignment]),
   );
   const visuals = connectorDefinitions.map((connector, index) =>
-    buildConnectorVisualModel(routePointSets[index], connector.flowAction, {
+    buildFlowConnectorVisualModel({
+      routePoints: routePointSets[index],
+      flowAction: connector.flowAction,
       obstacles,
       sharedTrunkSegment: trunkAssignments.get(connectorRecords[index].id)?.segment,
     }),
@@ -134,7 +134,7 @@ export function buildConnectorFixture(definition: ConnectorFixtureDefinition): C
 function renderConnectorFixture(
   definition: ConnectorFixtureDefinition,
   routePointSets: Array<Array<{ x: number; y: number }>>,
-  visuals: ConnectorVisualModel[],
+  visuals: FlowConnectorVisualModel[],
 ): string {
   const sceneBounds = calculateSceneBounds(definition, visuals);
   const connectorDefinitions = [
@@ -255,7 +255,7 @@ function renderConnectorFixture(
 
 function calculateSceneBounds(
   definition: ConnectorFixtureDefinition,
-  visuals: ConnectorVisualModel[],
+  visuals: FlowConnectorVisualModel[],
 ): FixtureRect {
   const connectorDefinitions = [
     { start: definition.start, end: definition.end },

@@ -1,3 +1,4 @@
+import { ANNOTATION_CARD_LAYOUT, getAnnotationBadgePosition } from "../visual-model.ts";
 import {
   addIssue,
   arraysEqual,
@@ -13,9 +14,6 @@ import type {
   ValidationReport,
 } from "./types.ts";
 
-const CARD_OFFSET_Y = 40;
-const BADGE_SIZE = 28;
-const BADGE_GAP = 4;
 const VALIDATION_LAYOUT_TOLERANCE = 1;
 
 export function validateAnnotationBindings(
@@ -122,7 +120,7 @@ export function validateAnnotationBindings(
       if (context?.rect === undefined) {
         return false;
       }
-      const minY = context.rect.y + context.rect.height + CARD_OFFSET_Y;
+      const minY = context.rect.y + context.rect.height + ANNOTATION_CARD_LAYOUT.offsetY;
       return (
         card.rect.y < minY - VALIDATION_LAYOUT_TOLERANCE ||
         card.rect.x < context.rect.x - VALIDATION_LAYOUT_TOLERANCE ||
@@ -178,12 +176,13 @@ export function validateAnnotationBindings(
       ),
     );
     arrangedOrder.forEach((badge, index) => {
-      const expectedX =
-        subjectRect.x + subjectRect.width - BADGE_SIZE / 2 + index * (BADGE_SIZE + BADGE_GAP);
-      const expectedY = subjectRect.y - BADGE_SIZE / 2;
+      const expectedPosition = getAnnotationBadgePosition({
+        badgeIndex: index,
+        subjectBounds: subjectRect,
+      });
       if (
-        Math.abs(badge.rect.x - expectedX) > VALIDATION_LAYOUT_TOLERANCE ||
-        Math.abs(badge.rect.y - expectedY) > VALIDATION_LAYOUT_TOLERANCE
+        Math.abs(badge.rect.x - expectedPosition.x) > VALIDATION_LAYOUT_TOLERANCE ||
+        Math.abs(badge.rect.y - expectedPosition.y) > VALIDATION_LAYOUT_TOLERANCE
       ) {
         unarrangedBadgeTargets.push(badge.nodeId, subjectNodeId);
       }

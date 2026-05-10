@@ -13,8 +13,11 @@ import {
   decodeAnnotationNumberSeedRecord,
   decodeContextRecord,
   getAnnotationCardBasePosition,
+  getAnnotationCardRenderedHeight,
+  getCenteredAnnotationBadgeNumberPosition,
   type Point,
   planCreateAnnotationAuthoring,
+  type RgbColor,
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
@@ -40,9 +43,6 @@ import {
   getSelectedAnnotationCard,
   readAnnotationRecord,
 } from "./records";
-
-const CARD_WIDTH = 280;
-const BADGE_SIZE = 28;
 
 export interface AnnotationCreationResult {
   annotationNumber: number;
@@ -250,48 +250,52 @@ function createAnnotationCard(
   operation: CreateAnnotationCardOperation,
 ): FrameNode {
   const card = figma.createFrame();
+  const visual = operation.visual;
   card.name = operation.name;
-  card.fills = [solidPaint(1, 1, 1)];
-  card.strokes = [solidPaint(0.21, 0.35, 0.55)];
-  card.strokeWeight = 1;
-  card.cornerRadius = 8;
+  card.fills = [solidPaintFromRgb(visual.frame.fill)];
+  card.strokes = [solidPaintFromRgb(visual.frame.stroke)];
+  card.strokeWeight = visual.frame.strokeWeight;
+  card.cornerRadius = visual.frame.cornerRadius;
   card.clipsContent = false;
-  card.resize(CARD_WIDTH, 128);
+  card.resize(visual.frame.width, visual.frame.initialHeight);
   container.appendChild(card);
 
   const title = createText(
-    `Annotation Number ${operation.annotationNumber}`,
-    `Annotation #${operation.annotationNumber}`,
-    13,
-    solidPaint(0.07, 0.12, 0.2),
-    CARD_WIDTH - 32,
+    visual.title.name,
+    visual.title.text,
+    visual.title.fontSize,
+    solidPaintFromRgb(visual.title.fill),
+    visual.title.width,
   );
   card.appendChild(title);
-  title.x = 16;
-  title.y = 14;
+  title.x = visual.title.x;
+  title.y = visual.title.y;
 
   const subjectLabel = createText(
-    "Subject Nodes",
-    `Subjects: ${operation.subjectSummary}`,
-    11,
-    solidPaint(0.34, 0.4, 0.49),
-    CARD_WIDTH - 32,
+    visual.subjectLabel.name,
+    visual.subjectLabel.text,
+    visual.subjectLabel.fontSize,
+    solidPaintFromRgb(visual.subjectLabel.fill),
+    visual.subjectLabel.width,
   );
   card.appendChild(subjectLabel);
-  subjectLabel.x = 16;
-  subjectLabel.y = 38;
+  subjectLabel.x = visual.subjectLabel.x;
+  subjectLabel.y = visual.subjectLabel.y;
 
   const body = createText(
-    "Annotation Body",
-    operation.body,
-    12,
-    solidPaint(0.1, 0.1, 0.11),
-    CARD_WIDTH - 32,
+    visual.body.name,
+    visual.body.text,
+    visual.body.fontSize,
+    solidPaintFromRgb(visual.body.fill),
+    visual.body.width,
   );
   card.appendChild(body);
-  body.x = 16;
-  body.y = 64;
-  card.resize(CARD_WIDTH, Math.max(112, body.y + body.height + 18));
+  body.x = visual.body.x;
+  body.y = visual.body.y;
+  card.resize(
+    visual.frame.width,
+    getAnnotationCardRenderedHeight({ bodyHeight: body.height, visual }),
+  );
 
   const position = getAnnotationCardBasePosition({
     basePosition: operation.basePosition,
@@ -309,30 +313,40 @@ function createAnnotationBadge(
   operation: CreateAnnotationBadgeOperation,
 ): FrameNode {
   const badge = figma.createFrame();
+  const visual = operation.visual;
   badge.name = operation.name;
-  badge.fills = [solidPaint(0.88, 0.22, 0.2)];
-  badge.strokes = [solidPaint(1, 1, 1)];
-  badge.strokeWeight = 2;
-  badge.cornerRadius = BADGE_SIZE / 2;
+  badge.fills = [solidPaintFromRgb(visual.frame.fill)];
+  badge.strokes = [solidPaintFromRgb(visual.frame.stroke)];
+  badge.strokeWeight = visual.frame.strokeWeight;
+  badge.cornerRadius = visual.frame.cornerRadius;
   badge.clipsContent = false;
-  badge.resize(BADGE_SIZE, BADGE_SIZE);
+  badge.resize(visual.frame.size, visual.frame.size);
   container.appendChild(badge);
   badge.x = operation.position.x;
   badge.y = operation.position.y;
 
   const number = createText(
-    "Annotation Badge Number",
-    String(operation.annotationNumber),
-    12,
-    solidPaint(1, 1, 1),
-    BADGE_SIZE,
+    visual.number.name,
+    visual.number.text,
+    visual.number.fontSize,
+    solidPaintFromRgb(visual.number.fill),
+    visual.number.width,
   );
   number.textAutoResize = "WIDTH_AND_HEIGHT";
   badge.appendChild(number);
-  number.x = (BADGE_SIZE - number.width) / 2;
-  number.y = (BADGE_SIZE - number.height) / 2;
+  const numberPosition = getCenteredAnnotationBadgeNumberPosition({
+    badgeVisual: visual,
+    textHeight: number.height,
+    textWidth: number.width,
+  });
+  number.x = numberPosition.x;
+  number.y = numberPosition.y;
 
   return badge;
+}
+
+function solidPaintFromRgb(color: RgbColor): SolidPaint {
+  return solidPaint(color.r, color.g, color.b);
 }
 
 function getExistingAnnotationCardRects(container: FrameNode, card: FrameNode): Rect[] {

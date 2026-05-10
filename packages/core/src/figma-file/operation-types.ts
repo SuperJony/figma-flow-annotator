@@ -5,6 +5,11 @@ import type {
   SharedPluginDataKey,
   SharedPluginDataValue,
 } from "../shared/plugin-data.ts";
+import type {
+  AnnotationBadgeVisualModel,
+  AnnotationCardVisualModel,
+  FlowConnectorVisualModel,
+} from "../visual-model.ts";
 
 export type FigmaFileOperationTarget =
   | { kind: "existing-node"; nodeId: string }
@@ -41,6 +46,7 @@ export interface CreateAnnotationCardOperation {
   body: string;
   subjectSummary: string;
   basePosition: Point;
+  visual: AnnotationCardVisualModel;
 }
 
 export interface CreateAnnotationBadgeOperation {
@@ -51,6 +57,7 @@ export interface CreateAnnotationBadgeOperation {
   annotationNumber: number;
   subjectNodeId: string;
   position: Point;
+  visual: AnnotationBadgeVisualModel;
 }
 
 export interface CreateFlowConnectorOperation {
@@ -60,6 +67,7 @@ export interface CreateFlowConnectorOperation {
   name: string;
   routePoints: Point[];
   flowAction: string | null;
+  visual: FlowConnectorVisualModel;
 }
 
 export interface UpdateFlowConnectorOperation {
@@ -68,6 +76,7 @@ export interface UpdateFlowConnectorOperation {
   name: string;
   routePoints: Point[];
   flowAction: string | null;
+  visual: FlowConnectorVisualModel;
 }
 
 export interface MoveNodeOperation {

@@ -281,11 +281,7 @@ function createFlowConnectorRoot(
   operation: CreateFlowConnectorOperation,
   runtime: ConnectRuntime,
 ): GroupNode {
-  const visualNodes = createConnectorVisualNodes(
-    operation.routePoints,
-    operation.flowAction ?? "",
-    runtime,
-  );
+  const visualNodes = createConnectorVisualNodes(operation.visual, runtime);
   const connectorRoot = figma.group(visualNodes, container);
   connectorRoot.name = operation.name;
   return connectorRoot;
@@ -296,11 +292,7 @@ function updateFlowConnectorRoot(
   operation: UpdateFlowConnectorOperation,
   runtime: ConnectRuntime,
 ): void {
-  const nextVisualNodes = createConnectorVisualNodes(
-    operation.routePoints,
-    operation.flowAction ?? "",
-    runtime,
-  );
+  const nextVisualNodes = createConnectorVisualNodes(operation.visual, runtime);
   replaceConnectorVisualNodes(connectorRoot, nextVisualNodes);
   connectorRoot.name = operation.name;
 }
@@ -415,14 +407,7 @@ function renderConnectorVisuals(
     if (connectorRoot === undefined) {
       return;
     }
-    const nextVisualNodes = createConnectorVisualNodes(
-      connector.routePoints,
-      connector.flowAction ?? "",
-      runtime,
-      connector.sharedTrunkSegment === undefined
-        ? {}
-        : { sharedTrunkSegment: connector.sharedTrunkSegment },
-    );
+    const nextVisualNodes = createConnectorVisualNodes(connector.visual, runtime);
     replaceConnectorVisualNodes(connectorRoot, nextVisualNodes);
   });
 }

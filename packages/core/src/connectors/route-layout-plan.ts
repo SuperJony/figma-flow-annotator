@@ -1,6 +1,7 @@
 import type { RefreshFlowConnectorOperationBatch } from "../figma-file/operation-types.ts";
 import type { Point, RectLike } from "../shared/geometry.ts";
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
+import { buildFlowConnectorVisualModel, type FlowConnectorVisualModel } from "../visual-model.ts";
 import type { FlowEndpointInput } from "./operations.ts";
 import { buildRefreshFlowConnectorOperationBatch } from "./operations.ts";
 import {
@@ -61,6 +62,7 @@ export interface FlowConnectorRouteRenderPlan {
   flowAction: string | null;
   routePoints: Point[];
   sharedTrunkSegment?: ConnectorRouteSegment;
+  visual: FlowConnectorVisualModel;
 }
 
 export interface FlowConnectorRouteRenderSetPlan {
@@ -142,6 +144,11 @@ export function planFlowConnectorRouteRenderSet(
         flowAction: connector.record.flowAction,
         routePoints: connector.record.routeCache?.points ?? [],
         ...(assignment === undefined ? {} : { sharedTrunkSegment: assignment.segment }),
+        visual: buildFlowConnectorVisualModel({
+          flowAction: connector.record.flowAction ?? "",
+          routePoints: connector.record.routeCache?.points ?? [],
+          sharedTrunkSegment: assignment?.segment,
+        }),
       };
     }),
     trunkLayout,
