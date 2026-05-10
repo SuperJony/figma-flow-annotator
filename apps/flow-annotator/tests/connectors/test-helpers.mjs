@@ -25,6 +25,40 @@ export async function importConnectModule() {
   return import(pathToFileURL(outfile).href);
 }
 
+export async function importConnectorObstaclesModule() {
+  await mkdir(buildDir, { recursive: true });
+  const outfile = resolve(
+    buildDir,
+    `obstacles-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+  );
+  await build({
+    bundle: true,
+    entryPoints: [resolve(appRoot, "src/connectors/obstacles.ts")],
+    format: "esm",
+    outfile,
+    platform: "node",
+    target: "es2019",
+  });
+  return import(pathToFileURL(outfile).href);
+}
+
+export async function importConnectorSnapshotModule() {
+  await mkdir(buildDir, { recursive: true });
+  const outfile = resolve(
+    buildDir,
+    `snapshot-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+  );
+  await build({
+    bundle: true,
+    entryPoints: [resolve(appRoot, "src/connectors/current-page-snapshot.ts")],
+    format: "esm",
+    outfile,
+    platform: "node",
+    target: "es2019",
+  });
+  return import(pathToFileURL(outfile).href);
+}
+
 export function createNode(page, id, x) {
   const sharedPluginData = new Map();
   const node = {

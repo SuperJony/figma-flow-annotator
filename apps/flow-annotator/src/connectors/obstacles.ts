@@ -4,7 +4,10 @@ import {
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
-import type { ConnectRuntime } from "./commands";
+
+interface ConnectorObstacleRuntime {
+  namespace: string;
+}
 
 interface ConnectorObstacleTraversalItem {
   node: SceneNode;
@@ -15,7 +18,7 @@ interface ConnectorObstacleTraversalItem {
 export function collectConnectorObstacles(
   startNode: SceneNode,
   endNode: SceneNode,
-  runtime: ConnectRuntime,
+  runtime: ConnectorObstacleRuntime,
 ): ConnectorObstacle[] {
   const obstacles: ConnectorObstacle[] = [];
   const startAncestorIds = getAncestorIds(startNode);

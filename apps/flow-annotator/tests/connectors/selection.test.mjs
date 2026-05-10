@@ -7,6 +7,8 @@ import {
   createRuntime,
   getPendingEndpointIds,
   importConnectModule,
+  importConnectorObstaclesModule,
+  importConnectorSnapshotModule,
   readConnectorEndpointIds,
   readConnectorRefs,
 } from "./test-helpers.mjs";
@@ -249,7 +251,7 @@ test("creates a Flow Connector without scanning children of unrelated frame obst
 });
 
 test("collects Context Frames and Annotation Cards as obstacles while excluding Annotation Badges", async () => {
-  const connect = await importConnectModule();
+  const { collectConnectorObstacles } = await importConnectorObstaclesModule();
   const page = { type: "PAGE", id: "page", children: [], selection: [] };
   const start = createNode(page, "start", 0);
   const end = createNode(page, "end", 520);
@@ -263,7 +265,7 @@ test("collects Context Frames and Annotation Cards as obstacles while excluding 
   page.children = [start, middleFrame, annotationCard, annotationBadge, end];
   globalThis.figma = { currentPage: page };
 
-  const obstacles = connect.collectConnectorObstacles(start, end, runtime);
+  const obstacles = collectConnectorObstacles(start, end, runtime);
 
   assert.deepEqual(
     obstacles.map((obstacle) => [obstacle.id, obstacle.kind]),
@@ -273,3 +275,92 @@ test("collects Context Frames and Annotation Cards as obstacles while excluding 
     ],
   );
 });
+
+test("reads connector snapshot facts from the provided namespace", async () => {
+  const {
+    collectFullPageFlowConnectorCurrentPageSnapshot,
+    toFlowConnectorReferenceValidationInput,
+  } = await importConnectorSnapshotModule();
+  const namespace = "custom_namespace";
+  const defaultNamespace = "figma_flow_annotator";
+  const page = createNamespacedNode(null, "page", "PAGE");
+  const generatedAncestor = createNamespacedNode(page, "generated-ancestor", "FRAME");
+  const generatedEndpoint = createNamespacedNode(generatedAncestor, "generated-endpoint", "FRAME");
+  const endpoint = createNamespacedNode(page, "endpoint", "FRAME");
+  const connectorsContainer = createNamespacedNode(page, "FFA Connectors", "FRAME");
+  const connectorRoot = createNamespacedNode(connectorsContainer, "connector-root", "GROUP");
+
+  page.selection = [];
+  generatedAncestor.setSharedPluginData(namespace, "kind", "annotation-card");
+  generatedEndpoint.setSharedPluginData(
+    namespace,
+    "connectorRefs",
+    JSON.stringify({ schemaVersion: 1, connectorIds: ["connector-custom"] }),
+  );
+  generatedEndpoint.setSharedPluginData(
+    defaultNamespace,
+    "connectorRefs",
+    JSON.stringify({ schemaVersion: 1, connectorIds: ["connector-default"] }),
+  );
+  endpoint.setSharedPluginData(
+    namespace,
+    "connectorRefs",
+    JSON.stringify({ schemaVersion: 1, connectorIds: ["connector-endpoint"] }),
+  );
+  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+  connectorRoot.setSharedPluginData(namespace, "kind", "flow-connector");
+  connectorRoot.setSharedPluginData(
+    namespace,
+    "connector",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "connector-custom",
+      start: {
+        nodeId: generatedEndpoint.id,
+        contextFrameId: generatedAncestor.id,
+      },
+      end: {
+        nodeId: endpoint.id,
+        contextFrameId: endpoint.id,
+      },
+      ownerContextFrameId: generatedAncestor.id,
+      flowAction: null,
+      createdAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+    }),
+  );
+  generatedAncestor.children = [generatedEndpoint];
+  connectorsContainer.children = [connectorRoot];
+  page.children = [generatedAncestor, endpoint, connectorsContainer];
+  globalThis.figma = { currentPage: page };
+
+  const snapshot = collectFullPageFlowConnectorCurrentPageSnapshot({ namespace });
+  const input = toFlowConnectorReferenceValidationInput(snapshot);
+  const generatedInput = input.endpoints.find((node) => node.nodeId === generatedEndpoint.id);
+  const endpointInput = input.endpoints.find((node) => node.nodeId === endpoint.id);
+
+  assert.deepEqual(
+    snapshot.connectorRecords.map((connector) => connector.record.id),
+    ["connector-custom"],
+  );
+  assert.deepEqual(generatedInput.connectorIds, ["connector-custom"]);
+  assert.equal(generatedInput.isEligibleFlowEndpoint, false);
+  assert.deepEqual(endpointInput.connectorIds, ["connector-endpoint"]);
+  assert.equal(endpointInput.isEligibleFlowEndpoint, true);
+});
+
+function createNamespacedNode(parent, id, type) {
+  const sharedPluginData = new Map();
+  return {
+    absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 100 },
+    children: [],
+    getSharedPluginData: (namespace, key) => sharedPluginData.get(`${namespace}:${key}`) ?? "",
+    id,
+    name: id,
+    parent,
+    setSharedPluginData: (namespace, key, value) => {
+      sharedPluginData.set(`${namespace}:${key}`, value);
+    },
+    type,
+  };
+}

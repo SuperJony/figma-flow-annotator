@@ -1,18 +1,9 @@
 import {
   buildCleanStaleIndexesOperationBatch,
   type CleanStaleIndexesOperationBatch,
-  CONNECTORS_CONTAINER_NAME,
-  decodeFlowConnectorRecord,
-  type FlowConnectorRecord,
-  type FlowConnectorRouteValidationConnectorInput,
-  type FlowConnectorValidationConnectorInput,
-  type FlowConnectorValidationEndpointInput,
   mergeValidationReports,
   SHARED_PLUGIN_DATA,
-  type ValidateFlowConnectorReferencesInput,
-  type ValidateFlowConnectorRouteGeometryInput,
   type ValidationReport,
-  VISUAL_NODE_KINDS,
   validateAnnotationBindings,
   validateFlowConnectorReferences,
   validateFlowConnectorRouteGeometry,
@@ -21,28 +12,27 @@ import {
   getAnnotationValidationBadges,
   getAnnotationValidationCards,
 } from "../annotations/records";
-import type { ConnectRuntime } from "../connectors/commands";
-import { collectConnectorObstacles } from "../connectors/commands";
-import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
-  collectCurrentPageNodes,
-  findContainer,
-  getVisibleBounds,
-  hasGeneratedAncestor,
-  NAMESPACE,
-  readReferenceIds,
-} from "../figma/runtime";
+  collectFullPageFlowConnectorCurrentPageSnapshot,
+  type FlowConnectorCurrentPageRuntime,
+  toCleanStaleIndexesInput,
+  toFlowConnectorReferenceValidationInput,
+  toFlowConnectorRouteValidationInput,
+} from "../connectors/current-page-snapshot";
+import { applyFigmaFileOperationBatch } from "../figma/file-operations";
+import { findContainer, readReferenceIds } from "../figma/runtime";
 
 export interface CleanStaleIndexesResult {
   cleanedEndpointCount: number;
   removedConnectorRefCount: number;
 }
 
-export function validateCurrentPageBindings(runtime: ConnectRuntime): {
+export function validateCurrentPageBindings(runtime: FlowConnectorCurrentPageRuntime): {
   report: ValidationReport;
   targetsByIssueId: Map<string, string[]>;
 } {
-  const pageNodes = collectCurrentPageNodes();
+  const connectorSnapshot = collectFullPageFlowConnectorCurrentPageSnapshot(runtime);
+  const pageNodes = connectorSnapshot.pageNodes;
   const allNodes = [figma.currentPage, ...pageNodes];
   const annotationsContainer = findContainer("FFA Annotations");
   const cards =
@@ -66,14 +56,10 @@ export function validateCurrentPageBindings(runtime: ConnectRuntime): {
     contexts,
     subjects,
   });
-  const connectorRecords = getFlowConnectorValidationRecords();
-  const connectorReferenceInput = getFlowConnectorReferenceValidationInput(
-    pageNodes,
-    connectorRecords,
-  );
+  const connectorReferenceInput = toFlowConnectorReferenceValidationInput(connectorSnapshot);
   const connectorReport = validateFlowConnectorReferences(connectorReferenceInput);
   const routeReport = validateFlowConnectorRouteGeometry(
-    getFlowConnectorRouteValidationInput(pageNodes, connectorRecords, runtime),
+    toFlowConnectorRouteValidationInput(connectorSnapshot, runtime),
   );
   const report = mergeValidationReports([annotationReport, connectorReport, routeReport]);
 
@@ -83,20 +69,16 @@ export function validateCurrentPageBindings(runtime: ConnectRuntime): {
   };
 }
 
-export function cleanStaleIndexes(): CleanStaleIndexesResult {
-  const pageNodes = collectCurrentPageNodes();
-  const connectorInput = getFlowConnectorReferenceValidationInput(
-    pageNodes,
-    getFlowConnectorValidationRecords(),
-  );
-  const batch = buildCleanStaleIndexesOperationBatch({
-    endpoints: connectorInput.endpoints,
-    liveConnectorIds: connectorInput.connectors.map((connector) => connector.record.id),
-  });
+export function cleanStaleIndexes(
+  runtime: FlowConnectorCurrentPageRuntime,
+): CleanStaleIndexesResult {
+  const connectorSnapshot = collectFullPageFlowConnectorCurrentPageSnapshot(runtime);
+  const batch = buildCleanStaleIndexesOperationBatch(toCleanStaleIndexesInput(connectorSnapshot));
 
   applyCleanStaleIndexesOperationBatch(
     batch,
-    new Map(pageNodes.map((node): [string, BaseNode] => [node.id, node])),
+    runtime,
+    new Map(connectorSnapshot.pageNodes.map((node): [string, BaseNode] => [node.id, node])),
   );
   return {
     cleanedEndpointCount: batch.cleanedEndpointNodeIds.length,
@@ -106,118 +88,12 @@ export function cleanStaleIndexes(): CleanStaleIndexesResult {
 
 function applyCleanStaleIndexesOperationBatch(
   batch: CleanStaleIndexesOperationBatch,
+  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
   existingNodes: Map<string, BaseNode>,
 ): void {
   applyFigmaFileOperationBatch({
     batch,
     existingNodes,
-    namespace: NAMESPACE,
+    namespace: runtime.namespace,
   });
-}
-
-function getFlowConnectorValidationRecords(): { node: GroupNode; record: FlowConnectorRecord }[] {
-  const connectorsContainer = findContainer(CONNECTORS_CONTAINER_NAME);
-  return connectorsContainer === null
-    ? []
-    : connectorsContainer.children.flatMap((child) => {
-        if (
-          child.type !== "GROUP" ||
-          child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !==
-            VISUAL_NODE_KINDS.flowConnector
-        ) {
-          return [];
-        }
-
-        const record = readFlowConnectorValidationRecord(child);
-        return record === null ? [] : [{ node: child, record }];
-      });
-}
-
-function getFlowConnectorReferenceValidationInput(
-  pageNodes: SceneNode[],
-  connectorRecords: {
-    node: GroupNode;
-    record: FlowConnectorRecord;
-  }[] = getFlowConnectorValidationRecords(),
-): ValidateFlowConnectorReferencesInput {
-  const connectors: FlowConnectorValidationConnectorInput[] = connectorRecords.map((connector) => ({
-    nodeId: connector.node.id,
-    record: connector.record,
-  }));
-  const endpoints: FlowConnectorValidationEndpointInput[] = pageNodes.map((node) => ({
-    connectorIds: readReferenceIds(node, SHARED_PLUGIN_DATA.keys.connectorRefs, "connectorIds"),
-    isEligibleFlowEndpoint: isFlowEndpointEligibleNode(node),
-    nodeId: node.id,
-  }));
-
-  return { connectors, endpoints };
-}
-
-function getFlowConnectorRouteValidationInput(
-  pageNodes: SceneNode[],
-  connectorRecords: { node: GroupNode; record: FlowConnectorRecord }[],
-  runtime: ConnectRuntime,
-): ValidateFlowConnectorRouteGeometryInput {
-  const nodesById = new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node]));
-  const connectors: FlowConnectorRouteValidationConnectorInput[] = connectorRecords.map(
-    (connector) => {
-      const startNode = nodesById.get(connector.record.start.nodeId);
-      const endNode = nodesById.get(connector.record.end.nodeId);
-      const labelRect = getFlowActionLabelRect(connector.node);
-      const baseInput = {
-        nodeId: connector.node.id,
-        record: connector.record,
-        ...(labelRect === undefined ? {} : { labelRect }),
-      };
-
-      if (
-        startNode === undefined ||
-        endNode === undefined ||
-        startNode.absoluteBoundingBox === null ||
-        endNode.absoluteBoundingBox === null
-      ) {
-        return {
-          ...baseInput,
-          obstacles: [],
-        };
-      }
-
-      return {
-        ...baseInput,
-        endRect: getVisibleBounds(endNode),
-        obstacles: collectConnectorObstacles(startNode, endNode, runtime),
-        startRect: getVisibleBounds(startNode),
-      };
-    },
-  );
-
-  return { connectors };
-}
-
-function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {
-  const label = connectorRoot.children.find(
-    (child) =>
-      child.name === "FFA Flow Action Label" &&
-      child.visible !== false &&
-      "absoluteBoundingBox" in child &&
-      child.absoluteBoundingBox !== null,
-  );
-  return label === undefined ||
-    !("absoluteBoundingBox" in label) ||
-    label.absoluteBoundingBox === null
-    ? undefined
-    : label.absoluteBoundingBox;
-}
-
-function readFlowConnectorValidationRecord(node: BaseNode): FlowConnectorRecord | null {
-  return decodeFlowConnectorRecord(
-    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.connector),
-  );
-}
-
-function isFlowEndpointEligibleNode(node: SceneNode): boolean {
-  return (
-    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === "" &&
-    !hasGeneratedAncestor(node)
-  );
 }

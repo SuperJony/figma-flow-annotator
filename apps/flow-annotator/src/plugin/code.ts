@@ -176,7 +176,7 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   }
 
   if (message.type === "clean-stale-indexes") {
-    const result = cleanStaleIndexes();
+    const result = cleanStaleIndexes(connectRuntime);
     const { report, targetsByIssueId } = validateCurrentPageBindings(connectRuntime);
     validationTargetsByIssueId = targetsByIssueId;
     postValidationReport(report);
