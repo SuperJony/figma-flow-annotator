@@ -2,6 +2,10 @@ import {
   ANNOTATIONS_CONTAINER_NAME,
   CONNECTORS_CONTAINER_NAME,
   type ContextRecord,
+  decodeAnnotationNumberSeedRecord,
+  decodeAnnotationReferenceIds,
+  decodeConnectorReferenceIds,
+  decodeContextRecord,
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
@@ -174,31 +178,13 @@ export function readReferenceIds(
   dataKey: "annotationRefs" | "connectorRefs",
   listKey: "annotationIds" | "connectorIds",
 ): string[] {
-  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, dataKey));
-  if (!isRecord(parsed) || !Array.isArray(parsed[listKey])) {
-    return [];
+  if (dataKey === SHARED_PLUGIN_DATA.keys.annotationRefs && listKey === "annotationIds") {
+    return decodeAnnotationReferenceIds(node.getSharedPluginData(NAMESPACE, dataKey));
   }
-  return parsed[listKey].filter((value): value is string => typeof value === "string");
-}
-
-export function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1;
-}
-
-export function parseJson(value: string): unknown {
-  if (value.length === 0) {
-    return null;
+  if (dataKey === SHARED_PLUGIN_DATA.keys.connectorRefs && listKey === "connectorIds") {
+    return decodeConnectorReferenceIds(node.getSharedPluginData(NAMESPACE, dataKey));
   }
-
-  try {
-    return JSON.parse(value) as unknown;
-  } catch (_error: unknown) {
-    return null;
-  }
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return [];
 }
 
 export function solidPaint(r: number, g: number, b: number): SolidPaint {
@@ -261,23 +247,10 @@ function readContextRecord(
   contextNode: ContextDataNode,
   contextFrameId: string,
 ): ContextRecord | null {
-  const parsed = parseJson(
+  return decodeContextRecord(
     contextNode.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.context),
-  );
-  if (
-    !isRecord(parsed) ||
-    parsed.schemaVersion !== 1 ||
-    parsed.contextFrameId !== contextFrameId ||
-    !isPositiveInteger(parsed.nextAnnotationNumber)
-  ) {
-    return null;
-  }
-
-  return {
-    schemaVersion: 1,
     contextFrameId,
-    nextAnnotationNumber: parsed.nextAnnotationNumber,
-  };
+  );
 }
 
 function getSeededNextAnnotationNumber(contextFrameId: string): number {
@@ -295,14 +268,10 @@ function getSeededNextAnnotationNumber(contextFrameId: string): number {
       return;
     }
 
-    const annotation = parseJson(
+    const annotation = decodeAnnotationNumberSeedRecord(
       node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation),
     );
-    if (
-      isRecord(annotation) &&
-      annotation.contextFrameId === contextFrameId &&
-      isPositiveInteger(annotation.annotationNumber)
-    ) {
+    if (annotation !== null && annotation.contextFrameId === contextFrameId) {
       maxNumber = Math.max(maxNumber, annotation.annotationNumber);
     }
   });

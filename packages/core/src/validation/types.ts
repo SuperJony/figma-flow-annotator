@@ -1,6 +1,10 @@
 import type { ConnectorObstacle } from "../connectors/routing.ts";
 import type { RectLike } from "../shared/geometry.ts";
-import type { BadgeRefRecord, FlowConnectorRecord } from "../shared/plugin-data.ts";
+import type {
+  AnnotationValidationRecord,
+  BadgeRefRecord,
+  FlowConnectorRecord,
+} from "../shared/plugin-data.ts";
 
 export type ValidationSeverity = "error" | "warning" | "info";
 
@@ -45,14 +49,6 @@ export interface ValidationReport {
   schemaVersion: 1;
   issues: ValidationIssue[];
   summary: ValidationReportSummary;
-}
-
-export interface AnnotationValidationRecord {
-  id: string;
-  annotationNumber: number;
-  body: string;
-  contextFrameId: string;
-  subjectNodeIds: string[];
 }
 
 export interface AnnotationValidationCardInput {

@@ -2,12 +2,14 @@ import {
   type AnnotationRecord,
   type AnnotationValidationBadgeInput,
   type AnnotationValidationCardInput,
-  type AnnotationValidationRecord,
   type BadgeRefRecord,
+  decodeAnnotationRecord,
+  decodeAnnotationValidationRecord,
+  decodeBadgeRefRecord,
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
-import { isPositiveInteger, isRecord, NAMESPACE, parseJson } from "../figma/runtime";
+import { NAMESPACE } from "../figma/runtime";
 
 export function getSelectedAnnotationCard(): FrameNode {
   const selectedCards = figma.currentPage.selection.filter(isAnnotationCardNode);
@@ -26,58 +28,19 @@ export function isAnnotationCardNode(node: SceneNode): node is FrameNode {
 }
 
 export function readAnnotationRecord(node: BaseNode): AnnotationRecord {
-  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation));
-  if (
-    !isRecord(parsed) ||
-    parsed.schemaVersion !== 1 ||
-    typeof parsed.id !== "string" ||
-    !isPositiveInteger(parsed.annotationNumber) ||
-    typeof parsed.body !== "string" ||
-    parsed.body.trim().length === 0 ||
-    typeof parsed.contextFrameId !== "string" ||
-    !Array.isArray(parsed.subjectNodeIds) ||
-    typeof parsed.createdAt !== "string" ||
-    typeof parsed.updatedAt !== "string"
-  ) {
+  const record = decodeAnnotationRecord(
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation),
+  );
+  if (record === null) {
     throw new Error("Selected Annotation Card does not contain a complete Annotation record.");
   }
-
-  return {
-    schemaVersion: 1,
-    id: parsed.id,
-    annotationNumber: parsed.annotationNumber,
-    ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
-    body: parsed.body,
-    ...(typeof parsed.kind === "string" ? { kind: parsed.kind } : {}),
-    contextFrameId: parsed.contextFrameId,
-    subjectNodeIds: parsed.subjectNodeIds.filter(
-      (value): value is string => typeof value === "string",
-    ),
-    createdAt: parsed.createdAt,
-    updatedAt: parsed.updatedAt,
-  };
+  return record;
 }
 
 export function readBadgeRefRecord(node: BaseNode): BadgeRefRecord | null {
-  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.badgeRef));
-  if (
-    !isRecord(parsed) ||
-    parsed.schemaVersion !== 1 ||
-    typeof parsed.annotationId !== "string" ||
-    !isPositiveInteger(parsed.annotationNumber) ||
-    typeof parsed.subjectNodeId !== "string" ||
-    typeof parsed.contextFrameId !== "string"
-  ) {
-    return null;
-  }
-
-  return {
-    schemaVersion: 1,
-    annotationId: parsed.annotationId,
-    annotationNumber: parsed.annotationNumber,
-    subjectNodeId: parsed.subjectNodeId,
-    contextFrameId: parsed.contextFrameId,
-  };
+  return decodeBadgeRefRecord(
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.badgeRef),
+  );
 }
 
 export function getAnnotationBadgeRecords(
@@ -159,26 +122,8 @@ export function getAnnotationValidationBadges(
   });
 }
 
-function readAnnotationValidationRecord(node: BaseNode): AnnotationValidationRecord | null {
-  const parsed = parseJson(node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation));
-  if (
-    !isRecord(parsed) ||
-    typeof parsed.id !== "string" ||
-    !isPositiveInteger(parsed.annotationNumber) ||
-    typeof parsed.body !== "string" ||
-    typeof parsed.contextFrameId !== "string" ||
-    !Array.isArray(parsed.subjectNodeIds)
-  ) {
-    return null;
-  }
-
-  return {
-    id: parsed.id,
-    annotationNumber: parsed.annotationNumber,
-    body: parsed.body,
-    contextFrameId: parsed.contextFrameId,
-    subjectNodeIds: parsed.subjectNodeIds.filter(
-      (value): value is string => typeof value === "string",
-    ),
-  };
+function readAnnotationValidationRecord(node: BaseNode) {
+  return decodeAnnotationValidationRecord(
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.annotation),
+  );
 }

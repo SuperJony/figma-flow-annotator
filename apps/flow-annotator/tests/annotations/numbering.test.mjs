@@ -32,11 +32,8 @@ test("creates an Annotation without scanning unrelated frame descendants for num
       schemaVersion: 1,
       id: "annotation-existing",
       annotationNumber: 4,
-      body: "existing",
       contextFrameId: page.id,
       subjectNodeIds: ["old-subject"],
-      createdAt: "2026-05-07T00:00:00.000Z",
-      updatedAt: "2026-05-07T00:00:00.000Z",
     }),
   );
 
