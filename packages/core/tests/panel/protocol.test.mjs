@@ -197,12 +197,22 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
     }),
     "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s), 2 warning(s).",
   );
-  assert.equal(
-    core.getDeepAuditRepairIndexPanelStatusTone({
-      schemaVersion: 1,
-      summary: { all: 1, errors: 1, warnings: 0, info: 0 },
-      issues: [],
+  assert.deepEqual(
+    core.buildDeepAuditRepairIndexPanelStatusMessage({
+      cleanedEndpointCount: 0,
+      removedConnectorRefCount: 0,
+      repairedContainerCount: 2,
+      validationReport: {
+        schemaVersion: 1,
+        summary: { all: 1, errors: 1, warnings: 0, info: 0 },
+        issues: [],
+      },
     }),
-    "error",
+    {
+      type: "status",
+      tone: "error",
+      message:
+        "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).",
+    },
   );
 });

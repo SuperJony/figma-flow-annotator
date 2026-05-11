@@ -212,25 +212,34 @@ export function formatCleanStaleIndexesPanelStatus(result: {
   return `Cleaned stale indexes on ${result.cleanedEndpointCount} Flow Endpoint(s); removed ${result.removedConnectorRefCount} stale connector reference(s).`;
 }
 
-export function formatDeepAuditRepairIndexPanelStatus(result: {
+interface DeepAuditRepairIndexPanelStatusInput {
   cleanedEndpointCount: number;
   removedConnectorRefCount: number;
   repairedContainerCount: number;
   validationReport?: ValidationReport;
-}): string {
+}
+
+export function formatDeepAuditRepairIndexPanelStatus(
+  result: DeepAuditRepairIndexPanelStatusInput,
+): string {
   const repairStatus = `Deep Audit Repair rebuilt the Validation Index on ${result.repairedContainerCount} container(s), cleaned ${result.cleanedEndpointCount} Flow Endpoint(s), and removed ${result.removedConnectorRefCount} stale connector reference(s).`;
   if (result.validationReport === undefined) {
     return repairStatus;
   }
-  const remainingIssues = formatValidationIssueSummary(result.validationReport);
-  if (remainingIssues === "0 issue(s)") {
+  if (result.validationReport.summary.all === 0) {
     return `${repairStatus} Validation found 0 issue(s).`;
   }
+  const remainingIssues = formatValidationIssueSummary(result.validationReport);
   return `${repairStatus} Validation still reports ${remainingIssues}.`;
 }
 
-export function getDeepAuditRepairIndexPanelStatusTone(report: ValidationReport): PanelStatusTone {
-  return report.summary.errors > 0 ? "error" : "success";
+export function buildDeepAuditRepairIndexPanelStatusMessage(
+  result: DeepAuditRepairIndexPanelStatusInput & { validationReport: ValidationReport },
+): PanelStatusMessage {
+  return buildPanelStatusMessage(
+    result.validationReport.summary.errors > 0 ? "error" : "success",
+    formatDeepAuditRepairIndexPanelStatus(result),
+  );
 }
 
 function formatValidationIssueSummary(report: ValidationReport): string {

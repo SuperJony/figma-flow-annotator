@@ -1,13 +1,12 @@
 import {
+  buildDeepAuditRepairIndexPanelStatusMessage,
   buildPanelSelectionStateMessage,
   buildPanelStatusMessage,
   buildPanelValidationOperationMessage,
   buildPanelValidationReportMessage,
   classifyPanelMessage,
   formatCleanStaleIndexesPanelStatus,
-  formatDeepAuditRepairIndexPanelStatus,
   formatRefreshConnectorsPanelStatus,
-  getDeepAuditRepairIndexPanelStatusTone,
   type PanelCommandMessage,
   type PanelMessageDispatch,
   type PanelStatusTone,
@@ -208,11 +207,11 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
       const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
       validationTargetsByIssueId = targetsByIssueId;
       postValidationReport(report);
-      postStatus(
-        getDeepAuditRepairIndexPanelStatusTone(report),
-        formatDeepAuditRepairIndexPanelStatus({ ...result, validationReport: report }),
-        true,
-      );
+      const status = buildDeepAuditRepairIndexPanelStatusMessage({
+        ...result,
+        validationReport: report,
+      });
+      postStatus(status.tone, status.message, true);
     });
     return;
   }

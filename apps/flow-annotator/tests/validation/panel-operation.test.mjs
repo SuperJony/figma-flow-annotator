@@ -159,6 +159,8 @@ test("deep audit repair reports remaining validation errors after rebuilding the
   globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
   await flushPluginMessage(messages);
 
+  const expectedStatus =
+    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).";
   const reportMessage = messages.find((message) => message.type === "validation-report");
   const statusMessage = messages.find((message) => message.type === "status");
 
@@ -168,14 +170,8 @@ test("deep audit repair reports remaining validation errors after rebuilding the
     ["flow-connector-orphaned"],
   );
   assert.equal(statusMessage.tone, "error");
-  assert.equal(
-    statusMessage.message,
-    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).",
-  );
-  assert.deepEqual(notifications, [
-    "Deep Audit Repair started.",
-    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).",
-  ]);
+  assert.equal(statusMessage.message, expectedStatus);
+  assert.deepEqual(notifications, ["Deep Audit Repair started.", expectedStatus]);
 });
 
 function readOperationMessages(messages) {
