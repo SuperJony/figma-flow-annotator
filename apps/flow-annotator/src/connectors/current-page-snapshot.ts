@@ -5,7 +5,6 @@ import {
   decodeFlowConnectorRecord,
   type FlowConnectorAuthoringEndpointInput,
   type FlowConnectorRecord,
-  type FlowConnectorRouteLayoutConnectorInput,
   type FlowConnectorRouteValidationConnectorInput,
   type FlowConnectorValidationConnectorInput,
   type FlowConnectorValidationEndpointInput,
@@ -39,12 +38,6 @@ export interface FlowConnectorValidationSnapshot extends FlowConnectorCurrentPag
   connectorObstacleCandidateNodes: SceneNode[];
   validationNodes: SceneNode[];
   validationNodesById: Map<string, SceneNode>;
-}
-
-export interface FlowConnectorRouteLayoutSnapshot extends FlowConnectorCurrentPageSnapshot {
-  connectorNodesById: Map<string, GroupNode>;
-  layoutConnectors: FlowConnectorRouteLayoutConnectorInput[];
-  selectedOnly: boolean;
 }
 
 export function collectFlowConnectorCurrentPageSnapshot(
@@ -127,23 +120,6 @@ export async function collectBoundedFlowConnectorValidationSnapshot(
     validationNodesById: new Map(
       validationNodes.map((node): [string, SceneNode] => [node.id, node]),
     ),
-  };
-}
-
-export async function collectFlowConnectorRouteLayoutSnapshot(
-  selectedConnectorRoots: GroupNode[],
-  runtime: FlowConnectorCurrentPageRuntime,
-): Promise<FlowConnectorRouteLayoutSnapshot> {
-  const snapshot = collectFlowConnectorCurrentPageSnapshot(runtime);
-  return {
-    ...snapshot,
-    connectorNodesById: buildConnectorNodeMap(snapshot.connectorRecords, selectedConnectorRoots),
-    layoutConnectors: await collectRouteLayoutConnectors(
-      snapshot.connectorRecords,
-      selectedConnectorRoots,
-      runtime,
-    ),
-    selectedOnly: selectedConnectorRoots.length > 0,
   };
 }
 
@@ -287,10 +263,6 @@ function findFlowConnectorsContainer(
   return null;
 }
 
-function collectCurrentPageConnectorObstacleCandidates(): SceneNode[] {
-  return figma.currentPage.findAllWithCriteria({ types: ["FRAME"] });
-}
-
 async function getExistingSceneNodesById(
   nodeIds: Iterable<string>,
   currentPageId: string,
@@ -304,101 +276,10 @@ async function getExistingSceneNodesById(
   return nodes.filter(isLiveSceneNode);
 }
 
-async function collectRouteLayoutConnectors(
-  connectorRecords: FlowConnectorSnapshotRecord[],
-  selectedConnectorRoots: GroupNode[],
-  runtime: FlowConnectorCurrentPageRuntime,
-): Promise<FlowConnectorRouteLayoutConnectorInput[]> {
-  if (connectorRecords.length === 0 && selectedConnectorRoots.length === 0) {
-    return [];
-  }
-
-  const obstacleCandidates = collectCurrentPageConnectorObstacleCandidates();
-  if (selectedConnectorRoots.length === 0) {
-    return Promise.all(
-      connectorRecords.map((connector) =>
-        toRouteLayoutConnector(connector, true, runtime, obstacleCandidates),
-      ),
-    );
-  }
-
-  const recordsByNodeId = new Map(
-    connectorRecords.map((connector) => [connector.node.id, connector]),
-  );
-  const selectedNodeIds = new Set(selectedConnectorRoots.map((node) => node.id));
-  const selectedConnectors = selectedConnectorRoots.map((node) => ({
-    node,
-    record: recordsByNodeId.get(node.id)?.record ?? readFlowConnectorRecord(node, runtime),
-  }));
-  const remainingConnectors = connectorRecords.filter(
-    (connector) => !selectedNodeIds.has(connector.node.id),
-  );
-
-  return [
-    ...(await Promise.all(
-      selectedConnectors.map((connector) =>
-        toRouteLayoutConnector(connector, true, runtime, obstacleCandidates),
-      ),
-    )),
-    ...remainingConnectors.map((connector) => toRouteLayoutConnectorWithoutRuntimeFacts(connector)),
-  ];
-}
-
-async function toRouteLayoutConnector(
-  connector: { node: GroupNode; record: FlowConnectorRecord | null },
-  includeRuntimeFacts: boolean,
-  runtime: FlowConnectorCurrentPageRuntime,
-  obstacleCandidates: Iterable<SceneNode>,
-): Promise<FlowConnectorRouteLayoutConnectorInput> {
-  if (!includeRuntimeFacts || connector.record === null) {
-    return toRouteLayoutConnectorWithoutRuntimeFacts(connector);
-  }
-
-  const startNode = await getLiveSceneNodeOrNull(connector.record.start.nodeId);
-  const endNode = await getLiveSceneNodeOrNull(connector.record.end.nodeId);
-
-  return {
-    ...toRouteLayoutConnectorWithoutRuntimeFacts(connector),
-    ...(startNode === null ? {} : { start: toFlowConnectorAuthoringEndpoint(startNode, runtime) }),
-    ...(endNode === null ? {} : { end: toFlowConnectorAuthoringEndpoint(endNode, runtime) }),
-    obstacles:
-      startNode === null || endNode === null
-        ? []
-        : collectConnectorObstacles(startNode, endNode, runtime, obstacleCandidates),
-  };
-}
-
 function addNodeIds(target: Set<string>, nodeIds: Iterable<string>): void {
   for (const nodeId of nodeIds) {
     target.add(nodeId);
   }
-}
-
-function toRouteLayoutConnectorWithoutRuntimeFacts(connector: {
-  node: GroupNode;
-  record: FlowConnectorRecord | null;
-}): FlowConnectorRouteLayoutConnectorInput {
-  return {
-    name: connector.node.name,
-    nodeId: connector.node.id,
-    record: connector.record,
-  };
-}
-
-function buildConnectorNodeMap(
-  connectorRecords: FlowConnectorSnapshotRecord[],
-  selectedConnectorRoots: GroupNode[],
-): Map<string, GroupNode> {
-  return new Map(
-    [...connectorRecords.map((connector) => connector.node), ...selectedConnectorRoots].map(
-      (node) => [node.id, node],
-    ),
-  );
-}
-
-async function getLiveSceneNodeOrNull(nodeId: string): Promise<SceneNode | null> {
-  const node = await figma.getNodeByIdAsync(nodeId);
-  return isLiveSceneNode(node) ? node : null;
 }
 
 function isLiveSceneNode(node: BaseNode | null): node is SceneNode {

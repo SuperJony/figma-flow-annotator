@@ -18,3 +18,17 @@ export interface CreateFlowConnectorRouteFacts {
   existingConnectors: ExistingFlowConnectorRouteFact[];
   obstacles: ConnectorObstacle[];
 }
+
+export interface RefreshFlowConnectorRouteConnectorFact {
+  nodeId: string;
+  name: string;
+  record: FlowConnectorRecord | null;
+  start?: FlowConnectorRouteEndpointFact;
+  end?: FlowConnectorRouteEndpointFact;
+  obstacles?: ConnectorObstacle[];
+}
+
+export interface RefreshFlowConnectorRouteFacts {
+  connectors: RefreshFlowConnectorRouteConnectorFact[];
+  selectedConnectorNodeIds?: string[];
+}

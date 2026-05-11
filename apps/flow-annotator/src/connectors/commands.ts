@@ -11,7 +11,6 @@ import {
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
   collectFlowConnectorCurrentPageSnapshot,
-  collectFlowConnectorRouteLayoutSnapshot,
   type FlowConnectorCurrentPageRuntime,
   findExistingDirectedConnectorInSnapshot,
   getSelectedFlowConnectorRoots,
@@ -21,7 +20,10 @@ import {
   renderFlowConnectorVisuals,
   resolveFlowConnectorVisualRoot,
 } from "./flow-connector-visual-writer";
-import { collectCreateFlowConnectorRouteFacts } from "./route-facts";
+import {
+  collectCreateFlowConnectorRouteFacts,
+  collectRefreshFlowConnectorRouteFacts,
+} from "./route-facts";
 import {
   getPendingConnectorEndpointNodes,
   handleSelectionChange,
@@ -91,23 +93,20 @@ export async function refreshFlowConnectors(
   const refreshedNodes: GroupNode[] = [];
   const applyFailures: string[] = [];
   const selectedConnectorRoots = getSelectedFlowConnectorRoots(runtime);
-  const routeSnapshot = await collectFlowConnectorRouteLayoutSnapshot(
+  const routeFactSnapshot = await collectRefreshFlowConnectorRouteFacts(
     selectedConnectorRoots,
     runtime,
   );
 
-  if (routeSnapshot.layoutConnectors.length === 0) {
+  if (routeFactSnapshot.routeFacts.connectors.length === 0) {
     throw new Error("No Flow Connectors found to refresh.");
   }
 
   const layoutPlan = planFlowConnectorRouteLayoutSet({
-    connectors: routeSnapshot.layoutConnectors,
     now: new Date().toISOString(),
-    ...(routeSnapshot.selectedOnly
-      ? { selectedConnectorNodeIds: selectedConnectorRoots.map((node) => node.id) }
-      : {}),
+    routeFacts: routeFactSnapshot.routeFacts,
   });
-  const connectorNodesById = routeSnapshot.connectorNodesById;
+  const connectorNodesById = routeFactSnapshot.connectorNodesById;
 
   for (const refresh of layoutPlan.refreshes) {
     try {
@@ -148,7 +147,7 @@ export async function refreshFlowConnectors(
     failedCount: failures.length,
     failures,
     refreshedCount: refreshedNodes.length,
-    selectedOnly: routeSnapshot.selectedOnly,
+    selectedOnly: routeFactSnapshot.selectedOnly,
     nodes: refreshedNodes,
   };
 }

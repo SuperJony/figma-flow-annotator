@@ -272,16 +272,34 @@ test("regenerates trunked connector labels on branch segments after shared-end c
   await connect.createFlowConnector("from B", runtime);
 
   assert.equal(connectorGroups.length, 2);
-  const firstRoute = readConnector(connectorGroups[0]).routeCache.points;
-  const secondRoute = readConnector(connectorGroups[1]).routeCache.points;
-  const sharedFinalSegment = finalSegment(firstRoute);
-  assert.deepEqual(finalSegment(secondRoute), sharedFinalSegment);
+  assertConnectorTrunkLabels(connectorGroups);
 
-  const firstLabelCenter = getLabelCenter(connectorGroups[0]);
-  const secondLabelCenter = getLabelCenter(connectorGroups[1]);
-  assert.equal(pointOnSegment(firstLabelCenter, sharedFinalSegment), false);
-  assert.equal(pointOnSegment(secondLabelCenter, sharedFinalSegment), false);
-  assert.notDeepEqual(firstLabelCenter, secondLabelCenter);
+  page.findAllWithCriteria = () => {
+    throw new Error("Refresh Flow Connector must not use page-level frame discovery.");
+  };
+
+  moveNode(end, { x: 640, y: 110, width: 100, height: 100 });
+  page.selection = [];
+  const pageRefresh = await connect.refreshFlowConnectors(runtime);
+
+  assert.equal(pageRefresh.selectedOnly, false);
+  assert.equal(pageRefresh.refreshedCount, 2);
+  assert.equal(pageRefresh.failedCount, 0);
+  assertConnectorTrunkLabels(connectorGroups);
+
+  const pageRefreshRoutes = connectorGroups.map(
+    (connector) => readConnector(connector).routeCache.points,
+  );
+
+  page.selection = [connectorGroups[0]];
+  const selectedRefresh = await connect.refreshFlowConnectors(runtime);
+
+  assert.equal(selectedRefresh.selectedOnly, true);
+  assert.equal(selectedRefresh.refreshedCount, 1);
+  assert.equal(selectedRefresh.failedCount, 0);
+  assert.deepEqual(readConnector(connectorGroups[0]).routeCache.points, pageRefreshRoutes[0]);
+  assert.deepEqual(readConnector(connectorGroups[1]).routeCache.points, pageRefreshRoutes[1]);
+  assertConnectorTrunkLabels(connectorGroups);
 });
 
 test("refreshes current-page Flow Connectors and gives selected connector roots precedence", async () => {
@@ -313,28 +331,20 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   connect.handleSelectionChange(runtime);
   await connect.createFlowConnector("choose", runtime);
 
-  const originalFindAllWithCriteria = page.findAllWithCriteria.bind(page);
-  let obstacleDiscoveryCalls = 0;
-  page.findAllWithCriteria = (criteria) => {
-    if (criteria.types?.includes("FRAME")) {
-      obstacleDiscoveryCalls += 1;
-    }
-    return originalFindAllWithCriteria(criteria);
-  };
-
   const firstInitialRoute = readConnector(connectorGroups[0]).routeCache.points;
   const secondInitialRoute = readConnector(connectorGroups[1]).routeCache.points;
+  page.findAllWithCriteria = () => {
+    throw new Error("Refresh Flow Connector must not use page-level frame discovery.");
+  };
 
   moveNode(end, { x: 560, y: 0, width: 100, height: 100 });
   moveNode(alternateEnd, { x: 560, y: 220, width: 100, height: 100 });
   page.selection = [];
-  obstacleDiscoveryCalls = 0;
   const pageRefresh = await connect.refreshFlowConnectors(runtime);
 
   assert.equal(pageRefresh.selectedOnly, false);
   assert.equal(pageRefresh.refreshedCount, 2);
   assert.equal(pageRefresh.failedCount, 0);
-  assert.equal(obstacleDiscoveryCalls, 1);
   assert.notDeepEqual(readConnector(connectorGroups[0]).routeCache.points, firstInitialRoute);
   assert.notDeepEqual(readConnector(connectorGroups[1]).routeCache.points, secondInitialRoute);
 
@@ -344,13 +354,11 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   moveNode(end, { x: 700, y: 0, width: 100, height: 100 });
   moveNode(alternateEnd, { x: 700, y: 260, width: 100, height: 100 });
   page.selection = [connectorGroups[0]];
-  obstacleDiscoveryCalls = 0;
   const selectedRefresh = await connect.refreshFlowConnectors(runtime);
 
   assert.equal(selectedRefresh.selectedOnly, true);
   assert.equal(selectedRefresh.refreshedCount, 1);
   assert.equal(selectedRefresh.failedCount, 0);
-  assert.equal(obstacleDiscoveryCalls, 1);
   assert.deepEqual(
     selectedRefresh.nodes.map((node) => node.id),
     [connectorGroups[0].id],
@@ -399,13 +407,17 @@ test("preserves an existing Flow Connector route and record when refresh routing
   ].forEach((rect, index) => {
     moveNode(walls[index], rect);
   });
-  page.children = [
-    start,
-    ...walls,
-    end,
-    page.children.find((node) => node.name === "FFA Connectors"),
-  ];
+  const connectorsContainer = page.children.find((node) => node.name === "FFA Connectors");
+  assert.ok(connectorsContainer, "expected Flow Connector container after creation");
+  setValidationIndex(connectorsContainer, {
+    connectorObstacleCandidateNodeIds: walls.map((wall) => wall.id),
+    contextFrameIds: walls.map((wall) => wall.id),
+  });
+  page.children = [start, ...walls, end, connectorsContainer];
   page.selection = [connectorGroups[0]];
+  page.findAllWithCriteria = () => {
+    throw new Error("Refresh Flow Connector must not use page-level frame discovery.");
+  };
 
   const result = await connect.refreshFlowConnectors(runtime);
 
@@ -422,3 +434,109 @@ test("preserves an existing Flow Connector route and record when refresh routing
     originalChildIds,
   );
 });
+
+test("preserves failed connector visuals during mixed page refresh", async () => {
+  const connect = await importConnectModule();
+  const page = { type: "PAGE", id: "page", children: [], selection: [] };
+  const failingStart = createNode(page, "failing-start", 0);
+  const failingEnd = createNode(page, "failing-end", 320);
+  const successfulStart = createNode(page, "successful-start", 0);
+  const successfulEnd = createNode(page, "successful-end", 320);
+  const connectorGroups = [];
+  const runtime = createRuntime(page, connectorGroups);
+
+  moveNode(successfulStart, { x: 0, y: 260, width: 100, height: 100 });
+  moveNode(successfulEnd, { x: 320, y: 260, width: 100, height: 100 });
+  page.children = [failingStart, failingEnd, successfulStart, successfulEnd];
+  globalThis.figma = createFigmaStub(page, connectorGroups);
+
+  connect.resetObservedEndpointSelection(runtime);
+  page.selection = [failingStart];
+  connect.handleSelectionChange(runtime);
+  page.selection = [failingStart, failingEnd];
+  connect.handleSelectionChange(runtime);
+  await connect.createFlowConnector("blocked", runtime);
+
+  page.selection = [];
+  connect.resetObservedEndpointSelection(runtime);
+  page.selection = [successfulStart];
+  connect.handleSelectionChange(runtime);
+  page.selection = [successfulStart, successfulEnd];
+  connect.handleSelectionChange(runtime);
+  await connect.createFlowConnector("succeeds", runtime);
+
+  const failingConnector = connectorGroups[0];
+  const successfulConnector = connectorGroups[1];
+  const originalFailingConnectorData = failingConnector.getSharedPluginData(
+    "figma_flow_annotator",
+    "connector",
+  );
+  const originalFailingChildIds = failingConnector.children.map((child) => child.id);
+  const originalSuccessfulRoute = readConnector(successfulConnector).routeCache.points;
+  const walls = [
+    createNode(page, "left-wall", -60),
+    createNode(page, "right-wall", 80),
+    createNode(page, "top-wall", -60),
+    createNode(page, "bottom-wall", -60),
+  ];
+
+  [
+    { x: -60, y: -60, width: 50, height: 200 },
+    { x: 80, y: -60, width: 50, height: 200 },
+    { x: -60, y: -60, width: 190, height: 50 },
+    { x: -60, y: 80, width: 190, height: 50 },
+  ].forEach((rect, index) => {
+    moveNode(walls[index], rect);
+  });
+  const connectorsContainer = page.children.find((node) => node.name === "FFA Connectors");
+  assert.ok(connectorsContainer, "expected Flow Connector container after creation");
+  setValidationIndex(connectorsContainer, {
+    connectorObstacleCandidateNodeIds: walls.map((wall) => wall.id),
+    contextFrameIds: walls.map((wall) => wall.id),
+  });
+  page.children = [
+    failingStart,
+    ...walls,
+    failingEnd,
+    successfulStart,
+    successfulEnd,
+    connectorsContainer,
+  ];
+  page.selection = [];
+  page.findAllWithCriteria = () => {
+    throw new Error("Refresh Flow Connector must not use page-level frame discovery.");
+  };
+
+  moveNode(successfulEnd, { x: 560, y: 260, width: 100, height: 100 });
+  const result = await connect.refreshFlowConnectors(runtime);
+
+  assert.equal(result.selectedOnly, false);
+  assert.equal(result.refreshedCount, 1);
+  assert.equal(result.failedCount, 1);
+  assert.match(result.failures[0], /No legal Orthogonal Route avoids Connector Obstacles/);
+  assert.equal(
+    failingConnector.getSharedPluginData("figma_flow_annotator", "connector"),
+    originalFailingConnectorData,
+  );
+  assert.deepEqual(
+    failingConnector.children.map((child) => child.id),
+    originalFailingChildIds,
+  );
+  assert.notDeepEqual(
+    readConnector(successfulConnector).routeCache.points,
+    originalSuccessfulRoute,
+  );
+});
+
+function assertConnectorTrunkLabels(connectorGroups) {
+  const firstRoute = readConnector(connectorGroups[0]).routeCache.points;
+  const secondRoute = readConnector(connectorGroups[1]).routeCache.points;
+  const sharedFinalSegment = finalSegment(firstRoute);
+  assert.deepEqual(finalSegment(secondRoute), sharedFinalSegment);
+
+  const firstLabelCenter = getLabelCenter(connectorGroups[0]);
+  const secondLabelCenter = getLabelCenter(connectorGroups[1]);
+  assert.equal(pointOnSegment(firstLabelCenter, sharedFinalSegment), false);
+  assert.equal(pointOnSegment(secondLabelCenter, sharedFinalSegment), false);
+  assert.notDeepEqual(firstLabelCenter, secondLabelCenter);
+}

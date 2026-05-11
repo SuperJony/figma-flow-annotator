@@ -1,10 +1,13 @@
 import type { RefreshFlowConnectorOperationBatch } from "../figma-file/operation-types.ts";
-import type { Point, RectLike } from "../shared/geometry.ts";
+import type { Point } from "../shared/geometry.ts";
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
-import type { FlowEndpointInput } from "./operations.ts";
 import { buildRefreshFlowConnectorOperationBatch } from "./operations.ts";
+import type {
+  FlowConnectorRouteEndpointFact,
+  RefreshFlowConnectorRouteConnectorFact,
+  RefreshFlowConnectorRouteFacts,
+} from "./route-facts.ts";
 import {
-  type ConnectorObstacle,
   type ConnectorRouteSegment,
   type ConnectorTrunkLayout,
   groupConnectorTrunks,
@@ -12,24 +15,12 @@ import {
 } from "./routing.ts";
 import { buildFlowConnectorVisualModel, type FlowConnectorVisualModel } from "./visual-model.ts";
 
-export interface FlowConnectorRouteLayoutEndpointInput extends FlowEndpointInput {
-  bounds: RectLike;
-  hasGeneratedAncestor: boolean;
-}
-
-export interface FlowConnectorRouteLayoutConnectorInput {
-  nodeId: string;
-  name: string;
-  record: FlowConnectorRecord | null;
-  start?: FlowConnectorRouteLayoutEndpointInput;
-  end?: FlowConnectorRouteLayoutEndpointInput;
-  obstacles?: ConnectorObstacle[];
-}
+export type FlowConnectorRouteLayoutEndpointInput = FlowConnectorRouteEndpointFact;
+export type FlowConnectorRouteLayoutConnectorInput = RefreshFlowConnectorRouteConnectorFact;
 
 export interface PlanFlowConnectorRouteLayoutSetInput {
-  connectors: FlowConnectorRouteLayoutConnectorInput[];
   now: string;
-  selectedConnectorNodeIds?: string[];
+  routeFacts: RefreshFlowConnectorRouteFacts;
 }
 
 export interface FlowConnectorRouteRefreshPlan {
@@ -80,12 +71,13 @@ export interface FlowConnectorRouteLayoutSetPlan extends FlowConnectorRouteRende
 export function planFlowConnectorRouteLayoutSet(
   input: PlanFlowConnectorRouteLayoutSetInput,
 ): FlowConnectorRouteLayoutSetPlan {
-  const selectedConnectorNodeIds = input.selectedConnectorNodeIds ?? [];
+  const selectedConnectorNodeIds = input.routeFacts.selectedConnectorNodeIds ?? [];
   const selectedOnly = selectedConnectorNodeIds.length > 0;
   const selectedNodeIdSet = new Set(selectedConnectorNodeIds);
+  const connectors = input.routeFacts.connectors;
   const targetConnectors = selectedOnly
-    ? input.connectors.filter((connector) => selectedNodeIdSet.has(connector.nodeId))
-    : input.connectors;
+    ? connectors.filter((connector) => selectedNodeIdSet.has(connector.nodeId))
+    : connectors;
   const refreshes: FlowConnectorRouteRefreshPlan[] = [];
   const failures: FlowConnectorRouteLayoutFailure[] = [];
 
@@ -105,8 +97,12 @@ export function planFlowConnectorRouteLayoutSet(
   const refreshedRecordsByNodeId = new Map(
     refreshes.map((refresh) => [refresh.connectorNodeId, refresh.record]),
   );
+  const failedConnectorNodeIds = new Set(failures.map((failure) => failure.connectorNodeId));
   const renderSet = planFlowConnectorRouteRenderSet({
-    connectors: input.connectors.flatMap((connector) => {
+    connectors: connectors.flatMap((connector) => {
+      if (failedConnectorNodeIds.has(connector.nodeId)) {
+        return [];
+      }
       const record =
         refreshedRecordsByNodeId.get(connector.nodeId) ?? connector.record ?? undefined;
       return record === undefined ? [] : [{ nodeId: connector.nodeId, record }];
