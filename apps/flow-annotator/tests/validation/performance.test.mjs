@@ -260,22 +260,22 @@ test("validates and cleans explicitly referenced Stale Reverse Indexes without p
   );
 });
 
-test("requires Deep Audit Repair for missing, invalid, or stale Validation Index data", async () => {
+test("requires validation state repair for missing, invalid, or stale validation data", async () => {
   const cases = [
     {
-      expected: "Validation Index is missing.",
+      expected: "Validation data is missing.",
       name: "missing",
       prepareIndex: () => {},
     },
     {
-      expected: "Validation Index is invalid on 1 container(s).",
+      expected: "Validation data is unreadable in 1 project area(s).",
       name: "invalid",
       prepareIndex: (connectorsContainer) => {
         connectorsContainer.setSharedPluginData(namespace, "validationIndex", "{bad json");
       },
     },
     {
-      expected: "Validation Index references 1 deleted node(s).",
+      expected: "Validation data references 1 deleted object(s).",
       name: "stale",
       prepareIndex: (connectorsContainer, start, end, connector) => {
         setValidationIndex(connectorsContainer, {
@@ -311,13 +311,14 @@ test("requires Deep Audit Repair for missing, invalid, or stale Validation Index
     assert.equal(cleanStatus.tone, "error");
     assert.equal(
       cleanStatus.message,
-      `${testCase.expected} Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.`,
+      `${testCase.expected} Run Repair Validation State before cleaning stale connector references.`,
     );
+    assert.equal(cleanStatus.validationRepairRequired, true);
     assert.deepEqual(readConnectorRefs(start), ["live-connector", "deleted-connector"]);
   }
 });
 
-test("Deep Audit Repair rebuilds the Validation Index and cleans unknown stale reverse refs", async () => {
+test("Repair Validation State rebuilds validation data and cleans unknown stale reverse refs", async () => {
   const page = createPage();
   const start = createNode(page, "start-endpoint", 0);
   const end = createNode(page, "end-endpoint", 160);
@@ -347,7 +348,7 @@ test("Deep Audit Repair rebuilds the Validation Index and cleans unknown stale r
   assert.deepEqual(readConnectorRefs(unknownFormerEndpoint), ["deleted-connector"]);
 
   messages.length = 0;
-  globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
+  globalThis.figma.ui.onmessage({ type: "repair-validation-state" });
   await flushPluginMessage(messages);
 
   const repairStatus = messages.find(
@@ -356,8 +357,9 @@ test("Deep Audit Repair rebuilds the Validation Index and cleans unknown stale r
   assert.deepEqual(readConnectorRefs(unknownFormerEndpoint), []);
   assert.equal(
     repairStatus.message,
-    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 1 Flow Endpoint(s), and removed 1 stale connector reference(s). Validation found 0 issue(s).",
+    "Repair Validation State refreshed project validation data, cleaned 1 Flow Endpoint(s), and removed 1 stale connector reference(s). Validation found 0 issue(s).",
   );
+  assert.equal(repairStatus.validationRepairRequired, false);
   assert.deepEqual(readValidationIndex(connectorsContainer).flowEndpointNodeIds, [
     start.id,
     end.id,
@@ -365,7 +367,7 @@ test("Deep Audit Repair rebuilds the Validation Index and cleans unknown stale r
   assert.deepEqual(readValidationIndex(connectorsContainer).connectorRootNodeIds, [connector.id]);
 });
 
-test("Deep Audit Repair keeps rebuilt Validation Index under the Figma plugin-data limit", async () => {
+test("Repair Validation State keeps rebuilt validation data under the Figma plugin-data limit", async () => {
   const page = createPage();
   const unrelatedFrames = Array.from({ length: 6_000 }, (_value, index) =>
     createNode(page, `unrelated-frame-${String(index).padStart(5, "0")}`, index),
@@ -388,7 +390,7 @@ test("Deep Audit Repair keeps rebuilt Validation Index under the Figma plugin-da
 
   await importCodeModule();
 
-  globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
+  globalThis.figma.ui.onmessage({ type: "repair-validation-state" });
   await flushPluginMessage(messages);
 
   const repairStatus = messages.find((message) => message.type === "status");

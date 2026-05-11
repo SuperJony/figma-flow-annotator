@@ -37,7 +37,7 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#summaryAll")).toHaveText("3");
         await expect(page.locator(".issue-row")).toHaveCount(3);
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+        await expect(page.locator("#repairValidationState")).toBeHidden();
         await page.locator('[data-filter="warning"]').click();
         await expect(page.locator(".issue-row")).toHaveCount(1);
         await expect(page.locator(".issue-title")).toHaveText("Missing Annotation Badge");
@@ -47,7 +47,7 @@ test.describe("Plugin panel browser visuals", () => {
       if (definition.name === "validate-empty-report") {
         await expect(page.locator("#summaryAll")).toHaveText("0");
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+        await expect(page.locator("#repairValidationState")).toBeHidden();
         await expect(page.locator("#status")).toHaveText("Validation found 0 issue(s).");
         await expect(page.locator(".empty-report")).toHaveText("No validation issues found.");
       }
@@ -57,7 +57,7 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#summaryErrors")).toHaveText("3");
         await expect(page.locator("#summaryWarnings")).toHaveText("2");
         await expect(page.locator("#cleanStaleIndexes")).toBeEnabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+        await expect(page.locator("#repairValidationState")).toBeHidden();
         await expect(page.locator(".issue-title")).toHaveText([
           "Orphaned Flow Connector",
           "Invalid Flow Endpoint",
@@ -76,7 +76,7 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#summaryWarnings")).toHaveText("2");
         await expect(page.locator("#summaryInfo")).toHaveText("1");
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+        await expect(page.locator("#repairValidationState")).toBeHidden();
         await expect(page.locator(".issue-title")).toHaveText([
           "Connector Route Crosses Obstacle",
           "Flow Action Label Overlap",
@@ -122,7 +122,7 @@ test.describe("Plugin panel browser visuals", () => {
       if (definition.name === "validate-clean-complete") {
         await expect(page.locator("#summaryAll")).toHaveText("1");
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+        await expect(page.locator("#repairValidationState")).toBeHidden();
         await expect(page.locator("#status")).toHaveText(
           "Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).",
         );
@@ -132,7 +132,7 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#panelValidate")).toHaveAttribute("aria-busy", "true");
         await expect(page.locator("#runValidation")).toBeDisabled();
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeDisabled();
+        await expect(page.locator("#repairValidationState")).toBeHidden();
         await expect(page.locator("#summaryAll")).toHaveText("1");
         await expect(page.locator(".issue-title")).toHaveText("Stale Reverse Index");
         await expect(page.locator("#status")).toHaveText("Validate Bindings is running.");
@@ -142,20 +142,20 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#panelValidate")).toHaveAttribute("aria-busy", "false");
         await expect(page.locator("#runValidation")).toBeEnabled();
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+        await expect(page.locator("#repairValidationState")).toBeHidden();
         await expect(page.locator("#summaryAll")).toHaveText("1");
         await expect(page.locator(".issue-title")).toHaveText("Orphaned Flow Connector");
         await expect(page.locator("#status")).toHaveText(
-          "Validate Bindings failed: Unable to read Validation Index.",
+          "Validate Bindings failed: Unable to read validation data.",
         );
       }
 
       if (definition.name === "validate-repair-required") {
         await expect(page.locator("#status")).toHaveText(
-          "Validation Index is missing. Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.",
+          "Validation data is missing. Run Repair Validation State before cleaning stale connector references.",
         );
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+        await expect(page.locator("#repairValidationState")).toBeEnabled();
       }
 
       await expect(page.locator(".shell")).toHaveScreenshot(`${definition.name}.png`, {
@@ -179,10 +179,10 @@ test.describe("Plugin panel browser visuals", () => {
       status: "Clean Stale Indexes is running.",
     },
     {
-      button: "#deepAuditRepairIndex",
+      button: "#repairValidationState",
       fixtureName: "validate-repair-required",
-      messageType: "deep-audit-repair-index",
-      status: "Deep Audit Repair is running.",
+      messageType: "repair-validation-state",
+      status: "Repair Validation State is running.",
     },
   ]) {
     test(`${command.messageType} click enters busy state before the plugin replies`, async ({
@@ -227,7 +227,11 @@ test.describe("Plugin panel browser visuals", () => {
       await expect(page.locator("#panelValidate")).toHaveAttribute("aria-busy", "true");
       await expect(page.locator("#runValidation")).toBeDisabled();
       await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
-      await expect(page.locator("#deepAuditRepairIndex")).toBeDisabled();
+      if (command.messageType === "repair-validation-state") {
+        await expect(page.locator("#repairValidationState")).toBeDisabled();
+      } else {
+        await expect(page.locator("#repairValidationState")).toBeHidden();
+      }
       await expect(page.locator("#status")).toHaveText(command.status);
     });
   }
