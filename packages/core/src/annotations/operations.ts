@@ -4,7 +4,9 @@ import type {
   ArrangeAnnotationCardsOperationBatch,
   CreateAnnotationOperationBatch,
   FigmaFileOperation,
+  FigmaFileOperationTarget,
   MoveNodeOperation,
+  UpdateValidationIndexOperation,
 } from "../figma-file/operation-types.ts";
 import type { Point, RectLike } from "../shared/geometry.ts";
 import { unionRects } from "../shared/geometry.ts";
@@ -191,6 +193,17 @@ export function buildCreateAnnotationOperationBatch(
       },
     );
   });
+  operations.push(
+    buildUpdateAnnotationValidationIndexOperation({
+      annotationBadgeNodeIdTargets: input.subjects.map((_subject, index) => ({
+        kind: "created-node",
+        ref: `annotation-badge-${index + 1}`,
+      })),
+      annotationCardNodeIdTarget: { kind: "created-node", ref: cardRef },
+      contextFrameId: input.contextFrameId,
+      subjectNodeIds: record.subjectNodeIds,
+    }),
+  );
 
   return {
     schemaVersion: 1,
@@ -230,23 +243,19 @@ export function buildAddAnnotationSubjectsOperationBatch(
   const subjectsNeedingBadges = addedSubjects.filter(
     (subject) => !existingBadgeSubjectIds.has(subject.id),
   );
-  const operations: FigmaFileOperation[] = [];
-
-  if (subjectsNeedingBadges.length > 0) {
-    operations.push(
-      {
-        type: "ensure-container",
-        ref: "annotations",
-        name: ANNOTATIONS_CONTAINER_NAME,
-      },
-      {
-        type: "set-shared-plugin-data",
-        target: { kind: "container", ref: "annotations" },
-        key: SHARED_PLUGIN_DATA.keys.kind,
-        value: VISUAL_NODE_KINDS.container,
-      },
-    );
-  }
+  const operations: FigmaFileOperation[] = [
+    {
+      type: "ensure-container",
+      ref: "annotations",
+      name: ANNOTATIONS_CONTAINER_NAME,
+    },
+    {
+      type: "set-shared-plugin-data",
+      target: { kind: "container", ref: "annotations" },
+      key: SHARED_PLUGIN_DATA.keys.kind,
+      value: VISUAL_NODE_KINDS.container,
+    },
+  ];
 
   if (addedSubjectIds.length > 0) {
     operations.push({
@@ -305,6 +314,17 @@ export function buildAddAnnotationSubjectsOperationBatch(
       id: input.annotation.id,
     });
   });
+  operations.push(
+    buildUpdateAnnotationValidationIndexOperation({
+      annotationBadgeNodeIdTargets: subjectsNeedingBadges.map((_subject, index) => ({
+        kind: "created-node",
+        ref: `annotation-badge-added-${index + 1}`,
+      })),
+      annotationCardNodeIdTarget: { kind: "existing-node", nodeId: input.annotationCardNodeId },
+      contextFrameId: record.contextFrameId,
+      subjectNodeIds: record.subjectNodeIds,
+    }),
+  );
 
   return {
     schemaVersion: 1,
@@ -328,7 +348,19 @@ export function buildArrangeAnnotationBadgesOperationBatch(
     throw new Error("Select one or more Subject Nodes with Annotation Badges.");
   }
 
-  const operations: MoveNodeOperation[] = [];
+  const operations: FigmaFileOperation[] = [
+    {
+      type: "ensure-container",
+      ref: "annotations",
+      name: ANNOTATIONS_CONTAINER_NAME,
+    },
+    {
+      type: "set-shared-plugin-data",
+      target: { kind: "container", ref: "annotations" },
+      key: SHARED_PLUGIN_DATA.keys.kind,
+      value: VISUAL_NODE_KINDS.container,
+    },
+  ];
   input.subjects.forEach((subject) => {
     const sortedBadges = [...subject.badges].sort(compareAnnotationNumbersThenIds);
     sortedBadges.forEach((badge, index) => {
@@ -342,11 +374,29 @@ export function buildArrangeAnnotationBadgesOperationBatch(
       });
     });
   });
+  const movedBadgeNodeIds = operations.flatMap((operation) =>
+    operation.type === "move-node" ? [operation.targetNodeId] : [],
+  );
+  operations.push({
+    type: "update-validation-index",
+    target: { kind: "container", ref: "annotations" },
+    upsert: {
+      nodeIds: {
+        subjectNodeIds: input.subjects.map((subject) => subject.id),
+      },
+      nodeTargets: {
+        annotationBadgeNodeIds: movedBadgeNodeIds.map((nodeId) => ({
+          kind: "existing-node",
+          nodeId,
+        })),
+      },
+    },
+  });
 
   return {
     schemaVersion: 1,
     kind: "arrange-annotation-badges",
-    movedBadgeNodeIds: operations.map((operation) => operation.targetNodeId),
+    movedBadgeNodeIds,
     operations,
   };
 }
@@ -359,7 +409,7 @@ export function buildArrangeAnnotationCardsOperationBatch(
   }
 
   let nextY = input.basePosition.y;
-  const operations = [...input.cards].sort(compareAnnotationNumbersThenIds).map((card) => {
+  const moveOperations = [...input.cards].sort(compareAnnotationNumbersThenIds).map((card) => {
     const operation: MoveNodeOperation = {
       type: "move-node",
       targetNodeId: card.nodeId,
@@ -371,12 +421,65 @@ export function buildArrangeAnnotationCardsOperationBatch(
     nextY += card.rect.height + ANNOTATION_CARD_LAYOUT.gap;
     return operation;
   });
+  const operations: FigmaFileOperation[] = [
+    {
+      type: "ensure-container",
+      ref: "annotations",
+      name: ANNOTATIONS_CONTAINER_NAME,
+    },
+    {
+      type: "set-shared-plugin-data",
+      target: { kind: "container", ref: "annotations" },
+      key: SHARED_PLUGIN_DATA.keys.kind,
+      value: VISUAL_NODE_KINDS.container,
+    },
+    ...moveOperations,
+    {
+      type: "update-validation-index",
+      target: { kind: "container", ref: "annotations" },
+      upsert: {
+        nodeTargets: {
+          annotationCardNodeIds: moveOperations.map((operation) => ({
+            kind: "existing-node",
+            nodeId: operation.targetNodeId,
+          })),
+          connectorObstacleCandidateNodeIds: moveOperations.map((operation) => ({
+            kind: "existing-node",
+            nodeId: operation.targetNodeId,
+          })),
+        },
+      },
+    },
+  ];
 
   return {
     schemaVersion: 1,
     kind: "arrange-annotation-cards",
-    movedCardNodeIds: operations.map((operation) => operation.targetNodeId),
+    movedCardNodeIds: moveOperations.map((operation) => operation.targetNodeId),
     operations,
+  };
+}
+
+function buildUpdateAnnotationValidationIndexOperation(input: {
+  annotationBadgeNodeIdTargets: FigmaFileOperationTarget[];
+  annotationCardNodeIdTarget: FigmaFileOperationTarget;
+  contextFrameId: string;
+  subjectNodeIds: string[];
+}): UpdateValidationIndexOperation {
+  return {
+    type: "update-validation-index",
+    target: { kind: "container", ref: "annotations" },
+    upsert: {
+      nodeIds: {
+        contextFrameIds: [input.contextFrameId],
+        subjectNodeIds: input.subjectNodeIds,
+      },
+      nodeTargets: {
+        annotationBadgeNodeIds: input.annotationBadgeNodeIdTargets,
+        annotationCardNodeIds: [input.annotationCardNodeIdTarget],
+        connectorObstacleCandidateNodeIds: [input.annotationCardNodeIdTarget],
+      },
+    },
   };
 }
 

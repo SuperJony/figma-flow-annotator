@@ -95,7 +95,10 @@ test("upserts Flow Connectors by directed endpoint pair and keeps reverse direct
 
   assert.equal(unchanged.mode, "idempotent");
   assert.equal(unchanged.connectorId, "connector-existing");
-  assert.deepEqual(unchanged.operations, []);
+  assert.deepEqual(
+    unchanged.operations.map((operation) => operation.type),
+    ["ensure-container", "set-shared-plugin-data", "update-validation-index"],
+  );
   assert.equal(unchanged.record.updatedAt, existingRecord.updatedAt);
 
   const changed = core.buildCreateFlowConnectorOperationBatch({
@@ -131,8 +134,18 @@ test("upserts Flow Connectors by directed endpoint pair and keeps reverse direct
   assert.equal(changed.record.flowAction, null);
   assert.deepEqual(
     changed.operations.map((operation) => operation.type),
-    ["update-flow-connector", "set-shared-plugin-data"],
+    [
+      "ensure-container",
+      "set-shared-plugin-data",
+      "update-flow-connector",
+      "set-shared-plugin-data",
+      "update-validation-index",
+    ],
   );
+  assert.deepEqual(changed.operations.at(-1).upsert.nodeIds.flowEndpointNodeIds, [
+    "node-a",
+    "node-b",
+  ]);
   assert.throws(
     () =>
       core.buildCreateFlowConnectorOperationBatch({
@@ -191,6 +204,10 @@ test("upserts Flow Connectors by directed endpoint pair and keeps reverse direct
       .map((operation) => operation.targetNodeId),
     ["node-b", "node-a"],
   );
+  assert.equal(
+    reverse.operations.filter((operation) => operation.type === "update-validation-index").length,
+    1,
+  );
 });
 
 test("builds explicit Flow Connector refresh operation batches without changing semantics", async () => {
@@ -243,7 +260,13 @@ test("builds explicit Flow Connector refresh operation batches without changing 
   ]);
   assert.deepEqual(
     refreshed.operations.map((operation) => operation.type),
-    ["update-flow-connector", "set-shared-plugin-data"],
+    [
+      "ensure-container",
+      "set-shared-plugin-data",
+      "update-flow-connector",
+      "set-shared-plugin-data",
+      "update-validation-index",
+    ],
   );
 
   const idempotent = core.buildRefreshFlowConnectorOperationBatch({
@@ -256,7 +279,10 @@ test("builds explicit Flow Connector refresh operation batches without changing 
   });
 
   assert.equal(idempotent.mode, "idempotent");
-  assert.deepEqual(idempotent.operations, []);
+  assert.deepEqual(
+    idempotent.operations.map((operation) => operation.type),
+    ["ensure-container", "set-shared-plugin-data", "update-validation-index"],
+  );
   assert.equal(idempotent.record.updatedAt, existingRecord.updatedAt);
   assert.throws(
     () =>
