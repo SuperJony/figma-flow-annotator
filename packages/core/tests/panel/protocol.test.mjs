@@ -35,6 +35,10 @@ test("classifies panel messages into adapter dispatch decisions", async () => {
     kind: "command",
     command: { type: "validate-bindings" },
   });
+  assert.deepEqual(core.classifyPanelMessage({ type: "deep-audit-repair-index" }), {
+    kind: "command",
+    command: { type: "deep-audit-repair-index" },
+  });
 });
 
 test("rejects unsupported or malformed panel messages before adapter dispatch", async () => {
@@ -147,5 +151,13 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
       removedConnectorRefCount: 2,
     }),
     "Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).",
+  );
+  assert.equal(
+    core.formatDeepAuditRepairIndexPanelStatus({
+      cleanedEndpointCount: 2,
+      removedConnectorRefCount: 2,
+      repairedContainerCount: 2,
+    }),
+    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 2 Flow Endpoint(s), and removed 2 stale connector reference(s).",
   );
 });

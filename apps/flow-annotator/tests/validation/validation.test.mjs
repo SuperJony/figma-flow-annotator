@@ -11,12 +11,12 @@ import {
   importCodeModule,
   moveNode,
   namespace,
-  readConnectorId,
   readConnectorRefs,
   setBadgeRecord,
   setCardRecord,
   setConnectorRecord,
   setConnectorRefs,
+  setValidationIndex,
 } from "../support/plugin-test-helpers.mjs";
 
 let validationTestQueue = Promise.resolve();
@@ -186,6 +186,15 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   setConnectorRecord(invalidConnector, "connector-invalid", invalidEndpoint.id, end.id, "open");
   setConnectorRecord(duplicateConnectorA, "connector-duplicate-a", start.id, end.id, null);
   setConnectorRecord(duplicateConnectorB, "connector-duplicate-b", start.id, end.id, "open");
+  setValidationIndex(connectorsContainer, {
+    connectorRootNodeIds: [
+      orphanConnector.id,
+      invalidConnector.id,
+      duplicateConnectorA.id,
+      duplicateConnectorB.id,
+    ],
+    flowEndpointNodeIds: [start.id, end.id, invalidEndpoint.id],
+  });
 
   connectorsContainer.children = [
     orphanConnector,
@@ -260,11 +269,6 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   assert.equal(
     cleanReport.issues.some((issue) => issue.code === "flow-endpoint-invalid"),
     true,
-  );
-  assert.equal(connectorsContainer.children.length, 4);
-  assert.equal(
-    connectorsContainer.children.some((node) => readConnectorId(node) === "connector-deleted-root"),
-    false,
   );
   assert.equal(
     cleanStatus.message,

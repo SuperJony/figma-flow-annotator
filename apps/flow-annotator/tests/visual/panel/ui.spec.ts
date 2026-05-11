@@ -37,6 +37,7 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#summaryAll")).toHaveText("3");
         await expect(page.locator(".issue-row")).toHaveCount(3);
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
+        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
         await page.locator('[data-filter="warning"]').click();
         await expect(page.locator(".issue-row")).toHaveCount(1);
         await expect(page.locator(".issue-title")).toHaveText("Missing Annotation Badge");
@@ -48,6 +49,7 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#summaryErrors")).toHaveText("3");
         await expect(page.locator("#summaryWarnings")).toHaveText("2");
         await expect(page.locator("#cleanStaleIndexes")).toBeEnabled();
+        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
         await expect(page.locator(".issue-title")).toHaveText([
           "Orphaned Flow Connector",
           "Invalid Flow Endpoint",
@@ -66,6 +68,7 @@ test.describe("Plugin panel browser visuals", () => {
         await expect(page.locator("#summaryWarnings")).toHaveText("2");
         await expect(page.locator("#summaryInfo")).toHaveText("1");
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
+        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
         await expect(page.locator(".issue-title")).toHaveText([
           "Connector Route Crosses Obstacle",
           "Flow Action Label Overlap",
@@ -111,9 +114,43 @@ test.describe("Plugin panel browser visuals", () => {
       if (definition.name === "validate-clean-complete") {
         await expect(page.locator("#summaryAll")).toHaveText("1");
         await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
+        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
         await expect(page.locator("#status")).toHaveText(
           "Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).",
         );
+      }
+
+      if (definition.name === "validate-repair-required") {
+        await expect(page.locator("#status")).toHaveText(
+          "Validation Index is missing. Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.",
+        );
+        await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
+        await expect(page.locator("#deepAuditRepairIndex")).toBeEnabled();
+
+        const postedMessages: unknown[] = [];
+        await page.exposeFunction("captureRepairPostMessage", (message: unknown) => {
+          postedMessages.push(message);
+        });
+        await page.evaluate(() => {
+          const windowWithCapture = window as unknown as {
+            captureRepairPostMessage: (message: unknown) => void;
+          };
+          const originalPostMessage = window.parent.postMessage.bind(window.parent);
+          window.parent.postMessage = ((
+            message: unknown,
+            targetOrigin: string,
+            transfer?: Transferable[],
+          ) => {
+            windowWithCapture.captureRepairPostMessage(message);
+            originalPostMessage(message, targetOrigin, transfer ?? []);
+          }) as typeof window.parent.postMessage;
+        });
+        await page.locator("#deepAuditRepairIndex").click();
+        expect(postedMessages).toContainEqual({
+          pluginMessage: {
+            type: "deep-audit-repair-index",
+          },
+        });
       }
 
       await expect(page.locator(".shell")).toHaveScreenshot(`${definition.name}.png`, {

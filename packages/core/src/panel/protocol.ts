@@ -14,6 +14,7 @@ export type PanelInboundMessage =
   | { type: "swap-connector-endpoints" }
   | { type: "validate-bindings" }
   | { type: "clean-stale-indexes" }
+  | { type: "deep-audit-repair-index" }
   | { type: "locate-validation-issue"; issueId: string }
   | { type: "request-selection-state" }
   | { type: "close" };
@@ -116,6 +117,7 @@ export function classifyPanelMessage(message: unknown): PanelMessageDispatch {
     case "swap-connector-endpoints":
     case "validate-bindings":
     case "clean-stale-indexes":
+    case "deep-audit-repair-index":
       return {
         kind: "command",
         command: { type: message.type },
@@ -180,6 +182,14 @@ export function formatCleanStaleIndexesPanelStatus(result: {
   removedConnectorRefCount: number;
 }): string {
   return `Cleaned stale indexes on ${result.cleanedEndpointCount} Flow Endpoint(s); removed ${result.removedConnectorRefCount} stale connector reference(s).`;
+}
+
+export function formatDeepAuditRepairIndexPanelStatus(result: {
+  cleanedEndpointCount: number;
+  removedConnectorRefCount: number;
+  repairedContainerCount: number;
+}): string {
+  return `Deep Audit Repair rebuilt the Validation Index on ${result.repairedContainerCount} container(s), cleaned ${result.cleanedEndpointCount} Flow Endpoint(s), and removed ${result.removedConnectorRefCount} stale connector reference(s).`;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

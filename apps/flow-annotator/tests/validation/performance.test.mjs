@@ -11,10 +11,12 @@ import {
   moveNode,
   namespace,
   readConnectorRefs,
+  readValidationIndex,
   setBadgeRecord,
   setCardRecord,
   setConnectorRecord,
   setConnectorRefs,
+  setValidationIndex,
 } from "../support/plugin-test-helpers.mjs";
 
 let validationTestQueue = Promise.resolve();
@@ -99,6 +101,14 @@ test("validates and cleans explicitly referenced Stale Reverse Indexes without p
     }),
   );
   setBadgeRecord(badge, 1, formerEndpoint.id, contextFrame.id);
+  setValidationIndex(annotationsContainer, {
+    annotationBadgeNodeIds: [badge.id],
+    annotationCardNodeIds: [card.id],
+    connectorObstacleCandidateNodeIds: [card.id],
+    contextFrameIds: [contextFrame.id],
+    flowEndpointNodeIds: [formerEndpoint.id],
+    subjectNodeIds: [formerEndpoint.id],
+  });
   setConnectorRefs(formerEndpoint, ["deleted-connector"]);
   contextFrame.children = [formerEndpoint];
   annotationsContainer.children = [card, badge];
@@ -138,6 +148,111 @@ test("validates and cleans explicitly referenced Stale Reverse Indexes without p
     cleanStatus.message,
     "Cleaned stale indexes on 1 Flow Endpoint(s); removed 1 stale connector reference(s).",
   );
+});
+
+test("requires Deep Audit Repair for missing, invalid, or stale Validation Index data", async () => {
+  const cases = [
+    {
+      expected: "Validation Index is missing.",
+      name: "missing",
+      prepareIndex: () => {},
+    },
+    {
+      expected: "Validation Index is invalid on 1 container(s).",
+      name: "invalid",
+      prepareIndex: (connectorsContainer) => {
+        connectorsContainer.setSharedPluginData(namespace, "validationIndex", "{bad json");
+      },
+    },
+    {
+      expected: "Validation Index references 1 deleted node(s).",
+      name: "stale",
+      prepareIndex: (connectorsContainer, start, end, connector) => {
+        setValidationIndex(connectorsContainer, {
+          connectorRootNodeIds: [connector.id, "deleted-index-node"],
+          flowEndpointNodeIds: [start.id, end.id],
+        });
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const page = createPage();
+    const start = createNode(page, `${testCase.name}-start`, 0);
+    const end = createNode(page, `${testCase.name}-end`, 160);
+    const connectorsContainer = createNode(page, "FFA Connectors", 800);
+    const connector = createNode(connectorsContainer, `${testCase.name}-connector-root`, 840);
+    const messages = [];
+
+    setConnectorRefs(start, ["live-connector", "deleted-connector"]);
+    connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+    setConnectorRecord(connector, "live-connector", start.id, end.id, "open");
+    testCase.prepareIndex(connectorsContainer, start, end, connector);
+    connectorsContainer.children = [connector];
+    page.children = [start, end, connectorsContainer];
+    globalThis.figma = createFigmaStub(page, messages);
+
+    await importCodeModule();
+
+    globalThis.figma.ui.onmessage({ type: "clean-stale-indexes" });
+    await flushPluginMessage(messages);
+
+    const cleanStatus = messages.find((message) => message.type === "status");
+    assert.equal(cleanStatus.tone, "error");
+    assert.equal(
+      cleanStatus.message,
+      `${testCase.expected} Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.`,
+    );
+    assert.deepEqual(readConnectorRefs(start), ["live-connector", "deleted-connector"]);
+  }
+});
+
+test("Deep Audit Repair rebuilds the Validation Index and cleans unknown stale reverse refs", async () => {
+  const page = createPage();
+  const start = createNode(page, "start-endpoint", 0);
+  const end = createNode(page, "end-endpoint", 160);
+  const unknownFormerEndpoint = createNode(page, "unknown-former-endpoint", 320);
+  const connectorsContainer = createNode(page, "FFA Connectors", 800);
+  const connector = createNode(connectorsContainer, "connector-root", 840);
+  const messages = [];
+
+  setConnectorRefs(start, ["live-connector", "deleted-connector"]);
+  setConnectorRefs(unknownFormerEndpoint, ["deleted-connector"]);
+  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+  setConnectorRecord(connector, "live-connector", start.id, end.id, "open");
+  setValidationIndex(connectorsContainer, {
+    connectorRootNodeIds: [connector.id],
+    flowEndpointNodeIds: [start.id, end.id],
+  });
+  connectorsContainer.children = [connector];
+  page.children = [start, end, unknownFormerEndpoint, connectorsContainer];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "clean-stale-indexes" });
+  await flushPluginMessage(messages);
+
+  assert.deepEqual(readConnectorRefs(start), ["live-connector"]);
+  assert.deepEqual(readConnectorRefs(unknownFormerEndpoint), ["deleted-connector"]);
+
+  messages.length = 0;
+  globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
+  await flushPluginMessage(messages);
+
+  const repairStatus = messages.find(
+    (message) => message.type === "status" && message.tone === "success",
+  );
+  assert.deepEqual(readConnectorRefs(unknownFormerEndpoint), []);
+  assert.equal(
+    repairStatus.message,
+    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 1 Flow Endpoint(s), and removed 1 stale connector reference(s).",
+  );
+  assert.deepEqual(readValidationIndex(connectorsContainer).flowEndpointNodeIds, [
+    start.id,
+    end.id,
+  ]);
+  assert.deepEqual(readValidationIndex(connectorsContainer).connectorRootNodeIds, [connector.id]);
 });
 
 test("validates connector routes without scanning unrelated group descendants", async () => {

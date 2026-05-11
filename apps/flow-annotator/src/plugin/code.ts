@@ -4,6 +4,7 @@ import {
   buildPanelValidationReportMessage,
   classifyPanelMessage,
   formatCleanStaleIndexesPanelStatus,
+  formatDeepAuditRepairIndexPanelStatus,
   formatRefreshConnectorsPanelStatus,
   type PanelCommandMessage,
   type PanelMessageDispatch,
@@ -39,7 +40,11 @@ import {
   NAMESPACE,
   solidPaint,
 } from "../figma/runtime";
-import { cleanStaleIndexes, validateCurrentPageBindings } from "../validation/commands";
+import {
+  cleanStaleIndexes,
+  deepAuditRepairValidationIndex,
+  validateCurrentPageBindings,
+} from "../validation/commands";
 
 let validationTargetsByIssueId = new Map<string, string[]>();
 
@@ -177,10 +182,23 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
 
   if (message.type === "clean-stale-indexes") {
     const result = await cleanStaleIndexes(connectRuntime);
+    if (result.kind === "repair-required") {
+      postStatus("error", result.message);
+      return;
+    }
     const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
     validationTargetsByIssueId = targetsByIssueId;
     postValidationReport(report);
     postStatus("success", formatCleanStaleIndexesPanelStatus(result));
+    return;
+  }
+
+  if (message.type === "deep-audit-repair-index") {
+    const result = deepAuditRepairValidationIndex(connectRuntime);
+    const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
+    validationTargetsByIssueId = targetsByIssueId;
+    postValidationReport(report);
+    postStatus("success", formatDeepAuditRepairIndexPanelStatus(result));
     return;
   }
 

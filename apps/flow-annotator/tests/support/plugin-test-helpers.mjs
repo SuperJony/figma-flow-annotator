@@ -140,6 +140,30 @@ export function readConnectorId(node) {
   return data.length === 0 ? null : JSON.parse(data).id;
 }
 
+export function readValidationIndex(node) {
+  const data = node.getSharedPluginData(namespace, "validationIndex");
+  return data.length === 0 ? null : JSON.parse(data);
+}
+
+export function setValidationIndex(node, update) {
+  node.setSharedPluginData(
+    namespace,
+    "validationIndex",
+    JSON.stringify({
+      schemaVersion: 1,
+      subjectNodeIds: [],
+      annotationCardNodeIds: [],
+      annotationBadgeNodeIds: [],
+      flowEndpointNodeIds: [],
+      contextFrameIds: [],
+      ownerContextFrameIds: [],
+      connectorRootNodeIds: [],
+      connectorObstacleCandidateNodeIds: [],
+      ...update,
+    }),
+  );
+}
+
 export function setBadgeRecord(badge, annotationNumber, subjectNodeId, contextFrameId) {
   badge.setSharedPluginData(namespace, "kind", "annotation-badge");
   badge.setSharedPluginData(

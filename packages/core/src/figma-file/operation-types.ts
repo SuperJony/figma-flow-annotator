@@ -120,7 +120,8 @@ export interface FigmaFileOperationBatch {
     | "arrange-annotation-cards"
     | "create-flow-connector"
     | "refresh-flow-connector"
-    | "clean-stale-indexes";
+    | "clean-stale-indexes"
+    | "deep-audit-repair-index";
   operations: FigmaFileOperation[];
 }
 

@@ -14,6 +14,13 @@ export type ValidationIndexField = Exclude<keyof ValidationIndexRecord, "schemaV
 
 export type ValidationIndexUpdate = Partial<Record<ValidationIndexField, string[]>>;
 
+export type ValidationIndexReadiness =
+  | { kind: "valid" }
+  | { kind: "missing" }
+  | { kind: "invalid"; sourceNodeIds: string[] }
+  | { kind: "stale"; missingNodeIds: string[] }
+  | { kind: "insufficient"; missingFieldIds: Partial<Record<ValidationIndexField, string[]>> };
+
 const validationIndexFields = [
   "subjectNodeIds",
   "annotationCardNodeIds",
@@ -82,6 +89,38 @@ export function mergeValidationIndexRecord(
 
 export function serializeValidationIndexRecord(record: ValidationIndexRecord): string {
   return JSON.stringify(createValidationIndexRecord(record));
+}
+
+export function describeValidationIndexReadiness(readiness: ValidationIndexReadiness): string {
+  if (readiness.kind === "valid") {
+    return "Validation Index is valid.";
+  }
+
+  if (readiness.kind === "missing") {
+    return "Validation Index is missing.";
+  }
+
+  if (readiness.kind === "invalid") {
+    return `Validation Index is invalid on ${readiness.sourceNodeIds.length} container(s).`;
+  }
+
+  if (readiness.kind === "stale") {
+    return `Validation Index references ${readiness.missingNodeIds.length} deleted node(s).`;
+  }
+
+  const missingCount = Object.values(readiness.missingFieldIds).reduce(
+    (count, ids) => count + (ids?.length ?? 0),
+    0,
+  );
+  return `Validation Index is missing ${missingCount} known validation input(s).`;
+}
+
+export function getValidationIndexRepairStatus(readiness: ValidationIndexReadiness): string {
+  if (readiness.kind === "valid") {
+    return "Validation Index is ready for indexed cleanup.";
+  }
+
+  return `${describeValidationIndexReadiness(readiness)} Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.`;
 }
 
 function mergeIds(existing: string[], next: string[] = []): string[] {

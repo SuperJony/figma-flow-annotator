@@ -126,6 +126,16 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   },
   {
     activeTab: "validate",
+    description: "Validate tab status points old files to explicit Deep Audit Repair.",
+    name: "validate-repair-required",
+    status: {
+      message:
+        "Validation Index is missing. Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.",
+      tone: "error",
+    },
+  },
+  {
+    activeTab: "validate",
     description: "Validate tab report with severity filters, rows, and location actions.",
     name: "validate-report",
     validationReport: {

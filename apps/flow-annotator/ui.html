@@ -306,7 +306,8 @@
       padding: 0 6px;
     }
 
-    #cleanStaleIndexes {
+    #cleanStaleIndexes,
+    #deepAuditRepairIndex {
       min-width: 126px;
     }
 
@@ -432,6 +433,7 @@
           <div class="actions">
             <button id="runValidation" class="primary" type="button">Validate Bindings</button>
             <button id="cleanStaleIndexes" type="button" disabled>Clean Stale Indexes</button>
+            <button id="deepAuditRepairIndex" type="button">Deep Audit Repair</button>
           </div>
         </div>
         <div class="validation-summary" aria-label="Validation summary">
@@ -469,6 +471,7 @@
     const swapConnector = document.getElementById('swapConnector');
     const runValidation = document.getElementById('runValidation');
     const cleanStaleIndexes = document.getElementById('cleanStaleIndexes');
+    const deepAuditRepairIndex = document.getElementById('deepAuditRepairIndex');
     const closeButton = document.getElementById('close');
     const status = document.getElementById('status');
     const selection = document.getElementById('selection');
@@ -546,6 +549,11 @@
     cleanStaleIndexes.addEventListener('click', () => {
       setActiveTab('validate');
       post({ type: 'clean-stale-indexes' });
+    });
+
+    deepAuditRepairIndex.addEventListener('click', () => {
+      setActiveTab('validate');
+      post({ type: 'deep-audit-repair-index' });
     });
 
     filterButtons.forEach((button) => {
