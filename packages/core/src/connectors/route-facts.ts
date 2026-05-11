@@ -32,3 +32,16 @@ export interface RefreshFlowConnectorRouteFacts {
   connectors: RefreshFlowConnectorRouteConnectorFact[];
   selectedConnectorNodeIds?: string[];
 }
+
+export interface ValidateFlowConnectorRouteConnectorFact {
+  nodeId: string;
+  record: FlowConnectorRecord;
+  start?: FlowConnectorRouteEndpointFact;
+  end?: FlowConnectorRouteEndpointFact;
+  obstacles?: ConnectorObstacle[];
+  labelRect?: RectLike;
+}
+
+export interface ValidateFlowConnectorRouteFacts {
+  connectors: ValidateFlowConnectorRouteConnectorFact[];
+}

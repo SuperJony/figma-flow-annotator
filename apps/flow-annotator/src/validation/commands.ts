@@ -116,21 +116,11 @@ async function collectIndexedFlowConnectorCleanupSnapshot(
     currentPage.id,
     getNodeByIdAsync,
   );
-  const connectorObstacleCandidateNodes = await getExistingSceneNodesById(
-    indexReadiness.index.connectorObstacleCandidateNodeIds,
-    currentPage.id,
-    getNodeByIdAsync,
-  );
-
   return {
     kind: "snapshot",
     snapshot: {
       ...snapshot,
-      connectorObstacleCandidateNodes,
       validationNodes,
-      validationNodesById: new Map(
-        validationNodes.map((node): [string, SceneNode] => [node.id, node]),
-      ),
     },
   };
 }

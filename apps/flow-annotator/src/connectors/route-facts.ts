@@ -10,6 +10,8 @@ import {
   type RefreshFlowConnectorRouteConnectorFact,
   type RefreshFlowConnectorRouteFacts,
   SHARED_PLUGIN_DATA,
+  type ValidateFlowConnectorRouteConnectorFact,
+  type ValidateFlowConnectorRouteGeometryInput,
   type ValidationIndexRecord,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
@@ -116,6 +118,29 @@ export async function collectRefreshFlowConnectorRouteFacts(
   };
 }
 
+export async function collectValidationFlowConnectorRouteFacts(
+  runtime: FlowConnectorCurrentPageRuntime,
+  connectorRecords: Iterable<FlowConnectorSnapshotRecord>,
+  explicitObstacleCandidateNodeIds: Iterable<string> = [],
+): Promise<ValidateFlowConnectorRouteGeometryInput> {
+  const connectors = [...connectorRecords];
+  const obstacleCandidates = await collectBoundedConnectorObstacleCandidates(
+    runtime,
+    collectEndpointContextFrameIds(connectors),
+    connectors,
+    explicitObstacleCandidateNodeIds,
+  );
+  const routeNodesById = new Map(
+    obstacleCandidates.map((node): [string, SceneNode] => [node.id, node]),
+  );
+
+  return {
+    connectors: connectors.map((connector) =>
+      toValidationFlowConnectorRouteFact(connector, runtime, routeNodesById, obstacleCandidates),
+    ),
+  };
+}
+
 interface RefreshConnectorRecord {
   node: GroupNode;
   record: FlowConnectorRecord | null;
@@ -186,15 +211,44 @@ function toRefreshFlowConnectorRouteFactWithoutRuntimeFacts(
   };
 }
 
+function toValidationFlowConnectorRouteFact(
+  connector: FlowConnectorSnapshotRecord,
+  runtime: FlowConnectorCurrentPageRuntime,
+  routeNodesById: Map<string, SceneNode>,
+  obstacleCandidates: Iterable<SceneNode>,
+): ValidateFlowConnectorRouteConnectorFact {
+  const startNode = routeNodesById.get(connector.record.start.nodeId);
+  const endNode = routeNodesById.get(connector.record.end.nodeId);
+  const labelRect = getFlowActionLabelRect(connector.node);
+  const baseFact = {
+    nodeId: connector.node.id,
+    record: connector.record,
+    ...(labelRect === undefined ? {} : { labelRect }),
+  };
+
+  if (startNode === undefined || endNode === undefined) {
+    return baseFact;
+  }
+
+  return {
+    ...baseFact,
+    end: toFlowConnectorAuthoringEndpoint(endNode, runtime),
+    obstacles: collectConnectorObstacles(startNode, endNode, runtime, obstacleCandidates),
+    start: toFlowConnectorAuthoringEndpoint(startNode, runtime),
+  };
+}
+
 async function collectBoundedConnectorObstacleCandidates(
   runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
   endpointContextFrameIds: Iterable<string>,
   connectorRecords: Iterable<{ record: FlowConnectorRecord }>,
+  explicitObstacleCandidateNodeIds: Iterable<string> = [],
 ): Promise<SceneNode[]> {
   const currentPage = figma.currentPage;
   const nodeIds = new Set<string>(endpointContextFrameIds);
   const validationIndex = readMergedProjectValidationIndex(runtime);
 
+  addNodeIds(nodeIds, explicitObstacleCandidateNodeIds);
   addNodeIds(nodeIds, validationIndex.annotationCardNodeIds);
   addNodeIds(nodeIds, validationIndex.contextFrameIds);
   addNodeIds(nodeIds, validationIndex.ownerContextFrameIds);
@@ -208,7 +262,7 @@ async function collectBoundedConnectorObstacleCandidates(
 }
 
 function* collectEndpointContextFrameIds(
-  connectors: Iterable<RefreshConnectorRecord>,
+  connectors: Iterable<{ record: FlowConnectorRecord | null }>,
 ): Iterable<string> {
   for (const connector of connectors) {
     if (connector.record === null) {
@@ -290,4 +344,19 @@ function buildConnectorNodeMap(
 
 function isLiveSceneNode(node: BaseNode | null): node is SceneNode {
   return node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node;
+}
+
+function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {
+  const label = connectorRoot.children.find(
+    (child) =>
+      child.name === "FFA Flow Action Label" &&
+      child.visible !== false &&
+      "absoluteBoundingBox" in child &&
+      child.absoluteBoundingBox !== null,
+  );
+  return label === undefined ||
+    !("absoluteBoundingBox" in label) ||
+    label.absoluteBoundingBox === null
+    ? undefined
+    : label.absoluteBoundingBox;
 }

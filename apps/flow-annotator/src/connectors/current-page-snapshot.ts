@@ -5,18 +5,14 @@ import {
   decodeFlowConnectorRecord,
   type FlowConnectorAuthoringEndpointInput,
   type FlowConnectorRecord,
-  type FlowConnectorRouteValidationConnectorInput,
   type FlowConnectorValidationConnectorInput,
   type FlowConnectorValidationEndpointInput,
   flowConnectorMatchesDirectedPair,
   getFlowConnectorValidationIndexNodeIds,
   SHARED_PLUGIN_DATA,
   type ValidateFlowConnectorReferencesInput,
-  type ValidateFlowConnectorRouteGeometryInput,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
-import { getVisibleBounds } from "../figma/runtime";
-import { collectConnectorObstacles } from "./obstacles";
 
 export interface FlowConnectorCurrentPageRuntime {
   namespace: string;
@@ -35,9 +31,7 @@ export interface FlowConnectorCurrentPageSnapshot {
 }
 
 export interface FlowConnectorValidationSnapshot extends FlowConnectorCurrentPageSnapshot {
-  connectorObstacleCandidateNodes: SceneNode[];
   validationNodes: SceneNode[];
-  validationNodesById: Map<string, SceneNode>;
 }
 
 export function collectFlowConnectorCurrentPageSnapshot(
@@ -75,30 +69,23 @@ export async function collectDeepAuditFlowConnectorCurrentPageSnapshot(
       },
     })
     .map((node) => node.id);
-  return collectBoundedFlowConnectorValidationSnapshot(
-    runtime,
-    connectorRefNodeIds,
-    connectorRefNodeIds,
-  );
+  return collectBoundedFlowConnectorValidationSnapshot(runtime, connectorRefNodeIds);
 }
 
 export async function collectBoundedFlowConnectorValidationSnapshot(
   runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
   candidateNodeIds: Iterable<string> = [],
-  obstacleCandidateNodeIds: Iterable<string> = [],
 ): Promise<FlowConnectorValidationSnapshot> {
   const currentPage = figma.currentPage;
   const getNodeByIdAsync = figma.getNodeByIdAsync.bind(figma);
   const snapshot = collectFlowConnectorCurrentPageSnapshot(runtime);
   const nodeIds = new Set(candidateNodeIds);
-  const obstacleNodeIds = new Set([...nodeIds, ...obstacleCandidateNodeIds]);
 
   snapshot.connectorRecords.forEach((connector) => {
     const indexNodeIds = getFlowConnectorValidationIndexNodeIds(connector.record);
     addNodeIds(nodeIds, indexNodeIds.flowEndpointNodeIds);
     addNodeIds(nodeIds, indexNodeIds.contextFrameIds);
     addNodeIds(nodeIds, indexNodeIds.ownerContextFrameIds);
-    addNodeIds(obstacleNodeIds, indexNodeIds.connectorObstacleCandidateNodeIds);
   });
   // Ordinary validation intentionally does not discover unknown reverse refs by scanning
   // shared plugin data across the page. Deep audit/indexed repair nodes own that slower path.
@@ -108,18 +95,9 @@ export async function collectBoundedFlowConnectorValidationSnapshot(
     currentPage.id,
     getNodeByIdAsync,
   );
-  const connectorObstacleCandidateNodes = await getExistingSceneNodesById(
-    obstacleNodeIds,
-    currentPage.id,
-    getNodeByIdAsync,
-  );
   return {
     ...snapshot,
-    connectorObstacleCandidateNodes,
     validationNodes,
-    validationNodesById: new Map(
-      validationNodes.map((node): [string, SceneNode] => [node.id, node]),
-    ),
   };
 }
 
@@ -169,50 +147,6 @@ export function toFlowConnectorReferenceValidationInput(
   );
 
   return { connectors, endpoints };
-}
-
-export function toFlowConnectorRouteValidationInput(
-  snapshot: FlowConnectorValidationSnapshot,
-  runtime: FlowConnectorCurrentPageRuntime,
-): ValidateFlowConnectorRouteGeometryInput {
-  const connectors: FlowConnectorRouteValidationConnectorInput[] = snapshot.connectorRecords.map(
-    (connector) => {
-      const startNode = snapshot.validationNodesById.get(connector.record.start.nodeId);
-      const endNode = snapshot.validationNodesById.get(connector.record.end.nodeId);
-      const labelRect = getFlowActionLabelRect(connector.node);
-      const baseInput = {
-        nodeId: connector.node.id,
-        record: connector.record,
-        ...(labelRect === undefined ? {} : { labelRect }),
-      };
-
-      if (
-        startNode === undefined ||
-        endNode === undefined ||
-        startNode.absoluteBoundingBox === null ||
-        endNode.absoluteBoundingBox === null
-      ) {
-        return {
-          ...baseInput,
-          obstacles: [],
-        };
-      }
-
-      return {
-        ...baseInput,
-        endRect: getVisibleBounds(endNode),
-        obstacles: collectConnectorObstacles(
-          startNode,
-          endNode,
-          runtime,
-          snapshot.connectorObstacleCandidateNodes,
-        ),
-        startRect: getVisibleBounds(startNode),
-      };
-    },
-  );
-
-  return { connectors };
 }
 
 export function toCleanStaleIndexesInput(
@@ -284,21 +218,6 @@ function addNodeIds(target: Set<string>, nodeIds: Iterable<string>): void {
 
 function isLiveSceneNode(node: BaseNode | null): node is SceneNode {
   return node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node;
-}
-
-function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {
-  const label = connectorRoot.children.find(
-    (child) =>
-      child.name === "FFA Flow Action Label" &&
-      child.visible !== false &&
-      "absoluteBoundingBox" in child &&
-      child.absoluteBoundingBox !== null,
-  );
-  return label === undefined ||
-    !("absoluteBoundingBox" in label) ||
-    label.absoluteBoundingBox === null
-    ? undefined
-    : label.absoluteBoundingBox;
 }
 
 function isFlowEndpointEligibleNode(node: SceneNode, namespace: string): boolean {

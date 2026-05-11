@@ -1,4 +1,4 @@
-import type { ConnectorObstacle } from "../connectors/routing.ts";
+import type { ValidateFlowConnectorRouteFacts } from "../connectors/route-facts.ts";
 import type { RectLike } from "../shared/geometry.ts";
 import type {
   AnnotationValidationRecord,
@@ -97,18 +97,7 @@ export interface ValidateFlowConnectorReferencesInput {
   endpoints: FlowConnectorValidationEndpointInput[];
 }
 
-export interface FlowConnectorRouteValidationConnectorInput {
-  endRect?: RectLike;
-  labelRect?: RectLike;
-  nodeId: string;
-  obstacles: ConnectorObstacle[];
-  record: FlowConnectorRecord;
-  startRect?: RectLike;
-}
-
-export interface ValidateFlowConnectorRouteGeometryInput {
-  connectors: FlowConnectorRouteValidationConnectorInput[];
-}
+export type ValidateFlowConnectorRouteGeometryInput = ValidateFlowConnectorRouteFacts;
 
 export interface BuildCleanStaleIndexesOperationBatchInput {
   endpoints: FlowConnectorValidationEndpointInput[];
