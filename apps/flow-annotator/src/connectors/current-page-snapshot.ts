@@ -10,13 +10,17 @@ import {
   type FlowConnectorValidationConnectorInput,
   type FlowConnectorValidationEndpointInput,
   flowConnectorMatchesDirectedPair,
+  getFlowConnectorValidationIndexNodeIds,
   SHARED_PLUGIN_DATA,
   type ValidateFlowConnectorReferencesInput,
   type ValidateFlowConnectorRouteGeometryInput,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
-import { collectCurrentPageNodes, getVisibleBounds } from "../figma/runtime";
-import { collectConnectorObstacles } from "./obstacles";
+import { getVisibleBounds } from "../figma/runtime";
+import {
+  collectConnectorObstacles,
+  collectCurrentPageConnectorObstacleCandidates,
+} from "./obstacles";
 
 export interface FlowConnectorCurrentPageRuntime {
   namespace: string;
@@ -34,9 +38,10 @@ export interface FlowConnectorCurrentPageSnapshot {
   namespace: string;
 }
 
-export interface FullPageFlowConnectorCurrentPageSnapshot extends FlowConnectorCurrentPageSnapshot {
-  pageNodes: SceneNode[];
-  pageNodesById: Map<string, SceneNode>;
+export interface FlowConnectorValidationSnapshot extends FlowConnectorCurrentPageSnapshot {
+  connectorObstacleCandidateNodes: SceneNode[];
+  validationNodes: SceneNode[];
+  validationNodesById: Map<string, SceneNode>;
 }
 
 export interface FlowConnectorAuthoringSnapshot extends FlowConnectorCurrentPageSnapshot {
@@ -75,14 +80,62 @@ export function collectFlowConnectorCurrentPageSnapshot(
   };
 }
 
-export function collectFullPageFlowConnectorCurrentPageSnapshot(
+export async function collectDeepAuditFlowConnectorCurrentPageSnapshot(
   runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-): FullPageFlowConnectorCurrentPageSnapshot {
-  const pageNodes = collectCurrentPageNodes();
+): Promise<FlowConnectorValidationSnapshot> {
+  const connectorRefNodeIds = figma.currentPage
+    .findAllWithCriteria({
+      sharedPluginData: {
+        namespace: runtime.namespace,
+        keys: [SHARED_PLUGIN_DATA.keys.connectorRefs],
+      },
+    })
+    .map((node) => node.id);
+  return collectBoundedFlowConnectorValidationSnapshot(
+    runtime,
+    connectorRefNodeIds,
+    connectorRefNodeIds,
+  );
+}
+
+export async function collectBoundedFlowConnectorValidationSnapshot(
+  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
+  candidateNodeIds: Iterable<string> = [],
+  obstacleCandidateNodeIds: Iterable<string> = [],
+): Promise<FlowConnectorValidationSnapshot> {
+  const currentPage = figma.currentPage;
+  const getNodeByIdAsync = figma.getNodeByIdAsync.bind(figma);
+  const snapshot = collectFlowConnectorCurrentPageSnapshot(runtime);
+  const nodeIds = new Set(candidateNodeIds);
+  const obstacleNodeIds = new Set([...nodeIds, ...obstacleCandidateNodeIds]);
+
+  snapshot.connectorRecords.forEach((connector) => {
+    const indexNodeIds = getFlowConnectorValidationIndexNodeIds(connector.record);
+    addNodeIds(nodeIds, indexNodeIds.flowEndpointNodeIds);
+    addNodeIds(nodeIds, indexNodeIds.contextFrameIds);
+    addNodeIds(nodeIds, indexNodeIds.ownerContextFrameIds);
+    addNodeIds(obstacleNodeIds, indexNodeIds.connectorObstacleCandidateNodeIds);
+  });
+  // Ordinary validation intentionally does not discover unknown reverse refs by scanning
+  // shared plugin data across the page. Deep audit/indexed repair nodes own that slower path.
+
+  const validationNodes = await getExistingSceneNodesById(
+    nodeIds,
+    currentPage.id,
+    getNodeByIdAsync,
+  );
+  const connectorObstacleCandidateNodes = await getExistingSceneNodesById(
+    obstacleNodeIds,
+    currentPage.id,
+    getNodeByIdAsync,
+  );
   return {
-    ...collectFlowConnectorCurrentPageSnapshot(runtime),
-    pageNodes,
-    pageNodesById: new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node])),
+    ...snapshot,
+    connectorObstacleCandidateNodes,
+    validationNodes,
+    validationNodesById: new Map(
+      validationNodes.map((node): [string, SceneNode] => [node.id, node]),
+    ),
   };
 }
 
@@ -99,7 +152,14 @@ export function collectFlowConnectorAuthoringSnapshot(
       record: connector.record,
     })),
     obstacles:
-      endpoints.length === 2 ? collectConnectorObstacles(endpoints[0], endpoints[1], runtime) : [],
+      endpoints.length === 2
+        ? collectConnectorObstacles(
+            endpoints[0],
+            endpoints[1],
+            runtime,
+            collectCurrentPageConnectorObstacleCandidates(),
+          )
+        : [],
   };
 }
 
@@ -149,7 +209,7 @@ export function findExistingDirectedConnectorInSnapshot(
 }
 
 export function toFlowConnectorReferenceValidationInput(
-  snapshot: FullPageFlowConnectorCurrentPageSnapshot,
+  snapshot: FlowConnectorValidationSnapshot,
 ): ValidateFlowConnectorReferencesInput {
   const connectors: FlowConnectorValidationConnectorInput[] = snapshot.connectorRecords.map(
     (connector) => ({
@@ -157,23 +217,25 @@ export function toFlowConnectorReferenceValidationInput(
       record: connector.record,
     }),
   );
-  const endpoints: FlowConnectorValidationEndpointInput[] = snapshot.pageNodes.map((node) => ({
-    connectorIds: readConnectorReferenceIds(node, snapshot.namespace),
-    isEligibleFlowEndpoint: isFlowEndpointEligibleNode(node, snapshot.namespace),
-    nodeId: node.id,
-  }));
+  const endpoints: FlowConnectorValidationEndpointInput[] = snapshot.validationNodes.map(
+    (node) => ({
+      connectorIds: readConnectorReferenceIds(node, snapshot.namespace),
+      isEligibleFlowEndpoint: isFlowEndpointEligibleNode(node, snapshot.namespace),
+      nodeId: node.id,
+    }),
+  );
 
   return { connectors, endpoints };
 }
 
 export function toFlowConnectorRouteValidationInput(
-  snapshot: FullPageFlowConnectorCurrentPageSnapshot,
+  snapshot: FlowConnectorValidationSnapshot,
   runtime: FlowConnectorCurrentPageRuntime,
 ): ValidateFlowConnectorRouteGeometryInput {
   const connectors: FlowConnectorRouteValidationConnectorInput[] = snapshot.connectorRecords.map(
     (connector) => {
-      const startNode = snapshot.pageNodesById.get(connector.record.start.nodeId);
-      const endNode = snapshot.pageNodesById.get(connector.record.end.nodeId);
+      const startNode = snapshot.validationNodesById.get(connector.record.start.nodeId);
+      const endNode = snapshot.validationNodesById.get(connector.record.end.nodeId);
       const labelRect = getFlowActionLabelRect(connector.node);
       const baseInput = {
         nodeId: connector.node.id,
@@ -196,7 +258,12 @@ export function toFlowConnectorRouteValidationInput(
       return {
         ...baseInput,
         endRect: getVisibleBounds(endNode),
-        obstacles: collectConnectorObstacles(startNode, endNode, runtime),
+        obstacles: collectConnectorObstacles(
+          startNode,
+          endNode,
+          runtime,
+          snapshot.connectorObstacleCandidateNodes,
+        ),
         startRect: getVisibleBounds(startNode),
       };
     },
@@ -206,7 +273,7 @@ export function toFlowConnectorRouteValidationInput(
 }
 
 export function toCleanStaleIndexesInput(
-  snapshot: FullPageFlowConnectorCurrentPageSnapshot,
+  snapshot: FlowConnectorValidationSnapshot,
 ): BuildCleanStaleIndexesOperationBatchInput {
   const connectorInput = toFlowConnectorReferenceValidationInput(snapshot);
   return {
@@ -253,14 +320,34 @@ function findFlowConnectorsContainer(
   return null;
 }
 
+async function getExistingSceneNodesById(
+  nodeIds: Iterable<string>,
+  currentPageId: string,
+  getNodeByIdAsync: (nodeId: string) => Promise<BaseNode | null>,
+): Promise<SceneNode[]> {
+  const nodes = await Promise.all(
+    [...new Set(nodeIds)]
+      .filter((nodeId) => nodeId !== currentPageId)
+      .map((nodeId) => getNodeByIdAsync(nodeId)),
+  );
+  return nodes.filter(isLiveSceneNode);
+}
+
 async function collectRouteLayoutConnectors(
   connectorRecords: FlowConnectorSnapshotRecord[],
   selectedConnectorRoots: GroupNode[],
   runtime: FlowConnectorCurrentPageRuntime,
 ): Promise<FlowConnectorRouteLayoutConnectorInput[]> {
+  if (connectorRecords.length === 0 && selectedConnectorRoots.length === 0) {
+    return [];
+  }
+
+  const obstacleCandidates = collectCurrentPageConnectorObstacleCandidates();
   if (selectedConnectorRoots.length === 0) {
     return Promise.all(
-      connectorRecords.map((connector) => toRouteLayoutConnector(connector, true, runtime)),
+      connectorRecords.map((connector) =>
+        toRouteLayoutConnector(connector, true, runtime, obstacleCandidates),
+      ),
     );
   }
 
@@ -278,7 +365,9 @@ async function collectRouteLayoutConnectors(
 
   return [
     ...(await Promise.all(
-      selectedConnectors.map((connector) => toRouteLayoutConnector(connector, true, runtime)),
+      selectedConnectors.map((connector) =>
+        toRouteLayoutConnector(connector, true, runtime, obstacleCandidates),
+      ),
     )),
     ...remainingConnectors.map((connector) => toRouteLayoutConnectorWithoutRuntimeFacts(connector)),
   ];
@@ -288,6 +377,7 @@ async function toRouteLayoutConnector(
   connector: { node: GroupNode; record: FlowConnectorRecord | null },
   includeRuntimeFacts: boolean,
   runtime: FlowConnectorCurrentPageRuntime,
+  obstacleCandidates: Iterable<SceneNode>,
 ): Promise<FlowConnectorRouteLayoutConnectorInput> {
   if (!includeRuntimeFacts || connector.record === null) {
     return toRouteLayoutConnectorWithoutRuntimeFacts(connector);
@@ -303,8 +393,14 @@ async function toRouteLayoutConnector(
     obstacles:
       startNode === null || endNode === null
         ? []
-        : collectConnectorObstacles(startNode, endNode, runtime),
+        : collectConnectorObstacles(startNode, endNode, runtime, obstacleCandidates),
   };
+}
+
+function addNodeIds(target: Set<string>, nodeIds: Iterable<string>): void {
+  for (const nodeId of nodeIds) {
+    target.add(nodeId);
+  }
 }
 
 function toRouteLayoutConnectorWithoutRuntimeFacts(connector: {
@@ -331,10 +427,11 @@ function buildConnectorNodeMap(
 
 async function getLiveSceneNodeOrNull(nodeId: string): Promise<SceneNode | null> {
   const node = await figma.getNodeByIdAsync(nodeId);
-  if (node === null || node.type === "PAGE" || !("absoluteBoundingBox" in node) || node.removed) {
-    return null;
-  }
-  return node as SceneNode;
+  return isLiveSceneNode(node) ? node : null;
+}
+
+function isLiveSceneNode(node: BaseNode | null): node is SceneNode {
+  return node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node;
 }
 
 function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {

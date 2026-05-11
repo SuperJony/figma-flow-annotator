@@ -70,24 +70,6 @@ export function findContainer(name: string): FrameNode | null {
   return null;
 }
 
-export function collectCurrentPageNodes(): SceneNode[] {
-  const result: SceneNode[] = [];
-  const queue = [...figma.currentPage.children];
-
-  while (queue.length > 0) {
-    const node = queue.shift();
-    if (node === undefined) {
-      continue;
-    }
-    result.push(node);
-    if ("children" in node) {
-      queue.push(...node.children);
-    }
-  }
-
-  return result;
-}
-
 export function ensureLayerOrder(): void {
   const annotations = findContainer(ANNOTATIONS_CONTAINER_NAME);
   const connectors = findContainer(CONNECTORS_CONTAINER_NAME);

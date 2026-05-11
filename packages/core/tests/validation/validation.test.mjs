@@ -3,6 +3,26 @@ import { test } from "node:test";
 
 import { importCoreModule } from "../support/helpers.mjs";
 
+test("merges Validation Index updates without duplicating known validation inputs", async () => {
+  const core = await importCoreModule();
+  const existing = core.createValidationIndexRecord({
+    annotationCardNodeIds: ["card-1"],
+    connectorObstacleCandidateNodeIds: ["card-1"],
+    subjectNodeIds: ["subject-1"],
+  });
+  const merged = core.mergeValidationIndexRecord(existing, {
+    annotationBadgeNodeIds: ["badge-1"],
+    annotationCardNodeIds: ["card-1", "card-2"],
+    connectorObstacleCandidateNodeIds: ["card-1", "context-1"],
+    subjectNodeIds: ["subject-1", "subject-2"],
+  });
+
+  assert.deepEqual(merged.annotationCardNodeIds, ["card-1", "card-2"]);
+  assert.deepEqual(merged.annotationBadgeNodeIds, ["badge-1"]);
+  assert.deepEqual(merged.subjectNodeIds, ["subject-1", "subject-2"]);
+  assert.deepEqual(merged.connectorObstacleCandidateNodeIds, ["card-1", "context-1"]);
+});
+
 test("validates Flow Connector references by impact severity", async () => {
   const core = await importCoreModule();
   const now = "2026-05-09T00:00:00.000Z";

@@ -38,6 +38,15 @@ test("builds v1 Annotation records and a Figma File Operation Batch shape", asyn
     batch.operations.filter((operation) => operation.type === "append-shared-reference").length,
     2,
   );
+  const indexOperation = batch.operations.find(
+    (operation) => operation.type === "update-validation-index",
+  );
+  assert.deepEqual(indexOperation.upsert.nodeIds.subjectNodeIds, ["subject-1", "subject-2"]);
+  assert.deepEqual(indexOperation.upsert.nodeIds.contextFrameIds, ["frame-1"]);
+  assert.deepEqual(
+    indexOperation.upsert.nodeTargets.annotationBadgeNodeIds.map((target) => target.ref),
+    ["annotation-badge-1", "annotation-badge-2"],
+  );
 });
 
 test("builds Annotation maintenance operation batches with stable numbers and badge dedupe", async () => {
@@ -92,6 +101,17 @@ test("builds Annotation maintenance operation batches with stable numbers and ba
     batch.operations.filter((operation) => operation.type === "append-shared-reference").length,
     2,
   );
+  const indexOperation = batch.operations.find(
+    (operation) => operation.type === "update-validation-index",
+  );
+  assert.deepEqual(indexOperation.upsert.nodeIds.subjectNodeIds, [
+    "subject-1",
+    "subject-2",
+    "subject-3",
+  ]);
+  assert.deepEqual(indexOperation.upsert.nodeTargets.annotationCardNodeIds, [
+    { kind: "existing-node", nodeId: "card-1" },
+  ]);
 });
 
 test("builds explicit badge and card arrange operation batches by Annotation Number", async () => {
@@ -119,7 +139,9 @@ test("builds explicit badge and card arrange operation batches by Annotation Num
   assert.equal(badgeBatch.kind, "arrange-annotation-badges");
   assert.deepEqual(badgeBatch.movedBadgeNodeIds, ["badge-2", "badge-9"]);
   assert.deepEqual(
-    badgeBatch.operations.map((operation) => operation.position),
+    badgeBatch.operations
+      .filter((operation) => operation.type === "move-node")
+      .map((operation) => operation.position),
     [
       { x: 166, y: 26 },
       { x: 198, y: 26 },
@@ -128,7 +150,9 @@ test("builds explicit badge and card arrange operation batches by Annotation Num
   assert.equal(cardBatch.kind, "arrange-annotation-cards");
   assert.deepEqual(cardBatch.movedCardNodeIds, ["card-1", "card-5"]);
   assert.deepEqual(
-    cardBatch.operations.map((operation) => operation.position),
+    cardBatch.operations
+      .filter((operation) => operation.type === "move-node")
+      .map((operation) => operation.position),
     [
       { x: 20, y: 200 },
       { x: 20, y: 316 },

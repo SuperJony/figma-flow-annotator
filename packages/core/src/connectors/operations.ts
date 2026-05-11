@@ -2,6 +2,7 @@ import type {
   CreateFlowConnectorOperationBatch,
   FigmaFileOperation,
   RefreshFlowConnectorOperationBatch,
+  UpdateValidationIndexOperation,
 } from "../figma-file/operation-types.ts";
 import type { Point } from "../shared/geometry.ts";
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
@@ -42,6 +43,30 @@ export interface BuildRefreshFlowConnectorOperationBatchInput {
   record: FlowConnectorRecord;
   routePoints: Point[];
   startName: string;
+}
+
+export interface FlowConnectorValidationIndexNodeIds {
+  connectorObstacleCandidateNodeIds: string[];
+  contextFrameIds: string[];
+  flowEndpointNodeIds: string[];
+  ownerContextFrameIds: string[];
+}
+
+export function getFlowConnectorValidationIndexNodeIds(
+  record: FlowConnectorRecord,
+): FlowConnectorValidationIndexNodeIds {
+  const flowEndpointNodeIds = [record.start.nodeId, record.end.nodeId];
+  const contextFrameIds = [record.start.contextFrameId, record.end.contextFrameId];
+  return {
+    connectorObstacleCandidateNodeIds: [
+      ...flowEndpointNodeIds,
+      ...contextFrameIds,
+      record.ownerContextFrameId,
+    ],
+    contextFrameIds,
+    flowEndpointNodeIds,
+    ownerContextFrameIds: [record.ownerContextFrameId],
+  };
 }
 
 export function buildCreateFlowConnectorOperationBatch(
@@ -89,12 +114,16 @@ export function buildCreateFlowConnectorOperationBatch(
         mode: "idempotent",
         createdNodeRefs: [],
         existingNodeRefs: [existingConnector.nodeId],
-        operations: [],
+        operations: buildConnectorIndexOperations({
+          connectorRootNodeId: existingConnector.nodeId,
+          record: existingConnector.record,
+        }),
         record: existingConnector.record,
       };
     }
 
     const operations: FigmaFileOperation[] = [
+      ...buildConnectorIndexPreambleOperations(),
       {
         type: "update-flow-connector",
         targetNodeId: existingConnector.nodeId,
@@ -112,6 +141,10 @@ export function buildCreateFlowConnectorOperationBatch(
         key: SHARED_PLUGIN_DATA.keys.connector,
         value: record,
       },
+      buildUpdateConnectorValidationIndexOperation({
+        connectorRootNodeId: existingConnector.nodeId,
+        record,
+      }),
     ];
 
     return {
@@ -176,6 +209,10 @@ export function buildCreateFlowConnectorOperationBatch(
       listKey: "connectorIds",
       id: input.connectorId,
     },
+    buildUpdateConnectorValidationIndexOperation({
+      connectorRootNodeRef: connectorRef,
+      record,
+    }),
   ];
 
   return {
@@ -211,7 +248,10 @@ export function buildRefreshFlowConnectorOperationBatch(
       connectorId: input.record.id,
       mode: "idempotent",
       existingNodeRefs: [input.connectorNodeId],
-      operations: [],
+      operations: buildConnectorIndexOperations({
+        connectorRootNodeId: input.connectorNodeId,
+        record: input.record,
+      }),
       record: input.record,
     };
   }
@@ -223,6 +263,7 @@ export function buildRefreshFlowConnectorOperationBatch(
     mode: "update",
     existingNodeRefs: [input.connectorNodeId],
     operations: [
+      ...buildConnectorIndexPreambleOperations(),
       {
         type: "update-flow-connector",
         targetNodeId: input.connectorNodeId,
@@ -240,8 +281,66 @@ export function buildRefreshFlowConnectorOperationBatch(
         key: SHARED_PLUGIN_DATA.keys.connector,
         value: record,
       },
+      buildUpdateConnectorValidationIndexOperation({
+        connectorRootNodeId: input.connectorNodeId,
+        record,
+      }),
     ],
     record,
+  };
+}
+
+function buildConnectorIndexOperations(input: {
+  connectorRootNodeId: string;
+  record: FlowConnectorRecord;
+}): FigmaFileOperation[] {
+  return [
+    ...buildConnectorIndexPreambleOperations(),
+    buildUpdateConnectorValidationIndexOperation(input),
+  ];
+}
+
+function buildConnectorIndexPreambleOperations(): FigmaFileOperation[] {
+  return [
+    {
+      type: "ensure-container",
+      ref: "connectors",
+      name: CONNECTORS_CONTAINER_NAME,
+    },
+    {
+      type: "set-shared-plugin-data",
+      target: { kind: "container", ref: "connectors" },
+      key: SHARED_PLUGIN_DATA.keys.kind,
+      value: VISUAL_NODE_KINDS.container,
+    },
+  ];
+}
+
+function buildUpdateConnectorValidationIndexOperation(
+  input:
+    | {
+        connectorRootNodeId: string;
+        record: FlowConnectorRecord;
+      }
+    | {
+        connectorRootNodeRef: string;
+        record: FlowConnectorRecord;
+      },
+): UpdateValidationIndexOperation {
+  const record = input.record;
+  const connectorRootTarget =
+    "connectorRootNodeRef" in input
+      ? { kind: "created-node" as const, ref: input.connectorRootNodeRef }
+      : { kind: "existing-node" as const, nodeId: input.connectorRootNodeId };
+  return {
+    type: "update-validation-index",
+    target: { kind: "container", ref: "connectors" },
+    upsert: {
+      nodeIds: getFlowConnectorValidationIndexNodeIds(record),
+      nodeTargets: {
+        connectorRootNodeIds: [connectorRootTarget],
+      },
+    },
   };
 }
 

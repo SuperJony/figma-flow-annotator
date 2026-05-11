@@ -15,6 +15,7 @@ test("exports shared plugin data namespace and key conventions", async () => {
     "annotationRefs",
     "connectorRefs",
     "context",
+    "validationIndex",
   ]);
 });
 
@@ -145,6 +146,59 @@ test("decodes versioned shared plugin data records in core", async () => {
   assert.deepEqual(core.decodeConnectorReferenceIds('{"connectorIds":["legacy",false]}'), [
     "legacy",
   ]);
+});
+
+test("serializes and decodes v1 Validation Index records", async () => {
+  const core = await importCoreModule();
+  const record = core.createValidationIndexRecord({
+    annotationBadgeNodeIds: ["badge-1", "badge-1", ""],
+    annotationCardNodeIds: ["card-1"],
+    connectorObstacleCandidateNodeIds: ["card-1", "context-1"],
+    connectorRootNodeIds: ["connector-root-1"],
+    contextFrameIds: ["context-1"],
+    flowEndpointNodeIds: ["start", "end"],
+    ownerContextFrameIds: ["context-1"],
+    subjectNodeIds: ["subject-1", "subject-2"],
+  });
+
+  assert.deepEqual(record.annotationBadgeNodeIds, ["badge-1"]);
+  assert.deepEqual(core.decodeValidationIndexRecord(core.serializeValidationIndexRecord(record)), {
+    schemaVersion: 1,
+    subjectNodeIds: ["subject-1", "subject-2"],
+    annotationCardNodeIds: ["card-1"],
+    annotationBadgeNodeIds: ["badge-1"],
+    flowEndpointNodeIds: ["start", "end"],
+    contextFrameIds: ["context-1"],
+    ownerContextFrameIds: ["context-1"],
+    connectorRootNodeIds: ["connector-root-1"],
+    connectorObstacleCandidateNodeIds: ["card-1", "context-1"],
+  });
+});
+
+test("handles missing, invalid, and partial Validation Index data", async () => {
+  const core = await importCoreModule();
+
+  assert.equal(core.decodeValidationIndexRecord(""), null);
+  assert.equal(core.decodeValidationIndexRecord("not json"), null);
+  assert.equal(core.decodeValidationIndexRecord('{"schemaVersion":2}'), null);
+  assert.deepEqual(
+    core.decodeOrCreateValidationIndexRecord(""),
+    core.createEmptyValidationIndexRecord(),
+  );
+  assert.deepEqual(
+    core.decodeValidationIndexRecord('{"schemaVersion":1,"subjectNodeIds":["a",5,"b"]}'),
+    {
+      schemaVersion: 1,
+      subjectNodeIds: ["a", "b"],
+      annotationCardNodeIds: [],
+      annotationBadgeNodeIds: [],
+      flowEndpointNodeIds: [],
+      contextFrameIds: [],
+      ownerContextFrameIds: [],
+      connectorRootNodeIds: [],
+      connectorObstacleCandidateNodeIds: [],
+    },
+  );
 });
 
 test("rejects invalid shared plugin data records", async () => {

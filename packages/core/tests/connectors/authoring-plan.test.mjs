@@ -41,8 +41,20 @@ test("plans Flow Connector create authoring by routing and detecting existing di
   assert.equal(plan.batch.record.flowAction, "choose");
   assert.deepEqual(
     plan.batch.operations.map((operation) => operation.type),
-    ["update-flow-connector", "set-shared-plugin-data"],
+    [
+      "ensure-container",
+      "set-shared-plugin-data",
+      "update-flow-connector",
+      "set-shared-plugin-data",
+      "update-validation-index",
+    ],
   );
+  const indexOperation = plan.batch.operations.at(-1);
+  assert.equal(indexOperation.type, "update-validation-index");
+  assert.deepEqual(indexOperation.upsert.nodeIds.flowEndpointNodeIds, ["node-a", "node-b"]);
+  assert.deepEqual(indexOperation.upsert.nodeTargets.connectorRootNodeIds, [
+    { kind: "existing-node", nodeId: "connector-node" },
+  ]);
   assert.ok(plan.routePoints.length >= 2);
 });
 
@@ -76,6 +88,12 @@ test("plans new Flow Connector authoring with route cache and reverse references
       .map((operation) => operation.targetNodeId),
     ["node-a", "node-b"],
   );
+  const indexOperation = plan.batch.operations.find(
+    (operation) => operation.type === "update-validation-index",
+  );
+  assert.deepEqual(indexOperation.upsert.nodeTargets.connectorRootNodeIds, [
+    { kind: "created-node", ref: "flow-connector" },
+  ]);
 });
 
 function endpoint(id, name, contextFrameId, bounds) {

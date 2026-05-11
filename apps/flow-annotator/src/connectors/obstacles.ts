@@ -9,79 +9,75 @@ interface ConnectorObstacleRuntime {
   namespace: string;
 }
 
-interface ConnectorObstacleTraversalItem {
-  node: SceneNode;
-  generatedAncestor: boolean;
-  coveringObstacles: RectLike[];
-}
-
 export function collectConnectorObstacles(
   startNode: SceneNode,
   endNode: SceneNode,
   runtime: ConnectorObstacleRuntime,
+  candidates: Iterable<SceneNode>,
 ): ConnectorObstacle[] {
   const obstacles: ConnectorObstacle[] = [];
+  const obstacleRootIds = new Set<string>();
   const startAncestorIds = getAncestorIds(startNode);
   const endAncestorIds = getAncestorIds(endNode);
-  const pending: ConnectorObstacleTraversalItem[] = figma.currentPage.children.map((node) => ({
-    node,
-    generatedAncestor: false,
-    coveringObstacles: [],
-  }));
 
-  for (let index = 0; index < pending.length; index += 1) {
-    const item = pending[index];
-    const node = item.node;
+  for (const node of candidates) {
+    if (node.type !== "FRAME") {
+      continue;
+    }
     if (node === startNode || node === endNode) {
+      continue;
+    }
+    if (hasAncestorId(node, obstacleRootIds)) {
+      continue;
+    }
+
+    const coveredObstacleRects = obstacles.map(toObstacleRect);
+    if (
+      node.absoluteBoundingBox !== null &&
+      isCoveredByObstacle(node.absoluteBoundingBox, coveredObstacleRects)
+    ) {
       continue;
     }
 
     const kind = node.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind);
     const nodeContainsEndpoint = startAncestorIds.has(node.id) || endAncestorIds.has(node.id);
-    let generatedAncestor = item.generatedAncestor;
-    let coveringObstacles = item.coveringObstacles;
-    let wholeFrameObstacle = false;
 
     if (
       kind === VISUAL_NODE_KINDS.annotationCard &&
       !nodeContainsEndpoint &&
       node.absoluteBoundingBox !== null
     ) {
-      generatedAncestor = true;
-      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, {
+      appendUncoveredObstacle(obstacles, obstacles.map(toObstacleRect), {
         id: node.id,
         kind: "annotation-card",
         rect: node.absoluteBoundingBox,
       });
-    } else if (kind !== "" || generatedAncestor) {
-      generatedAncestor = true;
+      obstacleRootIds.add(node.id);
     } else if (
+      kind === "" &&
+      !hasGeneratedAncestorInNamespace(node, runtime.namespace) &&
       node.type === "FRAME" &&
       !nodeContainsEndpoint &&
       node.absoluteBoundingBox !== null
     ) {
-      wholeFrameObstacle = true;
-      coveringObstacles = appendUncoveredObstacle(obstacles, coveringObstacles, {
+      appendUncoveredObstacle(obstacles, obstacles.map(toObstacleRect), {
         id: node.id,
         kind: "context-frame",
         rect: node.absoluteBoundingBox,
       });
+      obstacleRootIds.add(node.id);
     }
-
-    if (generatedAncestor || wholeFrameObstacle || !("children" in node)) {
-      continue;
-    }
-
-    node.children.forEach((child) => {
-      pending.push({
-        node: child,
-        generatedAncestor,
-        coveringObstacles,
-      });
-    });
   }
 
   return obstacles;
+}
+
+export function collectCurrentPageConnectorObstacleCandidates(): SceneNode[] {
+  return figma.currentPage.findAllWithCriteria({ types: ["FRAME"] });
+}
+
+function toObstacleRect(obstacle: ConnectorObstacle): RectLike {
+  return obstacle.rect;
 }
 
 function appendUncoveredObstacle(
@@ -119,4 +115,26 @@ function getAncestorIds(node: BaseNode): Set<string> {
     current = current.parent;
   }
   return ids;
+}
+
+function hasAncestorId(node: BaseNode, ancestorIds: Set<string>): boolean {
+  let current = node.parent;
+  while (current !== null && current.type !== "PAGE") {
+    if (ancestorIds.has(current.id)) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function hasGeneratedAncestorInNamespace(node: BaseNode, namespace: string): boolean {
+  let current = node.parent;
+  while (current !== null && current.type !== "PAGE") {
+    if (current.getSharedPluginData(namespace, SHARED_PLUGIN_DATA.keys.kind) !== "") {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
 }

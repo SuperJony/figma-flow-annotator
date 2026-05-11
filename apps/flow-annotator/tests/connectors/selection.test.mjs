@@ -265,7 +265,12 @@ test("collects Context Frames and Annotation Cards as obstacles while excluding 
   page.children = [start, middleFrame, annotationCard, annotationBadge, end];
   globalThis.figma = { currentPage: page };
 
-  const obstacles = collectConnectorObstacles(start, end, runtime);
+  const obstacles = collectConnectorObstacles(
+    start,
+    end,
+    runtime,
+    page.findAllWithCriteria({ types: ["FRAME"] }),
+  );
 
   assert.deepEqual(
     obstacles.map((obstacle) => [obstacle.id, obstacle.kind]),
@@ -278,7 +283,7 @@ test("collects Context Frames and Annotation Cards as obstacles while excluding 
 
 test("reads connector snapshot facts from the provided namespace", async () => {
   const {
-    collectFullPageFlowConnectorCurrentPageSnapshot,
+    collectDeepAuditFlowConnectorCurrentPageSnapshot,
     toFlowConnectorReferenceValidationInput,
   } = await importConnectorSnapshotModule();
   const namespace = "custom_namespace";
@@ -332,9 +337,9 @@ test("reads connector snapshot facts from the provided namespace", async () => {
   generatedAncestor.children = [generatedEndpoint];
   connectorsContainer.children = [connectorRoot];
   page.children = [generatedAncestor, endpoint, connectorsContainer];
-  globalThis.figma = { currentPage: page };
+  globalThis.figma = createFigmaStub(page, []);
 
-  const snapshot = collectFullPageFlowConnectorCurrentPageSnapshot({ namespace });
+  const snapshot = await collectDeepAuditFlowConnectorCurrentPageSnapshot({ namespace });
   const input = toFlowConnectorReferenceValidationInput(snapshot);
   const generatedInput = input.endpoints.find((node) => node.nodeId === generatedEndpoint.id);
   const endpointInput = input.endpoints.find((node) => node.nodeId === endpoint.id);

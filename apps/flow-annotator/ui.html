@@ -306,7 +306,8 @@
       padding: 0 6px;
     }
 
-    #cleanStaleIndexes {
+    #cleanStaleIndexes,
+    #deepAuditRepairIndex {
       min-width: 126px;
     }
 
@@ -360,6 +361,12 @@
       border-color: #d99b9b;
       background: #fff1f1;
       color: #8f2020;
+    }
+
+    #status.running {
+      border-color: #9db9dc;
+      background: #f0f6ff;
+      color: #174f8f;
     }
   </style>
 </head>
@@ -432,6 +439,7 @@
           <div class="actions">
             <button id="runValidation" class="primary" type="button">Validate Bindings</button>
             <button id="cleanStaleIndexes" type="button" disabled>Clean Stale Indexes</button>
+            <button id="deepAuditRepairIndex" type="button">Deep Audit Repair</button>
           </div>
         </div>
         <div class="validation-summary" aria-label="Validation summary">
@@ -469,6 +477,7 @@
     const swapConnector = document.getElementById('swapConnector');
     const runValidation = document.getElementById('runValidation');
     const cleanStaleIndexes = document.getElementById('cleanStaleIndexes');
+    const deepAuditRepairIndex = document.getElementById('deepAuditRepairIndex');
     const closeButton = document.getElementById('close');
     const status = document.getElementById('status');
     const selection = document.getElementById('selection');
@@ -477,6 +486,7 @@
     const endEndpoint = document.getElementById('endEndpoint');
     const routingStatus = document.getElementById('routingStatus');
     const existingConnectorStatus = document.getElementById('existingConnectorStatus');
+    const panelValidate = document.getElementById('panelValidate');
     const validationIssues = document.getElementById('validationIssues');
     const summaryAll = document.getElementById('summaryAll');
     const summaryErrors = document.getElementById('summaryErrors');
@@ -493,6 +503,7 @@
     let existingConnector = null;
     let currentRoutingStatus = 'Select two Flow Endpoints to preview a Connector Route.';
     let activeFilter = 'all';
+    let validationOperation = null;
     let validationReport = {
       schemaVersion: 1,
       issues: [],
@@ -539,13 +550,21 @@
     });
 
     runValidation.addEventListener('click', () => {
-      setActiveTab('validate');
-      post({ type: 'validate-bindings' });
+      if (startValidationOperation('validate-bindings')) {
+        post({ type: 'validate-bindings' });
+      }
     });
 
     cleanStaleIndexes.addEventListener('click', () => {
-      setActiveTab('validate');
-      post({ type: 'clean-stale-indexes' });
+      if (startValidationOperation('clean-stale-indexes')) {
+        post({ type: 'clean-stale-indexes' });
+      }
+    });
+
+    deepAuditRepairIndex.addEventListener('click', () => {
+      if (startValidationOperation('deep-audit-repair-index')) {
+        post({ type: 'deep-audit-repair-index' });
+      }
     });
 
     filterButtons.forEach((button) => {
@@ -589,6 +608,11 @@
         return;
       }
 
+      if (message.type === 'validation-operation') {
+        applyValidationOperationMessage(message);
+        return;
+      }
+
       if (message.type === 'validation-report') {
         validationReport = message.report;
         setActiveTab('validate');
@@ -621,6 +645,32 @@
       refreshConnectors.disabled = false;
     }
 
+    function startValidationOperation(operation) {
+      if (validationOperation !== null) {
+        return false;
+      }
+      setActiveTab('validate');
+      setValidationOperation(operation, true, `${formatValidationOperationLabel(operation)} is running.`);
+      return true;
+    }
+
+    function applyValidationOperationMessage(message) {
+      setValidationOperation(
+        message.operation,
+        message.state === 'running',
+        message.message || `${formatValidationOperationLabel(message.operation)} is running.`,
+      );
+    }
+
+    function setValidationOperation(operation, isRunning, message) {
+      validationOperation = isRunning ? operation : null;
+      panelValidate.setAttribute('aria-busy', validationOperation === null ? 'false' : 'true');
+      if (isRunning) {
+        setStatus('running', message);
+      }
+      renderValidationControls();
+    }
+
     function setActiveTab(tab) {
       tabButtons.forEach((button) => {
         button.classList.toggle('active', button.dataset.tab === tab);
@@ -641,7 +691,7 @@
       });
 
       const issues = Array.isArray(validationReport.issues) ? validationReport.issues : [];
-      cleanStaleIndexes.disabled = !issues.some((issue) => issue.code === 'connector-reverse-index-stale');
+      renderValidationControls();
       const filtered = activeFilter === 'all'
         ? issues
         : issues.filter((issue) => issue.severity === activeFilter);
@@ -660,6 +710,25 @@
           <button class="locate" type="button" data-issue-id="${escapeHtml(issue.id)}">Locate</button>
         </div>
       `).join('');
+    }
+
+    function renderValidationControls() {
+      const issues = Array.isArray(validationReport.issues) ? validationReport.issues : [];
+      const isRunning = validationOperation !== null;
+      runValidation.disabled = isRunning;
+      cleanStaleIndexes.disabled =
+        isRunning || !issues.some((issue) => issue.code === 'connector-reverse-index-stale');
+      deepAuditRepairIndex.disabled = isRunning;
+    }
+
+    function formatValidationOperationLabel(operation) {
+      if (operation === 'clean-stale-indexes') {
+        return 'Clean Stale Indexes';
+      }
+      if (operation === 'deep-audit-repair-index') {
+        return 'Deep Audit Repair';
+      }
+      return 'Validate Bindings';
     }
 
     function formatSeverity(severity) {
@@ -683,12 +752,13 @@
     }
 
     function setStatus(tone, message) {
-      status.className = tone === 'success' || tone === 'error' ? tone : '';
+      status.className = tone === 'success' || tone === 'error' || tone === 'running' ? tone : '';
       status.textContent = message;
     }
 
     post({ type: 'request-selection-state' });
     renderSelectionState();
+    renderValidationControls();
   </script>
 </body>
 </html>

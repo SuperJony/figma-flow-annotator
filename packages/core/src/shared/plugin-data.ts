@@ -1,3 +1,4 @@
+import type { ValidationIndexRecord } from "../validation/validation-index.ts";
 import type { Point } from "./geometry.ts";
 
 export const SHARED_PLUGIN_DATA = {
@@ -10,6 +11,7 @@ export const SHARED_PLUGIN_DATA = {
     annotationRefs: "annotationRefs",
     connectorRefs: "connectorRefs",
     context: "context",
+    validationIndex: "validationIndex",
   },
 } as const;
 
@@ -107,7 +109,8 @@ export type SharedPluginDataValue =
   | ContextRecord
   | AnnotationRefsRecord
   | FlowConnectorRecord
-  | ConnectorRefsRecord;
+  | ConnectorRefsRecord
+  | ValidationIndexRecord;
 
 export function createAnnotationRecord(input: {
   annotationId: string;

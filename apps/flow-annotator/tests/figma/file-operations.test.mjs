@@ -85,6 +85,24 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
           listKey: "annotationIds",
           id: "annotation-existing",
         },
+        {
+          type: "update-validation-index",
+          target: { kind: "container", ref: "annotations" },
+          upsert: {
+            nodeIds: {
+              contextFrameIds: ["context"],
+              subjectNodeIds: [subject.id],
+            },
+            nodeTargets: {
+              annotationBadgeNodeIds: [{ kind: "created-node", ref: "annotation-badge" }],
+              annotationCardNodeIds: [{ kind: "created-node", ref: "annotation-card" }],
+              connectorObstacleCandidateNodeIds: [
+                { kind: "created-node", ref: "annotation-card" },
+                { kind: "existing-node", nodeId: subject.id },
+              ],
+            },
+          },
+        },
         { type: "ensure-container", ref: "connectors", name: "FFA Connectors" },
         {
           type: "create-flow-connector",
@@ -103,6 +121,18 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
           key: "connectorRefs",
           listKey: "connectorIds",
           id: "connector-1",
+        },
+        {
+          type: "update-validation-index",
+          target: { kind: "container", ref: "connectors" },
+          upsert: {
+            nodeIds: {
+              flowEndpointNodeIds: [endpoint.id],
+            },
+            nodeTargets: {
+              connectorRootNodeIds: [{ kind: "created-node", ref: "flow-connector" }],
+            },
+          },
         },
         {
           type: "update-flow-connector",
@@ -163,6 +193,34 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
     schemaVersion: 1,
     connectorIds: ["connector-1"],
   });
+  assert.deepEqual(
+    JSON.parse(containers.get("FFA Annotations").getSharedPluginData(namespace, "validationIndex")),
+    {
+      schemaVersion: 1,
+      subjectNodeIds: [subject.id],
+      annotationCardNodeIds: ["annotation-card"],
+      annotationBadgeNodeIds: ["annotation-badge"],
+      flowEndpointNodeIds: [],
+      contextFrameIds: ["context"],
+      ownerContextFrameIds: [],
+      connectorRootNodeIds: [],
+      connectorObstacleCandidateNodeIds: ["annotation-card", subject.id],
+    },
+  );
+  assert.deepEqual(
+    JSON.parse(containers.get("FFA Connectors").getSharedPluginData(namespace, "validationIndex")),
+    {
+      schemaVersion: 1,
+      subjectNodeIds: [],
+      annotationCardNodeIds: [],
+      annotationBadgeNodeIds: [],
+      flowEndpointNodeIds: [endpoint.id],
+      contextFrameIds: [],
+      ownerContextFrameIds: [],
+      connectorRootNodeIds: ["flow-connector"],
+      connectorObstacleCandidateNodeIds: [],
+    },
+  );
   assert.equal(updates[0].name, "FFA Connector A -> C");
 });
 

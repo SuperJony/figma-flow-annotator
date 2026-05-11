@@ -10,6 +10,10 @@ import type {
   SharedPluginDataKey,
   SharedPluginDataValue,
 } from "../shared/plugin-data.ts";
+import type {
+  ValidationIndexField,
+  ValidationIndexUpdate,
+} from "../validation/validation-index.ts";
 
 export type FigmaFileOperationTarget =
   | { kind: "existing-node"; nodeId: string }
@@ -35,6 +39,17 @@ export interface AppendSharedReferenceOperation {
   key: "annotationRefs" | "connectorRefs";
   listKey: "annotationIds" | "connectorIds";
   id: string;
+}
+
+export interface ValidationIndexOperationUpsert {
+  nodeIds?: ValidationIndexUpdate;
+  nodeTargets?: Partial<Record<ValidationIndexField, FigmaFileOperationTarget[]>>;
+}
+
+export interface UpdateValidationIndexOperation {
+  type: "update-validation-index";
+  target: FigmaFileOperationTarget;
+  upsert: ValidationIndexOperationUpsert;
 }
 
 export interface CreateAnnotationCardOperation {
@@ -89,6 +104,7 @@ export type FigmaFileOperation =
   | EnsureContainerOperation
   | SetSharedPluginDataOperation
   | AppendSharedReferenceOperation
+  | UpdateValidationIndexOperation
   | CreateAnnotationCardOperation
   | CreateAnnotationBadgeOperation
   | CreateFlowConnectorOperation
@@ -104,7 +120,8 @@ export interface FigmaFileOperationBatch {
     | "arrange-annotation-cards"
     | "create-flow-connector"
     | "refresh-flow-connector"
-    | "clean-stale-indexes";
+    | "clean-stale-indexes"
+    | "deep-audit-repair-index";
   operations: FigmaFileOperation[];
 }
 

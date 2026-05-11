@@ -5,15 +5,20 @@ import {
   type CreateFlowConnectorOperation,
   decodeAnnotationReferenceIds,
   decodeConnectorReferenceIds,
+  decodeOrCreateValidationIndexRecord,
   type FigmaFileOperationBatch,
   type FigmaFileOperationTarget,
   type MoveNodeOperation,
   mergeAnnotationReferenceIds,
   mergeConnectorReferenceIds,
+  mergeValidationIndexRecord,
   type SetSharedPluginDataOperation,
   SHARED_PLUGIN_DATA,
   serializeSharedPluginDataValue,
+  serializeValidationIndexRecord,
   type UpdateFlowConnectorOperation,
+  type UpdateValidationIndexOperation,
+  type ValidationIndexUpdate,
 } from "@figma-flow-annotator/core";
 
 export interface OperationNodeRefs {
@@ -78,6 +83,15 @@ export function applyFigmaFileOperationBatch(
       return;
     }
 
+    if (operation.type === "update-validation-index") {
+      updateValidationIndex(operation, input.namespace, {
+        containers,
+        createdNodes,
+        existingNodes: input.existingNodes,
+      });
+      return;
+    }
+
     if (operation.type === "move-node") {
       movedNodes.push(moveExistingNode(input.existingNodes, operation));
       return;
@@ -127,6 +141,40 @@ export function applyFigmaFileOperationBatch(
     createdNodes,
     movedNodes,
   };
+}
+
+function updateValidationIndex(
+  operation: UpdateValidationIndexOperation,
+  namespace: string,
+  refs: OperationNodeRefs,
+): void {
+  const node = resolveOperationTarget(operation.target, refs);
+  const existing = decodeOrCreateValidationIndexRecord(
+    node.getSharedPluginData(namespace, SHARED_PLUGIN_DATA.keys.validationIndex),
+  );
+  const update = resolveValidationIndexUpdate(operation, refs);
+  const next = mergeValidationIndexRecord(existing, update);
+  node.setSharedPluginData(
+    namespace,
+    SHARED_PLUGIN_DATA.keys.validationIndex,
+    serializeValidationIndexRecord(next),
+  );
+}
+
+function resolveValidationIndexUpdate(
+  operation: UpdateValidationIndexOperation,
+  refs: OperationNodeRefs,
+): ValidationIndexUpdate {
+  const update: ValidationIndexUpdate = {};
+  for (const [field, nodeIds] of Object.entries(operation.upsert.nodeIds ?? {})) {
+    update[field as keyof ValidationIndexUpdate] = nodeIds;
+  }
+  for (const [field, targets] of Object.entries(operation.upsert.nodeTargets ?? {})) {
+    update[field as keyof ValidationIndexUpdate] = targets.map(
+      (target) => resolveOperationTarget(target, refs).id,
+    );
+  }
+  return update;
 }
 
 export function resolveContainer(ref: string, containers: Map<string, FrameNode>): FrameNode {

@@ -3,12 +3,15 @@ import { readFileSync } from "node:fs";
 import {
   buildPanelSelectionStateMessage,
   buildPanelStatusMessage,
+  buildPanelValidationOperationMessage,
   buildPanelValidationReportMessage,
   PANEL_EMPTY_ROUTING_STATUS,
   type PanelConnectorSelectionState,
   type PanelOutboundMessage,
   type PanelSelectionNodeInput,
   type PanelStatusMessage,
+  type PanelValidationOperation,
+  type PanelValidationOperationState,
   type ValidationReport,
 } from "@figma-flow-annotator/core";
 import type { Page } from "@playwright/test";
@@ -24,14 +27,20 @@ interface PanelSelectionState {
 
 type PanelStatusState = Omit<PanelStatusMessage, "type">;
 
+interface PanelValidationOperationFixture {
+  message?: string;
+  operation: PanelValidationOperation;
+  state: PanelValidationOperationState;
+}
+
 interface PanelFixtureDefinition {
   activeTab?: "annotate" | "connect" | "validate";
   annotationBody?: string;
-  description: string;
   flowAction?: string;
   name: string;
   selection?: PanelSelectionState;
   status?: PanelStatusState;
+  validationOperation?: PanelValidationOperationFixture;
   validationReport?: ValidationReport;
 }
 
@@ -44,12 +53,10 @@ const panelHtml = readFileSync("ui.html", "utf8");
 
 export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   {
-    description: "Initial state before a selectable subject or pending endpoint exists.",
     name: "initial-empty-selection",
   },
   {
     annotationBody: "Review whether this interaction should stay modal after submit.",
-    description: "One eligible subject and a non-empty Annotation Body.",
     name: "eligible-annotation-selection",
     selection: {
       eligibleCount: 1,
@@ -57,7 +64,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     },
   },
   {
-    description: "One selected Annotation Card and one Subject Node can add subjects.",
     name: "add-subject-selection",
     selection: {
       eligibleCount: 1,
@@ -67,7 +73,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   },
   {
     activeTab: "connect",
-    description: "Two pending Flow Endpoint selections can create a connector.",
     flowAction: "Choose plan",
     name: "two-pending-connector-endpoints",
     selection: {
@@ -82,7 +87,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   },
   {
     activeTab: "connect",
-    description: "Existing directed connector status remains in create/upsert mode.",
     flowAction: "Choose plan",
     name: "existing-connector-status",
     selection: {
@@ -101,7 +105,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     },
   },
   {
-    description: "Success status uses the current panel status rendering.",
     name: "success-status",
     selection: {
       eligibleCount: 1,
@@ -113,7 +116,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     },
   },
   {
-    description: "Error status uses the current panel status rendering.",
     name: "error-status",
     selection: {
       eligibleCount: 0,
@@ -126,7 +128,33 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   },
   {
     activeTab: "validate",
-    description: "Validate tab report with severity filters, rows, and location actions.",
+    name: "validate-repair-required",
+    status: {
+      message:
+        "Validation Index is missing. Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.",
+      tone: "error",
+    },
+  },
+  {
+    activeTab: "validate",
+    name: "validate-empty-report",
+    status: {
+      message: "Validation found 0 issue(s).",
+      tone: "success",
+    },
+    validationReport: {
+      schemaVersion: 1,
+      summary: {
+        all: 0,
+        errors: 0,
+        warnings: 0,
+        info: 0,
+      },
+      issues: [],
+    },
+  },
+  {
+    activeTab: "validate",
     name: "validate-report",
     validationReport: {
       schemaVersion: 1,
@@ -170,8 +198,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   },
   {
     activeTab: "validate",
-    description:
-      "Validate tab report with Flow Connector reference issues and stale cleanup enabled.",
     name: "validate-connector-report",
     validationReport: {
       schemaVersion: 1,
@@ -233,7 +259,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   },
   {
     activeTab: "validate",
-    description: "Validate tab report with route, Flow Action label, and Connector Trunk issues.",
     name: "validate-route-label-trunk-report",
     validationReport: {
       schemaVersion: 1,
@@ -307,7 +332,6 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
   },
   {
     activeTab: "validate",
-    description: "Validate tab after Clean Stale Indexes removes stale connectorRefs.",
     name: "validate-clean-complete",
     status: {
       message:
@@ -331,6 +355,67 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
           locationNodeIds: ["connector-node-1"],
           severity: "warning",
           title: "Empty Flow Action",
+        },
+      ],
+    },
+  },
+  {
+    activeTab: "validate",
+    name: "validate-running",
+    validationOperation: {
+      message: "Validate Bindings is running.",
+      operation: "validate-bindings",
+      state: "running",
+    },
+    validationReport: {
+      schemaVersion: 1,
+      summary: {
+        all: 1,
+        errors: 0,
+        warnings: 1,
+        info: 0,
+      },
+      issues: [
+        {
+          affectedObjectCount: 2,
+          code: "connector-reverse-index-stale",
+          description: "A Flow Endpoint has connectorRefs pointing to deleted Flow Connectors.",
+          id: "connector-reverse-index-stale-1",
+          locationNodeIds: ["endpoint-node-1", "endpoint-node-2"],
+          severity: "warning",
+          title: "Stale Reverse Index",
+        },
+      ],
+    },
+  },
+  {
+    activeTab: "validate",
+    name: "validate-failure",
+    status: {
+      message: "Validate Bindings failed: Unable to read Validation Index.",
+      tone: "error",
+    },
+    validationOperation: {
+      operation: "validate-bindings",
+      state: "idle",
+    },
+    validationReport: {
+      schemaVersion: 1,
+      summary: {
+        all: 1,
+        errors: 1,
+        warnings: 0,
+        info: 0,
+      },
+      issues: [
+        {
+          affectedObjectCount: 1,
+          code: "flow-connector-orphaned",
+          description: "A Flow Connector is missing its start or end Flow Endpoint.",
+          id: "flow-connector-orphaned-1",
+          locationNodeIds: ["connector-node-1"],
+          severity: "error",
+          title: "Orphaned Flow Connector",
         },
       ],
     },
@@ -362,6 +447,13 @@ export async function loadPanelFixture(
 
   if (definition.validationReport !== undefined) {
     await postPluginMessage(page, buildPanelValidationReportMessage(definition.validationReport));
+  }
+
+  if (definition.validationOperation !== undefined) {
+    await postPluginMessage(
+      page,
+      buildPanelValidationOperationMessage(definition.validationOperation),
+    );
   }
 
   if (definition.status !== undefined) {

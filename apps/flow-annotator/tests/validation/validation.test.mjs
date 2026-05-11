@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
 
 import {
   addFlowActionLabel,
@@ -7,16 +7,35 @@ import {
   createNode,
   createPage,
   flushPluginMessage,
+  forbidPageFindAllWithCriteria,
   importCodeModule,
   moveNode,
   namespace,
-  readConnectorId,
   readConnectorRefs,
   setBadgeRecord,
   setCardRecord,
   setConnectorRecord,
   setConnectorRefs,
+  setValidationIndex,
 } from "../support/plugin-test-helpers.mjs";
+
+let validationTestQueue = Promise.resolve();
+
+function test(name, fn) {
+  let release = () => {};
+  nodeTest(name, async (context) => {
+    const previous = validationTestQueue;
+    validationTestQueue = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      await fn(context);
+    } finally {
+      release();
+    }
+  });
+}
 
 test("validates Annotation bindings and locates validation issue nodes without shared report data", async () => {
   const page = createPage();
@@ -93,6 +112,10 @@ test("validates Annotation bindings and locates validation issue nodes without s
   ];
   contextFrame.children = [subjectA, subjectB];
   page.children = [contextFrame, annotationsContainer];
+  forbidPageFindAllWithCriteria(
+    page,
+    "Validate Bindings must not call page-wide findAllWithCriteria for Annotation records.",
+  );
   globalThis.figma = createFigmaStub(page, messages, scrollEvents);
 
   await importCodeModule();
@@ -163,6 +186,15 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   setConnectorRecord(invalidConnector, "connector-invalid", invalidEndpoint.id, end.id, "open");
   setConnectorRecord(duplicateConnectorA, "connector-duplicate-a", start.id, end.id, null);
   setConnectorRecord(duplicateConnectorB, "connector-duplicate-b", start.id, end.id, "open");
+  setValidationIndex(connectorsContainer, {
+    connectorRootNodeIds: [
+      orphanConnector.id,
+      invalidConnector.id,
+      duplicateConnectorA.id,
+      duplicateConnectorB.id,
+    ],
+    flowEndpointNodeIds: [start.id, end.id, invalidEndpoint.id],
+  });
 
   connectorsContainer.children = [
     orphanConnector,
@@ -206,11 +238,11 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
 
   assert.deepEqual(
     page.selection.map((node) => node.id),
-    ["start-endpoint", "former-endpoint"],
+    ["start-endpoint"],
   );
   assert.deepEqual(
     scrollEvents.at(-1).map((node) => node.id),
-    ["start-endpoint", "former-endpoint"],
+    ["start-endpoint"],
   );
 
   messages.length = 0;
@@ -226,7 +258,10 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   assert.deepEqual(readConnectorRefs(start), ["connector-duplicate-a"]);
   assert.deepEqual(readConnectorRefs(end), ["connector-duplicate-a", "connector-duplicate-b"]);
   assert.deepEqual(readConnectorRefs(invalidEndpoint), ["connector-invalid"]);
-  assert.deepEqual(readConnectorRefs(formerEndpoint), ["connector-invalid"]);
+  assert.deepEqual(readConnectorRefs(formerEndpoint), [
+    "connector-deleted-root",
+    "connector-invalid",
+  ]);
   assert.equal(
     cleanReport.issues.some((issue) => issue.code === "connector-reverse-index-stale"),
     false,
@@ -235,14 +270,9 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
     cleanReport.issues.some((issue) => issue.code === "flow-endpoint-invalid"),
     true,
   );
-  assert.equal(connectorsContainer.children.length, 4);
-  assert.equal(
-    connectorsContainer.children.some((node) => readConnectorId(node) === "connector-deleted-root"),
-    false,
-  );
   assert.equal(
     cleanStatus.message,
-    "Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).",
+    "Cleaned stale indexes on 1 Flow Endpoint(s); removed 1 stale connector reference(s).",
   );
 });
 
@@ -250,7 +280,9 @@ test("validates route, label, and trunk connector issues without shared report d
   const page = createPage();
   const startCrossing = createNode(page, "start-crossing", 0);
   const endCrossing = createNode(page, "end-crossing", 420);
-  const crossingObstacle = createNode(page, "middle-obstacle", 190);
+  const annotationsContainer = createNode(page, "FFA Annotations", 760);
+  const crossingObstacle = createNode(annotationsContainer, "middle-obstacle", 190);
+  const crossingBadge = createNode(annotationsContainer, "middle-badge", 250);
   const startFailure = createNode(page, "start-failure", 0);
   const endFailure = createNode(page, "end-failure", 320);
   const walls = [
@@ -288,6 +320,22 @@ test("validates route, label, and trunk connector issues without shared report d
     { x: -60, y: 400, width: 190, height: 50 },
   ].forEach((rect, index) => {
     moveNode(walls[index], rect);
+    walls[index].parent = annotationsContainer;
+    walls[index].setSharedPluginData(namespace, "kind", "annotation-card");
+    walls[index].setSharedPluginData(
+      namespace,
+      "annotation",
+      JSON.stringify({
+        schemaVersion: 1,
+        id: `annotation-wall-${index}`,
+        annotationNumber: index + 2,
+        body: `Routing wall ${index + 1}`,
+        contextFrameId: page.id,
+        subjectNodeIds: [startFailure.id],
+        createdAt: "2026-05-07T00:00:00.000Z",
+        updatedAt: "2026-05-07T00:00:00.000Z",
+      }),
+    );
   });
   moveNode(labelStartA, { x: 0, y: 620, width: 100, height: 100 });
   moveNode(labelEndA, { x: 220, y: 620, width: 100, height: 100 });
@@ -299,6 +347,23 @@ test("validates route, label, and trunk connector issues without shared report d
   moveNode(connectorsContainer, { x: 900, y: 0, width: 1, height: 1 });
 
   connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  setCardRecord(crossingObstacle, 1, page.id);
+  crossingObstacle.setSharedPluginData(
+    namespace,
+    "annotation",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "annotation-1",
+      annotationNumber: 1,
+      body: "Route obstacle card",
+      contextFrameId: page.id,
+      subjectNodeIds: [startCrossing.id],
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+    }),
+  );
+  setBadgeRecord(crossingBadge, 1, startCrossing.id, page.id);
   setConnectorRecord(
     crossingConnector,
     "connector-crossing",
@@ -340,12 +405,16 @@ test("validates route, label, and trunk connector issues without shared report d
     trunkConnectorA,
     trunkConnectorB,
   ];
+  annotationsContainer.children = [crossingObstacle, crossingBadge, ...walls];
+  forbidPageFindAllWithCriteria(
+    page,
+    "Validate Bindings must not call page-wide findAllWithCriteria for route obstacles.",
+  );
   page.children = [
     startCrossing,
-    crossingObstacle,
     endCrossing,
+    annotationsContainer,
     startFailure,
-    ...walls,
     endFailure,
     labelStartA,
     labelEndA,
