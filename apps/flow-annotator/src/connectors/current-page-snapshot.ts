@@ -15,8 +15,11 @@ import {
   type ValidateFlowConnectorRouteGeometryInput,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
-import { collectCurrentPageNodes, getVisibleBounds } from "../figma/runtime";
-import { collectConnectorObstacles } from "./obstacles";
+import { getVisibleBounds } from "../figma/runtime";
+import {
+  collectConnectorObstacles,
+  collectCurrentPageConnectorObstacleCandidates,
+} from "./obstacles";
 
 export interface FlowConnectorCurrentPageRuntime {
   namespace: string;
@@ -76,12 +79,46 @@ export function collectFlowConnectorCurrentPageSnapshot(
   };
 }
 
-export function collectFullPageFlowConnectorCurrentPageSnapshot(
+export async function collectDeepAuditFlowConnectorCurrentPageSnapshot(
   runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-): FullPageFlowConnectorCurrentPageSnapshot {
-  const pageNodes = collectCurrentPageNodes();
+): Promise<FullPageFlowConnectorCurrentPageSnapshot> {
+  const snapshot = collectFlowConnectorCurrentPageSnapshot(runtime);
+  const nodesById = new Map<string, SceneNode>();
+  const candidateNodeIds = new Set<string>();
+
+  figma.currentPage
+    .findAllWithCriteria({
+      sharedPluginData: {
+        namespace: runtime.namespace,
+        keys: [SHARED_PLUGIN_DATA.keys.connectorRefs],
+      },
+    })
+    .forEach((node) => {
+      nodesById.set(node.id, node);
+      candidateNodeIds.add(node.id);
+    });
+
+  snapshot.connectorRecords.forEach((connector) => {
+    candidateNodeIds.add(connector.record.start.nodeId);
+    candidateNodeIds.add(connector.record.start.contextFrameId);
+    candidateNodeIds.add(connector.record.end.nodeId);
+    candidateNodeIds.add(connector.record.end.contextFrameId);
+    candidateNodeIds.add(connector.record.ownerContextFrameId);
+  });
+
+  for (const nodeId of candidateNodeIds) {
+    if (nodesById.has(nodeId)) {
+      continue;
+    }
+    const node = await getLiveSceneNodeOrNull(nodeId);
+    if (node !== null) {
+      nodesById.set(node.id, node);
+    }
+  }
+
+  const pageNodes = [...nodesById.values()];
   return {
-    ...collectFlowConnectorCurrentPageSnapshot(runtime),
+    ...snapshot,
     connectorObstacleCandidateNodes: pageNodes,
     pageNodes,
     pageNodesById: new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node])),
@@ -141,7 +178,14 @@ export function collectFlowConnectorAuthoringSnapshot(
       record: connector.record,
     })),
     obstacles:
-      endpoints.length === 2 ? collectConnectorObstacles(endpoints[0], endpoints[1], runtime) : [],
+      endpoints.length === 2
+        ? collectConnectorObstacles(
+            endpoints[0],
+            endpoints[1],
+            runtime,
+            collectCurrentPageConnectorObstacleCandidates(),
+          )
+        : [],
   };
 }
 
@@ -368,7 +412,12 @@ async function toRouteLayoutConnector(
     obstacles:
       startNode === null || endNode === null
         ? []
-        : collectConnectorObstacles(startNode, endNode, runtime),
+        : collectConnectorObstacles(
+            startNode,
+            endNode,
+            runtime,
+            collectCurrentPageConnectorObstacleCandidates(),
+          ),
   };
 }
 

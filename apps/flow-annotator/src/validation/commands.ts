@@ -22,8 +22,8 @@ import {
   getAnnotationValidationCards,
 } from "../annotations/records";
 import {
+  collectDeepAuditFlowConnectorCurrentPageSnapshot,
   collectFlowConnectorCurrentPageSnapshot,
-  collectFullPageFlowConnectorCurrentPageSnapshot,
   type FlowConnectorCurrentPageRuntime,
   type FullPageFlowConnectorCurrentPageSnapshot,
   toCleanStaleIndexesInput,
@@ -162,15 +162,15 @@ export async function cleanStaleIndexes(
   };
 }
 
-export function deepAuditRepairValidationIndex(
+export async function deepAuditRepairValidationIndex(
   runtime: FlowConnectorCurrentPageRuntime,
-): DeepAuditRepairIndexResult {
+): Promise<DeepAuditRepairIndexResult> {
   const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
   const cards =
     annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
   const badges =
     annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
-  const fullSnapshot = collectFullPageFlowConnectorCurrentPageSnapshot(runtime);
+  const fullSnapshot = await collectDeepAuditFlowConnectorCurrentPageSnapshot(runtime);
   const cleanBatch = buildCleanStaleIndexesOperationBatch(toCleanStaleIndexesInput(fullSnapshot));
   const repairBatch = buildDeepAuditRepairIndexOperationBatch({
     annotationsIndex: buildAnnotationsValidationIndex(cards, badges),
@@ -428,7 +428,7 @@ function buildAnnotationsValidationIndex(
 }
 
 function buildConnectorsValidationIndex(
-  snapshot: ReturnType<typeof collectFullPageFlowConnectorCurrentPageSnapshot>,
+  snapshot: FullPageFlowConnectorCurrentPageSnapshot,
 ): ValidationIndexRecord {
   const liveConnectorIds = new Set(
     snapshot.connectorRecords.map((connector) => connector.record.id),
@@ -443,23 +443,31 @@ function buildConnectorsValidationIndex(
   });
 
   return createValidationIndexRecord({
-    connectorObstacleCandidateNodeIds: snapshot.connectorObstacleCandidateNodes.map(
-      (node) => node.id,
-    ),
+    connectorObstacleCandidateNodeIds: [
+      ...snapshot.connectorRecords.flatMap((connector) => [
+        connector.record.start.nodeId,
+        connector.record.start.contextFrameId,
+        connector.record.end.nodeId,
+        connector.record.end.contextFrameId,
+        connector.record.ownerContextFrameId,
+      ]),
+    ].filter((nodeId) => snapshot.pageNodesById.has(nodeId)),
     connectorRootNodeIds: snapshot.connectorRecords.map((connector) => connector.node.id),
-    contextFrameIds: snapshot.connectorRecords.flatMap((connector) => [
-      connector.record.start.contextFrameId,
-      connector.record.end.contextFrameId,
-    ]),
+    contextFrameIds: snapshot.connectorRecords
+      .flatMap((connector) => [
+        connector.record.start.contextFrameId,
+        connector.record.end.contextFrameId,
+      ])
+      .filter((nodeId) => snapshot.pageNodesById.has(nodeId)),
     flowEndpointNodeIds: [
       ...snapshot.connectorRecords.flatMap((connector) => [
         connector.record.start.nodeId,
         connector.record.end.nodeId,
       ]),
       ...endpointsWithLiveConnectorRefs,
-    ],
-    ownerContextFrameIds: snapshot.connectorRecords.map(
-      (connector) => connector.record.ownerContextFrameId,
-    ),
+    ].filter((nodeId) => snapshot.pageNodesById.has(nodeId)),
+    ownerContextFrameIds: snapshot.connectorRecords
+      .map((connector) => connector.record.ownerContextFrameId)
+      .filter((nodeId) => snapshot.pageNodesById.has(nodeId)),
   });
 }

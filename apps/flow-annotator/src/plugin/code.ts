@@ -203,7 +203,7 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
 
   if (message.type === "deep-audit-repair-index") {
     await runValidationOperation(message.type, async () => {
-      const result = deepAuditRepairValidationIndex(connectRuntime);
+      const result = await deepAuditRepairValidationIndex(connectRuntime);
       const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
       validationTargetsByIssueId = targetsByIssueId;
       postValidationReport(report);

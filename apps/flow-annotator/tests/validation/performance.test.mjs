@@ -365,6 +365,48 @@ test("Deep Audit Repair rebuilds the Validation Index and cleans unknown stale r
   assert.deepEqual(readValidationIndex(connectorsContainer).connectorRootNodeIds, [connector.id]);
 });
 
+test("Deep Audit Repair keeps rebuilt Validation Index under the Figma plugin-data limit", async () => {
+  const page = createPage();
+  const unrelatedFrames = Array.from({ length: 6_000 }, (_value, index) =>
+    createNode(page, `unrelated-frame-${String(index).padStart(5, "0")}`, index),
+  );
+  const start = createNode(page, "start-endpoint", 0);
+  const end = createNode(page, "end-endpoint", 160);
+  const unknownFormerEndpoint = createNode(page, "unknown-former-endpoint", 320);
+  const connectorsContainer = createNode(page, "FFA Connectors", 800);
+  const connector = createNode(connectorsContainer, "connector-root", 840);
+  const messages = [];
+
+  setConnectorRefs(start, ["live-connector", "deleted-connector"]);
+  setConnectorRefs(unknownFormerEndpoint, ["deleted-connector"]);
+  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+  limitSharedPluginDataEntrySize(connectorsContainer, 100_000);
+  setConnectorRecord(connector, "live-connector", start.id, end.id, "open");
+  connectorsContainer.children = [connector];
+  page.children = [...unrelatedFrames, start, end, unknownFormerEndpoint, connectorsContainer];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
+  await flushPluginMessage(messages);
+
+  const repairStatus = messages.find((message) => message.type === "status");
+  const connectorIndexRaw = connectorsContainer.getSharedPluginData(namespace, "validationIndex");
+  const connectorIndex = readValidationIndex(connectorsContainer);
+
+  assert.equal(repairStatus.tone, "success");
+  assert.ok(
+    connectorIndexRaw.length < 100_000,
+    `Validation Index entry length ${connectorIndexRaw.length} should stay below 100 kB.`,
+  );
+  assert.equal(
+    connectorIndex.connectorObstacleCandidateNodeIds.includes(unrelatedFrames[0].id),
+    false,
+  );
+  assert.deepEqual(readConnectorRefs(unknownFormerEndpoint), []);
+});
+
 test("validates connector routes without scanning unrelated group descendants", async () => {
   const page = createPage();
   const contextFrame = createNode(page, "context-frame", 0);
@@ -409,6 +451,18 @@ test("validates connector routes without scanning unrelated group descendants", 
     false,
   );
 });
+
+function limitSharedPluginDataEntrySize(node, maxLength) {
+  const originalSetSharedPluginData = node.setSharedPluginData;
+  node.setSharedPluginData = (namespaceValue, key, value) => {
+    if (value.length > maxLength) {
+      throw new Error(
+        `in setSharedPluginData: This pluginData entry exceeds ${maxLength} byte test limit.`,
+      );
+    }
+    originalSetSharedPluginData(namespaceValue, key, value);
+  };
+}
 
 test("validates multiple connector routes without repeated obstacle discovery", async () => {
   const page = createPage();

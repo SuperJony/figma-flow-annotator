@@ -13,7 +13,7 @@ export function collectConnectorObstacles(
   startNode: SceneNode,
   endNode: SceneNode,
   runtime: ConnectorObstacleRuntime,
-  candidates: Iterable<SceneNode> = figma.currentPage.findAllWithCriteria({ types: ["FRAME"] }),
+  candidates: Iterable<SceneNode>,
 ): ConnectorObstacle[] {
   const obstacles: ConnectorObstacle[] = [];
   const obstacleRootIds = new Set<string>();
@@ -70,6 +70,10 @@ export function collectConnectorObstacles(
   }
 
   return obstacles;
+}
+
+export function collectCurrentPageConnectorObstacleCandidates(): SceneNode[] {
+  return figma.currentPage.findAllWithCriteria({ types: ["FRAME"] });
 }
 
 function toObstacleRect(obstacle: ConnectorObstacle): RectLike {
