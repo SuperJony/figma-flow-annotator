@@ -60,12 +60,14 @@ export async function importConnectorSnapshotModule() {
 }
 
 export function createNode(page, id, x) {
+  ensurePageRegistry(page);
   const sharedPluginData = new Map();
   const node = {
     absoluteBoundingBox: { x, y: 0, width: 100, height: 100 },
     appendChild: (child) => {
       child.parent = node;
       node.children.push(child);
+      registerNode(page, child);
     },
     children: [],
     getSharedPluginData: (_namespace, key) => sharedPluginData.get(key) ?? "",
@@ -93,6 +95,7 @@ export function createNode(page, id, x) {
     x,
     y: 0,
   };
+  registerNode(page, node);
   return node;
 }
 
@@ -139,6 +142,7 @@ export function createRuntime(page, connectorGroups = []) {
       container.children = connectorGroups;
       container.setSharedPluginData("figma_flow_annotator", "kind", "container");
       page.children.push(container);
+      registerNode(page, container);
       return container;
     },
     ensureLayerOrder: () => {},
@@ -153,12 +157,14 @@ export function createRuntime(page, connectorGroups = []) {
 }
 
 export function createFigmaStub(page, connectorGroups) {
+  ensurePageRegistry(page);
   return {
     createFrame: () => {
       const frame = createNode(page, `frame-${Math.random().toString(36).slice(2)}`, 0);
       frame.appendChild = (child) => {
         child.parent = frame;
         frame.children.push(child);
+        registerNode(page, child);
       };
       frame.resize = (width, height) => {
         frame.width = width;
@@ -174,14 +180,17 @@ export function createFigmaStub(page, connectorGroups) {
       group.children = nodes;
       nodes.forEach((node) => {
         node.parent = group;
+        registerNode(page, node);
       });
       group.parent = parent;
       group.type = "GROUP";
       group.appendChild = (child) => {
         child.parent = group;
         group.children.push(child);
+        registerNode(page, child);
       };
       connectorGroups.push(group);
+      registerNode(page, group);
       return group;
     },
   };
@@ -227,6 +236,46 @@ export function readConnector(connectorGroup) {
 export function readConnectorRefs(node) {
   const data = node.getSharedPluginData("figma_flow_annotator", "connectorRefs");
   return data.length === 0 ? [] : JSON.parse(data).connectorIds;
+}
+
+function ensurePageRegistry(page) {
+  if (page.__allNodes !== undefined) {
+    return;
+  }
+  page.__allNodes = new Set([page]);
+  page.findAllWithCriteria = (criteria) =>
+    [...page.__allNodes].filter((node) => matchesCriteria(node, criteria));
+  for (const child of page.children ?? []) {
+    registerNode(page, child);
+  }
+}
+
+function registerNode(page, node) {
+  ensurePageRegistry(page);
+  page.__allNodes.add(node);
+  for (const child of node.children ?? []) {
+    registerNode(page, child);
+  }
+}
+
+function matchesCriteria(node, criteria) {
+  if (node.type === "PAGE" || node.removed) {
+    return false;
+  }
+  if (criteria.types !== undefined && !criteria.types.includes(node.type)) {
+    return false;
+  }
+  const sharedPluginData = criteria.sharedPluginData;
+  if (sharedPluginData === undefined) {
+    return true;
+  }
+  const keys = sharedPluginData.keys;
+  if (keys === undefined) {
+    return ["kind", "annotation", "badgeRef", "connector", "annotationRefs", "connectorRefs"].some(
+      (key) => node.getSharedPluginData(sharedPluginData.namespace, key) !== "",
+    );
+  }
+  return keys.some((key) => node.getSharedPluginData(sharedPluginData.namespace, key) !== "");
 }
 
 export function routeIsOrthogonal(points) {

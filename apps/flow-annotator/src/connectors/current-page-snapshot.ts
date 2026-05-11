@@ -86,6 +86,32 @@ export function collectFullPageFlowConnectorCurrentPageSnapshot(
   };
 }
 
+export async function collectBoundedFlowConnectorValidationSnapshot(
+  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
+  candidateNodeIds: Iterable<string> = [],
+): Promise<FullPageFlowConnectorCurrentPageSnapshot> {
+  const currentPage = figma.currentPage;
+  const getNodeByIdAsync = figma.getNodeByIdAsync.bind(figma);
+  const snapshot = collectFlowConnectorCurrentPageSnapshot(runtime);
+  const nodeIds = new Set(candidateNodeIds);
+
+  snapshot.connectorRecords.forEach((connector) => {
+    nodeIds.add(connector.record.start.nodeId);
+    nodeIds.add(connector.record.end.nodeId);
+    nodeIds.add(connector.record.ownerContextFrameId);
+  });
+  collectReverseReferenceNodes(currentPage, runtime.namespace).forEach((node) => {
+    nodeIds.add(node.id);
+  });
+
+  const pageNodes = await getExistingSceneNodesById(nodeIds, currentPage.id, getNodeByIdAsync);
+  return {
+    ...snapshot,
+    pageNodes,
+    pageNodesById: new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node])),
+  };
+}
+
 export function collectFlowConnectorAuthoringSnapshot(
   endpoints: SceneNode[],
   runtime: FlowConnectorCurrentPageRuntime,
@@ -251,6 +277,33 @@ function findFlowConnectorsContainer(
     }
   }
   return null;
+}
+
+function collectReverseReferenceNodes(page: PageNode, namespace: string): SceneNode[] {
+  return page.findAllWithCriteria({
+    sharedPluginData: {
+      keys: [SHARED_PLUGIN_DATA.keys.annotationRefs, SHARED_PLUGIN_DATA.keys.connectorRefs],
+      namespace,
+    },
+  });
+}
+
+async function getExistingSceneNodesById(
+  nodeIds: Iterable<string>,
+  currentPageId: string,
+  getNodeByIdAsync: (nodeId: string) => Promise<BaseNode | null>,
+): Promise<SceneNode[]> {
+  const nodes: SceneNode[] = [];
+  for (const nodeId of nodeIds) {
+    if (nodeId === currentPageId) {
+      continue;
+    }
+    const node = await getNodeByIdAsync(nodeId);
+    if (node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node) {
+      nodes.push(node as SceneNode);
+    }
+  }
+  return nodes;
 }
 
 async function collectRouteLayoutConnectors(

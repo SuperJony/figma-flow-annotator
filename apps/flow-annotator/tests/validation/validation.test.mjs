@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
 
 import {
   addFlowActionLabel,
@@ -17,6 +17,24 @@ import {
   setConnectorRecord,
   setConnectorRefs,
 } from "../support/plugin-test-helpers.mjs";
+
+let validationTestQueue = Promise.resolve();
+
+function test(name, fn) {
+  let release = () => {};
+  nodeTest(name, async (context) => {
+    const previous = validationTestQueue;
+    validationTestQueue = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      await fn(context);
+    } finally {
+      release();
+    }
+  });
+}
 
 test("validates Annotation bindings and locates validation issue nodes without shared report data", async () => {
   const page = createPage();

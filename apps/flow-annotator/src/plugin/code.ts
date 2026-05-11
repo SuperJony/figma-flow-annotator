@@ -168,7 +168,7 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   }
 
   if (message.type === "validate-bindings") {
-    const { report, targetsByIssueId } = validateCurrentPageBindings(connectRuntime);
+    const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
     validationTargetsByIssueId = targetsByIssueId;
     postValidationReport(report);
     postStatus("success", `Validation found ${report.summary.all} issue(s).`);
@@ -176,8 +176,8 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   }
 
   if (message.type === "clean-stale-indexes") {
-    const result = cleanStaleIndexes(connectRuntime);
-    const { report, targetsByIssueId } = validateCurrentPageBindings(connectRuntime);
+    const result = await cleanStaleIndexes(connectRuntime);
+    const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
     validationTargetsByIssueId = targetsByIssueId;
     postValidationReport(report);
     postStatus("success", formatCleanStaleIndexesPanelStatus(result));

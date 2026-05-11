@@ -9,11 +9,11 @@ export const buildDir = resolve(appRoot, ".test-build-plugin");
 export const namespace = "figma_flow_annotator";
 
 export async function flushPluginMessage(messages) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     if (messages.some((message) => message.type === "status")) {
       return;
     }
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
 
@@ -41,9 +41,13 @@ export function createPage() {
   const page = createNode(null, "page", 0);
   page.type = "PAGE";
   page.selection = [];
+  page.__page = page;
+  page.__allNodes = new Set([page]);
   page.appendChild = (node) => {
     appendChild(page, node);
   };
+  page.findAllWithCriteria = (criteria) =>
+    [...page.__allNodes].filter((node) => matchesCriteria(node, criteria));
   return page;
 }
 
@@ -80,6 +84,7 @@ export function createNode(parent, id, x) {
     x,
     y: 0,
   };
+  registerNode(parent, node);
   return node;
 }
 
@@ -110,6 +115,7 @@ export function appendChild(parent, child) {
   }
   child.parent = parent;
   parent.children.push(child);
+  registerNode(parent, child);
 }
 
 export function readAnnotationRefs(node) {
@@ -256,4 +262,36 @@ export function findNodeById(node, id) {
     }
   }
   return null;
+}
+
+function registerNode(parent, node) {
+  const page = parent?.type === "PAGE" ? parent : parent?.__page;
+  if (page === undefined) {
+    return;
+  }
+  node.__page = page;
+  page.__allNodes.add(node);
+  for (const child of node.children ?? []) {
+    registerNode(node, child);
+  }
+}
+
+function matchesCriteria(node, criteria) {
+  if (node.type === "PAGE" || node.removed) {
+    return false;
+  }
+  if (criteria.types !== undefined && !criteria.types.includes(node.type)) {
+    return false;
+  }
+  const sharedPluginData = criteria.sharedPluginData;
+  if (sharedPluginData === undefined) {
+    return true;
+  }
+  const keys = sharedPluginData.keys;
+  if (keys === undefined) {
+    return ["kind", "annotation", "badgeRef", "connector", "annotationRefs", "connectorRefs"].some(
+      (key) => node.getSharedPluginData(sharedPluginData.namespace, key) !== "",
+    );
+  }
+  return keys.some((key) => node.getSharedPluginData(sharedPluginData.namespace, key) !== "");
 }

@@ -13,7 +13,7 @@ import {
   getAnnotationValidationCards,
 } from "../annotations/records";
 import {
-  collectFullPageFlowConnectorCurrentPageSnapshot,
+  collectBoundedFlowConnectorValidationSnapshot,
   type FlowConnectorCurrentPageRuntime,
   toCleanStaleIndexesInput,
   toFlowConnectorReferenceValidationInput,
@@ -27,23 +27,42 @@ export interface CleanStaleIndexesResult {
   removedConnectorRefCount: number;
 }
 
-export function validateCurrentPageBindings(runtime: FlowConnectorCurrentPageRuntime): {
+export async function validateCurrentPageBindings(
+  runtime: FlowConnectorCurrentPageRuntime,
+): Promise<{
   report: ValidationReport;
   targetsByIssueId: Map<string, string[]>;
-} {
-  const connectorSnapshot = collectFullPageFlowConnectorCurrentPageSnapshot(runtime);
-  const pageNodes = connectorSnapshot.pageNodes;
-  const allNodes = [figma.currentPage, ...pageNodes];
+}> {
+  const currentPage = figma.currentPage;
   const annotationsContainer = findContainer("FFA Annotations");
   const cards =
     annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
   const badges =
     annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
-  const subjects = pageNodes.map((node) => ({
-    annotationIds: readReferenceIds(node, SHARED_PLUGIN_DATA.keys.annotationRefs, "annotationIds"),
-    nodeId: node.id,
-    ...(node.absoluteBoundingBox === null ? {} : { rect: node.absoluteBoundingBox }),
-  }));
+  const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(
+    runtime,
+    collectAnnotationReferenceNodeIds(cards, badges),
+  );
+  const pageNodes = connectorSnapshot.pageNodes;
+  const allNodes = [currentPage, ...pageNodes];
+  const annotationNodeIds = new Set(collectAnnotationReferenceNodeIds(cards, badges));
+  const subjects = pageNodes.flatMap((node) => {
+    const annotationIds = readReferenceIds(
+      node,
+      SHARED_PLUGIN_DATA.keys.annotationRefs,
+      "annotationIds",
+    );
+    if (!annotationNodeIds.has(node.id) && annotationIds.length === 0) {
+      return [];
+    }
+    return [
+      {
+        annotationIds,
+        nodeId: node.id,
+        ...(node.absoluteBoundingBox === null ? {} : { rect: node.absoluteBoundingBox }),
+      },
+    ];
+  });
   const contexts = allNodes.map((node) => ({
     nodeId: node.id,
     ...("absoluteBoundingBox" in node && node.absoluteBoundingBox !== null
@@ -69,10 +88,10 @@ export function validateCurrentPageBindings(runtime: FlowConnectorCurrentPageRun
   };
 }
 
-export function cleanStaleIndexes(
+export async function cleanStaleIndexes(
   runtime: FlowConnectorCurrentPageRuntime,
-): CleanStaleIndexesResult {
-  const connectorSnapshot = collectFullPageFlowConnectorCurrentPageSnapshot(runtime);
+): Promise<CleanStaleIndexesResult> {
+  const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(runtime);
   const batch = buildCleanStaleIndexesOperationBatch(toCleanStaleIndexesInput(connectorSnapshot));
 
   applyCleanStaleIndexesOperationBatch(
@@ -84,6 +103,16 @@ export function cleanStaleIndexes(
     cleanedEndpointCount: batch.cleanedEndpointNodeIds.length,
     removedConnectorRefCount: batch.removedConnectorIds.length,
   };
+}
+
+function collectAnnotationReferenceNodeIds(
+  cards: ReturnType<typeof getAnnotationValidationCards>,
+  badges: ReturnType<typeof getAnnotationValidationBadges>,
+): string[] {
+  return [
+    ...cards.flatMap((card) => [card.record.contextFrameId, ...card.record.subjectNodeIds]),
+    ...badges.flatMap((badge) => [badge.record.contextFrameId, badge.record.subjectNodeId]),
+  ];
 }
 
 function applyCleanStaleIndexesOperationBatch(
