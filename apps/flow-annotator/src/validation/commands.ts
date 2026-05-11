@@ -9,33 +9,28 @@ import {
   type FigmaFileOperationBatch,
   getValidationIndexRepairStatus,
   mergeValidationIndexRecord,
-  mergeValidationReports,
+  runValidationComputation,
   type SetSharedPluginDataOperation,
   SHARED_PLUGIN_DATA,
   type ValidationIndexReadiness,
   type ValidationIndexRecord,
   type ValidationReport,
   VISUAL_NODE_KINDS,
-  validateAnnotationBindings,
-  validateFlowConnectorReferences,
-  validateFlowConnectorRouteGeometry,
 } from "@figma-flow-annotator/core";
 import {
   getAnnotationValidationBadges,
   getAnnotationValidationCards,
 } from "../annotations/records";
 import {
-  collectBoundedFlowConnectorValidationSnapshot,
   collectFlowConnectorCurrentPageSnapshot,
   collectFullPageFlowConnectorCurrentPageSnapshot,
   type FlowConnectorCurrentPageRuntime,
   type FullPageFlowConnectorCurrentPageSnapshot,
   toCleanStaleIndexesInput,
-  toFlowConnectorReferenceValidationInput,
-  toFlowConnectorRouteValidationInput,
 } from "../connectors/current-page-snapshot";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import { ensureContainer, findContainer, readReferenceIds } from "../figma/runtime";
+import { collectCurrentPageValidationSnapshot } from "./current-page-snapshot";
 
 export type CleanStaleIndexesResult =
   | {
@@ -71,55 +66,8 @@ export async function validateCurrentPageBindings(
   report: ValidationReport;
   targetsByIssueId: Map<string, string[]>;
 }> {
-  const currentPage = figma.currentPage;
-  const annotationsContainer = findContainer("FFA Annotations");
-  const cards =
-    annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
-  const badges =
-    annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
-  const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(
-    runtime,
-    collectAnnotationReferenceNodeIds(cards, badges),
-    collectAnnotationObstacleCandidateNodeIds(cards, badges),
-  );
-  const pageNodes = connectorSnapshot.pageNodes;
-  const allNodes = [currentPage, ...pageNodes];
-  const annotationNodeIds = new Set(collectAnnotationReferenceNodeIds(cards, badges));
-  const subjects = pageNodes.flatMap((node) => {
-    const annotationIds = readReferenceIds(
-      node,
-      SHARED_PLUGIN_DATA.keys.annotationRefs,
-      "annotationIds",
-    );
-    if (!annotationNodeIds.has(node.id) && annotationIds.length === 0) {
-      return [];
-    }
-    return [
-      {
-        annotationIds,
-        nodeId: node.id,
-        ...(node.absoluteBoundingBox === null ? {} : { rect: node.absoluteBoundingBox }),
-      },
-    ];
-  });
-  const contexts = allNodes.map((node) => ({
-    nodeId: node.id,
-    ...("absoluteBoundingBox" in node && node.absoluteBoundingBox !== null
-      ? { rect: node.absoluteBoundingBox }
-      : {}),
-  }));
-  const annotationReport = validateAnnotationBindings({
-    badges,
-    cards,
-    contexts,
-    subjects,
-  });
-  const connectorReferenceInput = toFlowConnectorReferenceValidationInput(connectorSnapshot);
-  const connectorReport = validateFlowConnectorReferences(connectorReferenceInput);
-  const routeReport = validateFlowConnectorRouteGeometry(
-    toFlowConnectorRouteValidationInput(connectorSnapshot, runtime),
-  );
-  const report = mergeValidationReports([annotationReport, connectorReport, routeReport]);
+  const snapshot = await collectCurrentPageValidationSnapshot(runtime);
+  const report = runValidationComputation(snapshot);
 
   return {
     report,
@@ -397,23 +345,6 @@ async function getMissingNodeIds(
     }
   }
   return missingNodeIds;
-}
-
-function collectAnnotationReferenceNodeIds(
-  cards: ReturnType<typeof getAnnotationValidationCards>,
-  badges: ReturnType<typeof getAnnotationValidationBadges>,
-): string[] {
-  return [
-    ...cards.flatMap((card) => [card.record.contextFrameId, ...card.record.subjectNodeIds]),
-    ...badges.flatMap((badge) => [badge.record.contextFrameId, badge.record.subjectNodeId]),
-  ];
-}
-
-function collectAnnotationObstacleCandidateNodeIds(
-  cards: ReturnType<typeof getAnnotationValidationCards>,
-  badges: ReturnType<typeof getAnnotationValidationBadges>,
-): string[] {
-  return [...cards.map((card) => card.nodeId), ...badges.map((badge) => badge.nodeId)];
 }
 
 function applyCleanStaleIndexesOperationBatch(

@@ -7,7 +7,9 @@ import {
   createPage,
   flushPluginMessage,
   forbidPageFindAllWithCriteria,
+  importAppModule,
   importCodeModule,
+  importCoreModule,
   moveNode,
   namespace,
   readConnectorRefs,
@@ -72,6 +74,114 @@ test("validates without scanning unrelated frame descendants", async () => {
     warnings: 0,
     info: 0,
   });
+});
+
+test("runs pure validation from a collected plain snapshot without Figma scene access", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "context-frame", 0);
+  const subject = createNode(contextFrame, "subject-a", 20);
+  const annotationsContainer = createNode(page, "FFA Annotations", 500);
+  const card = createNode(annotationsContainer, "annotation-card", 540);
+  const messages = [];
+  const previousFigmaDescriptor = Object.getOwnPropertyDescriptor(globalThis, "figma");
+  let currentPageReads = 0;
+  let getNodeByIdCalls = 0;
+
+  moveNode(contextFrame, { x: 0, y: 0, width: 320, height: 180 });
+  moveNode(subject, { x: 20, y: 24, width: 100, height: 50 });
+  moveNode(card, { x: 0, y: 220, width: 280, height: 100 });
+  subject.setSharedPluginData(
+    namespace,
+    "annotationRefs",
+    JSON.stringify({
+      schemaVersion: 1,
+      annotationIds: ["annotation-1"],
+    }),
+  );
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  setCardRecord(card, 1, contextFrame.id);
+  card.setSharedPluginData(
+    namespace,
+    "annotation",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "annotation-1",
+      annotationNumber: 1,
+      body: "",
+      contextFrameId: contextFrame.id,
+      subjectNodeIds: [subject.id],
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+    }),
+  );
+  contextFrame.children = [subject];
+  annotationsContainer.children = [card];
+  page.children = [contextFrame, annotationsContainer];
+
+  const figmaStub = createFigmaStub(page, messages);
+  Object.defineProperty(figmaStub, "currentPage", {
+    configurable: true,
+    get() {
+      currentPageReads += 1;
+      return page;
+    },
+  });
+  figmaStub.getNodeByIdAsync = async (id) => {
+    getNodeByIdCalls += 1;
+    return page.__nodesById?.get(id) ?? null;
+  };
+
+  try {
+    Object.defineProperty(globalThis, "figma", {
+      configurable: true,
+      value: figmaStub,
+      writable: true,
+    });
+    const { collectCurrentPageValidationSnapshot } = await importAppModule(
+      "src/validation/current-page-snapshot.ts",
+      "validation-snapshot",
+    );
+
+    const snapshot = await collectCurrentPageValidationSnapshot({
+      findContextFrameId: () => contextFrame.id,
+      getVisibleBounds: (node) => node.absoluteBoundingBox,
+      namespace,
+    });
+    assert.ok(currentPageReads > 0);
+    assert.ok(getNodeByIdCalls > 0);
+
+    const clonedSnapshot = structuredClone(snapshot);
+    assert.deepEqual(clonedSnapshot, snapshot);
+
+    Object.defineProperty(globalThis, "figma", {
+      configurable: true,
+      get() {
+        throw new Error("Pure validation computation must not access Figma scene state.");
+      },
+    });
+    const { runValidationComputation } = await importCoreModule();
+    const report = runValidationComputation(clonedSnapshot);
+
+    assert.deepEqual(report.summary, {
+      all: 2,
+      errors: 1,
+      warnings: 1,
+      info: 0,
+    });
+    assert.deepEqual(
+      report.issues.map((issue) => [issue.code, issue.locationNodeIds]),
+      [
+        ["annotation-missing-badge", ["annotation-card", "subject-a"]],
+        ["annotation-missing-body", ["annotation-card"]],
+      ],
+    );
+  } finally {
+    if (previousFigmaDescriptor === undefined) {
+      delete globalThis.figma;
+    } else {
+      Object.defineProperty(globalThis, "figma", previousFigmaDescriptor);
+    }
+  }
 });
 
 test("validates and cleans explicitly referenced Stale Reverse Indexes without page-wide discovery", async () => {

@@ -18,23 +18,33 @@ export async function flushPluginMessage(messages) {
 }
 
 export async function importCodeModule() {
+  return importAppModule("src/plugin/code.ts", "code");
+}
+
+export async function importAppModule(sourcePath, outputPrefix = "module") {
   await mkdir(buildDir, { recursive: true });
   const outfile = resolve(
     buildDir,
-    `code-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+    `${outputPrefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
   );
   await build({
     bundle: true,
     define: {
       __html__: '""',
     },
-    entryPoints: [resolve(appRoot, "src/plugin/code.ts")],
+    entryPoints: [resolve(appRoot, sourcePath)],
     format: "esm",
     outfile,
     platform: "node",
     target: "es2019",
   });
   return import(pathToFileURL(outfile).href);
+}
+
+export async function importCoreModule() {
+  const url = pathToFileURL(resolve(appRoot, "../../packages/core/src/index.ts"));
+  url.search = `cache=${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return import(url.href);
 }
 
 export function createPage() {
