@@ -24,14 +24,16 @@ test("plans Flow Connector create authoring by routing and detecting existing di
       allocatedId = "connector-new";
       return allocatedId;
     },
-    endpoints: [
-      endpoint("node-a", "Start", "frame-a", { x: 0, y: 0, width: 100, height: 100 }),
-      endpoint("node-b", "End", "frame-b", { x: 360, y: 0, width: 100, height: 100 }),
-    ],
-    existingConnectors: [{ nodeId: "connector-node", record: existingRecord }],
     flowAction: " choose ",
     now: "2026-05-10T00:00:00.000Z",
-    obstacles: [],
+    routeFacts: {
+      endpoints: [
+        endpoint("node-a", "Start", "frame-a", { x: 0, y: 0, width: 100, height: 100 }),
+        endpoint("node-b", "End", "frame-b", { x: 360, y: 0, width: 100, height: 100 }),
+      ],
+      existingConnectors: [{ nodeId: "connector-node", record: existingRecord }],
+      obstacles: [],
+    },
   });
 
   assert.equal(allocatedId, null);
@@ -66,14 +68,16 @@ test("plans new Flow Connector authoring with route cache and reverse references
       allocationCount += 1;
       return "connector-new";
     },
-    endpoints: [
-      endpoint("node-a", "Start", "frame-a", { x: 0, y: 0, width: 100, height: 100 }),
-      endpoint("node-b", "End", "frame-b", { x: 360, y: 0, width: 100, height: 100 }),
-    ],
-    existingConnectors: [],
     flowAction: "",
     now: "2026-05-10T00:00:00.000Z",
-    obstacles: [],
+    routeFacts: {
+      endpoints: [
+        endpoint("node-a", "Start", "frame-a", { x: 0, y: 0, width: 100, height: 100 }),
+        endpoint("node-b", "End", "frame-b", { x: 360, y: 0, width: 100, height: 100 }),
+      ],
+      existingConnectors: [],
+      obstacles: [],
+    },
   });
 
   assert.equal(allocationCount, 1);

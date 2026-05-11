@@ -60,7 +60,7 @@ test("creates a Flow Connector on duplicated selected endpoints, not the origina
   page.selection = [copyStart, copyEnd];
   connect.handleSelectionChange(runtime);
 
-  connect.createFlowConnector("", runtime);
+  await connect.createFlowConnector("", runtime);
 
   assert.equal(connectorGroups.length, 1);
   assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ["copy-start", "copy-end"]);
@@ -219,23 +219,32 @@ test("prunes removed pending endpoints before endpoint eligibility checks", asyn
   assert.ok(checkedEndpointIds.includes("live-endpoint"));
 });
 
-test("creates a Flow Connector without scanning children of unrelated frame obstacles", async () => {
+test("creates a Flow Connector without page discovery or scanning unrelated descendants", async () => {
   const connect = await importConnectModule();
   const page = { type: "PAGE", id: "page", children: [], selection: [] };
   const start = createNode(page, "start", 0);
   const end = createNode(page, "end", 400);
   const unrelatedFrame = createNode(page, "unrelated-frame", 1000);
   const nestedChild = createNode(page, "nested-child", 1040);
+  const nestedGroup = createNode(page, "nested-group", 1080);
   const connectorGroups = [];
   const runtime = createRuntime(page, connectorGroups);
 
   nestedChild.parent = unrelatedFrame;
   nestedChild.getSharedPluginData = () => {
-    throw new Error("Unrelated frame obstacle descendants must not be scanned.");
+    throw new Error("Unrelated frame descendants must not be scanned.");
   };
-  unrelatedFrame.children = [nestedChild];
+  nestedGroup.type = "GROUP";
+  nestedGroup.parent = unrelatedFrame;
+  nestedGroup.getSharedPluginData = () => {
+    throw new Error("Unrelated group descendants must not be scanned.");
+  };
+  unrelatedFrame.children = [nestedChild, nestedGroup];
   page.children = [start, end, unrelatedFrame];
   globalThis.figma = createFigmaStub(page, connectorGroups);
+  page.findAllWithCriteria = () => {
+    throw new Error("Create Flow Connector must not use page-level frame discovery.");
+  };
 
   connect.resetObservedEndpointSelection(runtime);
 
@@ -244,7 +253,7 @@ test("creates a Flow Connector without scanning children of unrelated frame obst
   page.selection = [start, end];
   connect.handleSelectionChange(runtime);
 
-  connect.createFlowConnector("", runtime);
+  await connect.createFlowConnector("", runtime);
 
   assert.equal(connectorGroups.length, 1);
   assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ["start", "end"]);

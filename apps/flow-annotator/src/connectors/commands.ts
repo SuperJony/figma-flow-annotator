@@ -10,7 +10,6 @@ import {
 } from "@figma-flow-annotator/core";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
-  collectFlowConnectorAuthoringSnapshot,
   collectFlowConnectorCurrentPageSnapshot,
   collectFlowConnectorRouteLayoutSnapshot,
   type FlowConnectorCurrentPageRuntime,
@@ -22,6 +21,7 @@ import {
   renderFlowConnectorVisuals,
   resolveFlowConnectorVisualRoot,
 } from "./flow-connector-visual-writer";
+import { collectCreateFlowConnectorRouteFacts } from "./route-facts";
 import {
   getPendingConnectorEndpointNodes,
   handleSelectionChange,
@@ -56,17 +56,18 @@ export interface ConnectRuntime extends FlowConnectorCurrentPageRuntime {
   solidPaint(r: number, g: number, b: number): SolidPaint;
 }
 
-export function createFlowConnector(flowActionValue: string, runtime: ConnectRuntime): GroupNode {
+export async function createFlowConnector(
+  flowActionValue: string,
+  runtime: ConnectRuntime,
+): Promise<GroupNode> {
   const endpoints = getPendingConnectorEndpointNodes(runtime);
-  const snapshot = collectFlowConnectorAuthoringSnapshot(endpoints, runtime);
+  const routeFactSnapshot = await collectCreateFlowConnectorRouteFacts(endpoints, runtime);
   const now = new Date().toISOString();
   const plan = planCreateFlowConnectorAuthoring({
     createConnectorId: () => runtime.createId("connector"),
-    endpoints: snapshot.endpoints,
-    existingConnectors: snapshot.existingConnectors,
     flowAction: flowActionValue,
     now,
-    obstacles: snapshot.obstacles,
+    routeFacts: routeFactSnapshot.routeFacts,
   });
   const [startNode, endNode] = endpoints;
   const batch = plan.batch;
@@ -76,10 +77,7 @@ export function createFlowConnector(flowActionValue: string, runtime: ConnectRun
     new Map([
       [startNode.id, startNode],
       [endNode.id, endNode],
-      ...snapshot.connectorRecords.map((connector): [string, BaseNode] => [
-        connector.node.id,
-        connector.node,
-      ]),
+      ...routeFactSnapshot.existingConnectorNodesById,
     ]),
   );
   renderPlannedConnectorSet(runtime);

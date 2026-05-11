@@ -17,10 +17,7 @@ import {
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
 import { getVisibleBounds } from "../figma/runtime";
-import {
-  collectConnectorObstacles,
-  collectCurrentPageConnectorObstacleCandidates,
-} from "./obstacles";
+import { collectConnectorObstacles } from "./obstacles";
 
 export interface FlowConnectorCurrentPageRuntime {
   namespace: string;
@@ -42,12 +39,6 @@ export interface FlowConnectorValidationSnapshot extends FlowConnectorCurrentPag
   connectorObstacleCandidateNodes: SceneNode[];
   validationNodes: SceneNode[];
   validationNodesById: Map<string, SceneNode>;
-}
-
-export interface FlowConnectorAuthoringSnapshot extends FlowConnectorCurrentPageSnapshot {
-  endpoints: FlowConnectorAuthoringEndpointInput[];
-  existingConnectors: { nodeId: string; record: FlowConnectorRecord }[];
-  obstacles: ReturnType<typeof collectConnectorObstacles>;
 }
 
 export interface FlowConnectorRouteLayoutSnapshot extends FlowConnectorCurrentPageSnapshot {
@@ -136,30 +127,6 @@ export async function collectBoundedFlowConnectorValidationSnapshot(
     validationNodesById: new Map(
       validationNodes.map((node): [string, SceneNode] => [node.id, node]),
     ),
-  };
-}
-
-export function collectFlowConnectorAuthoringSnapshot(
-  endpoints: SceneNode[],
-  runtime: FlowConnectorCurrentPageRuntime,
-): FlowConnectorAuthoringSnapshot {
-  const snapshot = collectFlowConnectorCurrentPageSnapshot(runtime);
-  return {
-    ...snapshot,
-    endpoints: endpoints.map((endpoint) => toFlowConnectorAuthoringEndpoint(endpoint, runtime)),
-    existingConnectors: snapshot.connectorRecords.map((connector) => ({
-      nodeId: connector.node.id,
-      record: connector.record,
-    })),
-    obstacles:
-      endpoints.length === 2
-        ? collectConnectorObstacles(
-            endpoints[0],
-            endpoints[1],
-            runtime,
-            collectCurrentPageConnectorObstacleCandidates(),
-          )
-        : [],
   };
 }
 
@@ -318,6 +285,10 @@ function findFlowConnectorsContainer(
     }
   }
   return null;
+}
+
+function collectCurrentPageConnectorObstacleCandidates(): SceneNode[] {
+  return figma.currentPage.findAllWithCriteria({ types: ["FRAME"] });
 }
 
 async function getExistingSceneNodesById(

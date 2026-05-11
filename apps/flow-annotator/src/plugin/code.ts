@@ -151,7 +151,7 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   }
 
   if (message.type === "create-connector") {
-    const created = createFlowConnector(message.flowAction, connectRuntime);
+    const created = await createFlowConnector(message.flowAction, connectRuntime);
     selectAndZoom([created]);
     postStatus("success", "Created or updated one flow connector.");
     return;

@@ -16,19 +16,37 @@ import {
   readConnectorRefs,
   routeIntersectsRect,
   routeIsOrthogonal,
+  setValidationIndex,
 } from "./test-helpers.mjs";
 
-test("routes around a middle Context Frame and writes only the successful route cache", async () => {
+test("routes around indexed Context Frames and Annotation Cards without page frame discovery", async () => {
   const connect = await importConnectModule();
   const page = { type: "PAGE", id: "page", children: [], selection: [] };
   const start = createNode(page, "start", 0);
   const middleFrame = createNode(page, "middle-frame", 180);
-  const end = createNode(page, "end", 380);
+  const annotationCard = createNode(page, "annotation-card", 360);
+  const annotationBadge = createNode(page, "annotation-badge", 480);
+  const end = createNode(page, "end", 620);
+  const connectorsContainer = createNode(page, "connector-container", 0);
   const connectorGroups = [];
   const runtime = createRuntime(page, connectorGroups);
 
-  page.children = [start, middleFrame, end];
+  annotationCard.setSharedPluginData("figma_flow_annotator", "kind", "annotation-card");
+  annotationBadge.setSharedPluginData("figma_flow_annotator", "kind", "annotation-badge");
+  connectorsContainer.name = "FFA Connectors";
+  connectorsContainer.children = connectorGroups;
+  connectorsContainer.setSharedPluginData("figma_flow_annotator", "kind", "container");
+  setValidationIndex(connectorsContainer, {
+    annotationBadgeNodeIds: [annotationBadge.id],
+    annotationCardNodeIds: [annotationCard.id],
+    connectorObstacleCandidateNodeIds: [middleFrame.id, annotationCard.id, annotationBadge.id],
+    contextFrameIds: [middleFrame.id],
+  });
+  page.children = [start, middleFrame, annotationCard, annotationBadge, end, connectorsContainer];
   globalThis.figma = createFigmaStub(page, connectorGroups);
+  page.findAllWithCriteria = () => {
+    throw new Error("Create Flow Connector must not use page-level frame discovery.");
+  };
 
   connect.resetObservedEndpointSelection(runtime);
   page.selection = [start];
@@ -36,15 +54,59 @@ test("routes around a middle Context Frame and writes only the successful route 
   page.selection = [start, end];
   connect.handleSelectionChange(runtime);
 
-  connect.createFlowConnector("", runtime);
+  const created = await connect.createFlowConnector("", runtime);
 
-  const routePoints = readConnector(connectorGroups[0]).routeCache.points;
+  const routePoints = readConnector(created).routeCache.points;
   assert.equal(routeIsOrthogonal(routePoints), true);
   assert.equal(
     routeIntersectsRect(routePoints, expandRect(middleFrame.absoluteBoundingBox, 24)),
     false,
   );
-  assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ["start", "end"]);
+  assert.equal(
+    routeIntersectsRect(routePoints, expandRect(annotationCard.absoluteBoundingBox, 24)),
+    false,
+  );
+  assert.deepEqual(readConnectorEndpointIds(created), ["start", "end"]);
+});
+
+test("does not treat indexed Annotation Badges as Create Flow Connector obstacles", async () => {
+  const connect = await importConnectModule();
+  const page = { type: "PAGE", id: "page", children: [], selection: [] };
+  const start = createNode(page, "start", 0);
+  const annotationBadge = createNode(page, "annotation-badge", 180);
+  const end = createNode(page, "end", 400);
+  const annotationsContainer = createNode(page, "annotation-container", 0);
+  const connectorGroups = [];
+  const runtime = createRuntime(page, connectorGroups);
+
+  annotationBadge.setSharedPluginData("figma_flow_annotator", "kind", "annotation-badge");
+  annotationsContainer.name = "FFA Annotations";
+  annotationsContainer.setSharedPluginData("figma_flow_annotator", "kind", "container");
+  setValidationIndex(annotationsContainer, {
+    annotationBadgeNodeIds: [annotationBadge.id],
+    connectorObstacleCandidateNodeIds: [annotationBadge.id],
+  });
+  page.children = [start, annotationBadge, end, annotationsContainer];
+  globalThis.figma = createFigmaStub(page, connectorGroups);
+  page.findAllWithCriteria = () => {
+    throw new Error("Create Flow Connector must not use page-level frame discovery.");
+  };
+
+  connect.resetObservedEndpointSelection(runtime);
+  page.selection = [start];
+  connect.handleSelectionChange(runtime);
+  page.selection = [start, end];
+  connect.handleSelectionChange(runtime);
+
+  const created = await connect.createFlowConnector("", runtime);
+
+  assert.equal(
+    routeIntersectsRect(
+      readConnector(created).routeCache.points,
+      expandRect(annotationBadge.absoluteBoundingBox, 24),
+    ),
+    true,
+  );
 });
 
 test("fails connector creation atomically when no legal route exists", async () => {
@@ -58,6 +120,7 @@ test("fails connector creation atomically when no legal route exists", async () 
     createNode(page, "bottom-wall", -60),
   ];
   const end = createNode(page, "end", 320);
+  const annotationsContainer = createNode(page, "annotation-container", 0);
   const connectorGroups = [];
   const runtime = createRuntime(page, connectorGroups);
 
@@ -73,8 +136,17 @@ test("fails connector creation atomically when no legal route exists", async () 
     walls[index].width = rect.width;
     walls[index].height = rect.height;
   });
-  page.children = [start, ...walls, end];
+  annotationsContainer.name = "FFA Annotations";
+  annotationsContainer.setSharedPluginData("figma_flow_annotator", "kind", "container");
+  setValidationIndex(annotationsContainer, {
+    connectorObstacleCandidateNodeIds: walls.map((wall) => wall.id),
+    contextFrameIds: walls.map((wall) => wall.id),
+  });
+  page.children = [start, ...walls, end, annotationsContainer];
   globalThis.figma = createFigmaStub(page, connectorGroups);
+  page.findAllWithCriteria = () => {
+    throw new Error("Create Flow Connector must not use page-level frame discovery.");
+  };
 
   connect.resetObservedEndpointSelection(runtime);
   page.selection = [start];
@@ -82,7 +154,7 @@ test("fails connector creation atomically when no legal route exists", async () 
   page.selection = [start, end];
   connect.handleSelectionChange(runtime);
 
-  assert.throws(
+  await assert.rejects(
     () => connect.createFlowConnector("", runtime),
     /No legal Orthogonal Route avoids Connector Obstacles/,
   );
@@ -112,7 +184,7 @@ test("upserts an existing directed Flow Connector and keeps reverse direction se
   page.selection = [start, end];
   connect.handleSelectionChange(runtime);
 
-  connect.createFlowConnector("click", runtime);
+  await connect.createFlowConnector("click", runtime);
   assert.equal(connectorGroups.length, 1);
   assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ["start", "end"]);
   assert.equal(readConnector(connectorGroups[0]).flowAction, "click");
@@ -121,19 +193,19 @@ test("upserts an existing directed Flow Connector and keeps reverse direction se
     "connector",
   );
 
-  connect.createFlowConnector(" click ", runtime);
+  await connect.createFlowConnector(" click ", runtime);
   assert.equal(connectorGroups.length, 1);
   assert.equal(
     connectorGroups[0].getSharedPluginData("figma_flow_annotator", "connector"),
     unchangedConnectorData,
   );
 
-  connect.createFlowConnector("", runtime);
+  await connect.createFlowConnector("", runtime);
   assert.equal(connectorGroups.length, 1);
   assert.equal(readConnector(connectorGroups[0]).flowAction, null);
 
   connect.swapPendingConnectorEndpoints(runtime);
-  connect.createFlowConnector("", runtime);
+  await connect.createFlowConnector("", runtime);
   assert.equal(connectorGroups.length, 2);
   assert.deepEqual(readConnectorEndpointIds(connectorGroups[1]), ["end", "start"]);
   assert.deepEqual(readConnectorRefs(start), ["connector-1", "connector-2"]);
@@ -156,7 +228,7 @@ test("reports Connect preview and existing directed connector status from projec
   connect.handleSelectionChange(runtime);
   page.selection = [start, end];
   connect.handleSelectionChange(runtime);
-  connect.createFlowConnector("choose", runtime);
+  await connect.createFlowConnector("choose", runtime);
 
   const state = connect.getConnectSelectionState(runtime);
 
@@ -189,7 +261,7 @@ test("regenerates trunked connector labels on branch segments after shared-end c
   connect.handleSelectionChange(runtime);
   page.selection = [startA, end];
   connect.handleSelectionChange(runtime);
-  connect.createFlowConnector("from A", runtime);
+  await connect.createFlowConnector("from A", runtime);
 
   page.selection = [];
   connect.resetObservedEndpointSelection(runtime);
@@ -197,7 +269,7 @@ test("regenerates trunked connector labels on branch segments after shared-end c
   connect.handleSelectionChange(runtime);
   page.selection = [startB, end];
   connect.handleSelectionChange(runtime);
-  connect.createFlowConnector("from B", runtime);
+  await connect.createFlowConnector("from B", runtime);
 
   assert.equal(connectorGroups.length, 2);
   const firstRoute = readConnector(connectorGroups[0]).routeCache.points;
@@ -231,7 +303,7 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   connect.handleSelectionChange(runtime);
   page.selection = [start, end];
   connect.handleSelectionChange(runtime);
-  connect.createFlowConnector("click", runtime);
+  await connect.createFlowConnector("click", runtime);
 
   page.selection = [];
   connect.resetObservedEndpointSelection(runtime);
@@ -239,7 +311,7 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   connect.handleSelectionChange(runtime);
   page.selection = [start, alternateEnd];
   connect.handleSelectionChange(runtime);
-  connect.createFlowConnector("choose", runtime);
+  await connect.createFlowConnector("choose", runtime);
 
   const originalFindAllWithCriteria = page.findAllWithCriteria.bind(page);
   let obstacleDiscoveryCalls = 0;
@@ -305,7 +377,7 @@ test("preserves an existing Flow Connector route and record when refresh routing
   connect.handleSelectionChange(runtime);
   page.selection = [start, end];
   connect.handleSelectionChange(runtime);
-  connect.createFlowConnector("click", runtime);
+  await connect.createFlowConnector("click", runtime);
 
   const originalConnectorData = connectorGroups[0].getSharedPluginData(
     "figma_flow_annotator",
