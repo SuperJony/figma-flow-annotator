@@ -257,7 +257,7 @@ export function addFlowActionLabel(connector, rect, visible = true) {
   connector.children.push(label);
 }
 
-export function createFigmaStub(page, messages, scrollEvents = []) {
+export function createFigmaStub(page, messages, scrollEvents = [], notifications = []) {
   return {
     closePlugin: () => {},
     createFrame: () => createNode(null, "", 0),
@@ -265,7 +265,9 @@ export function createFigmaStub(page, messages, scrollEvents = []) {
     currentPage: page,
     getNodeByIdAsync: async (id) => page.__nodesById?.get(id) ?? null,
     loadFontAsync: async () => {},
-    notify: () => {},
+    notify: (message) => {
+      notifications.push(message);
+    },
     on: () => {},
     showUI: () => {},
     ui: {

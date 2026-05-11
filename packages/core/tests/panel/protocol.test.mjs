@@ -87,6 +87,30 @@ test("builds panel-facing selection, status, and report payloads", async () => {
     report,
   });
   assert.deepEqual(
+    core.buildPanelValidationOperationMessage({
+      message: "Validate Bindings is running.",
+      operation: "validate-bindings",
+      state: "running",
+    }),
+    {
+      type: "validation-operation",
+      operation: "validate-bindings",
+      state: "running",
+      message: "Validate Bindings is running.",
+    },
+  );
+  assert.deepEqual(
+    core.buildPanelValidationOperationMessage({
+      operation: "validate-bindings",
+      state: "idle",
+    }),
+    {
+      type: "validation-operation",
+      operation: "validate-bindings",
+      state: "idle",
+    },
+  );
+  assert.deepEqual(
     core.buildPanelSelectionStateMessage({
       connector: {
         endpoints: [

@@ -1,6 +1,7 @@
 import {
   buildPanelSelectionStateMessage,
   buildPanelStatusMessage,
+  buildPanelValidationOperationMessage,
   buildPanelValidationReportMessage,
   classifyPanelMessage,
   formatCleanStaleIndexesPanelStatus,
@@ -9,6 +10,7 @@ import {
   type PanelCommandMessage,
   type PanelMessageDispatch,
   type PanelStatusTone,
+  type PanelValidationOperation,
   type ValidationReport,
 } from "@figma-flow-annotator/core";
 import {
@@ -47,6 +49,7 @@ import {
 } from "../validation/commands";
 
 let validationTargetsByIssueId = new Map<string, string[]>();
+let activeValidationOperation: PanelValidationOperation | null = null;
 
 const connectRuntime: ConnectRuntime = {
   namespace: NAMESPACE,
@@ -173,37 +176,74 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   }
 
   if (message.type === "validate-bindings") {
-    const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
-    validationTargetsByIssueId = targetsByIssueId;
-    postValidationReport(report);
-    postStatus("success", `Validation found ${report.summary.all} issue(s).`);
+    await runValidationOperation(message.type, async () => {
+      const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
+      validationTargetsByIssueId = targetsByIssueId;
+      postValidationReport(report);
+      postStatus("success", `Validation found ${report.summary.all} issue(s).`);
+    });
     return;
   }
 
   if (message.type === "clean-stale-indexes") {
-    const result = await cleanStaleIndexes(connectRuntime);
-    if (result.kind === "repair-required") {
-      postStatus("error", result.message);
-      return;
-    }
-    const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
-    validationTargetsByIssueId = targetsByIssueId;
-    postValidationReport(report);
-    postStatus("success", formatCleanStaleIndexesPanelStatus(result));
+    await runValidationOperation(message.type, async () => {
+      const result = await cleanStaleIndexes(connectRuntime);
+      if (result.kind === "repair-required") {
+        postValidationOperationFailure(message.type, result.message);
+        postStatus("error", result.message, false);
+        return;
+      }
+      const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
+      validationTargetsByIssueId = targetsByIssueId;
+      postValidationReport(report);
+      postStatus("success", formatCleanStaleIndexesPanelStatus(result));
+    });
     return;
   }
 
   if (message.type === "deep-audit-repair-index") {
-    const result = deepAuditRepairValidationIndex(connectRuntime);
-    const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
-    validationTargetsByIssueId = targetsByIssueId;
-    postValidationReport(report);
-    postStatus("success", formatDeepAuditRepairIndexPanelStatus(result));
+    await runValidationOperation(message.type, async () => {
+      const result = deepAuditRepairValidationIndex(connectRuntime);
+      const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
+      validationTargetsByIssueId = targetsByIssueId;
+      postValidationReport(report);
+      postStatus("success", formatDeepAuditRepairIndexPanelStatus(result));
+    });
     return;
   }
 
   if (message.type === "locate-validation-issue") {
     await locateValidationIssue(message.issueId);
+  }
+}
+
+async function runValidationOperation(
+  operation: PanelValidationOperation,
+  action: () => Promise<void>,
+): Promise<void> {
+  if (activeValidationOperation !== null) {
+    postStatus(
+      "error",
+      `${formatValidationOperationLabel(activeValidationOperation)} is already running.`,
+      true,
+    );
+    return;
+  }
+
+  activeValidationOperation = operation;
+  const runningMessage = `${formatValidationOperationLabel(operation)} is running.`;
+  figma.notify(`${formatValidationOperationLabel(operation)} started.`);
+  postValidationOperation(operation, "running", runningMessage);
+
+  try {
+    await action();
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown plugin error.";
+    postValidationOperationFailure(operation, errorMessage);
+    postStatus("error", formatValidationOperationFailure(operation, errorMessage), false);
+  } finally {
+    activeValidationOperation = null;
+    postValidationOperation(operation, "idle");
   }
 }
 
@@ -228,11 +268,44 @@ function selectAndZoom(nodes: SceneNode[]): void {
   figma.viewport.scrollAndZoomIntoView(nodes);
 }
 
-function postStatus(tone: PanelStatusTone, message: string): void {
+function postStatus(tone: PanelStatusTone, message: string, notify = tone === "success"): void {
   const statusMessage = buildPanelStatusMessage(tone, message);
   figma.ui.postMessage(statusMessage);
-  if (statusMessage.tone === "success") {
+  if (notify) {
     figma.notify(message);
+  }
+}
+
+function postValidationOperation(
+  operation: PanelValidationOperation,
+  state: "running" | "idle",
+  message?: string,
+): void {
+  figma.ui.postMessage(buildPanelValidationOperationMessage({ message, operation, state }));
+}
+
+function postValidationOperationFailure(
+  operation: PanelValidationOperation,
+  errorMessage: string,
+): void {
+  figma.notify(formatValidationOperationFailure(operation, errorMessage));
+}
+
+function formatValidationOperationFailure(
+  operation: PanelValidationOperation,
+  errorMessage: string,
+): string {
+  return `${formatValidationOperationLabel(operation)} failed: ${errorMessage}`;
+}
+
+function formatValidationOperationLabel(operation: PanelValidationOperation): string {
+  switch (operation) {
+    case "validate-bindings":
+      return "Validate Bindings";
+    case "clean-stale-indexes":
+      return "Clean Stale Indexes";
+    case "deep-audit-repair-index":
+      return "Deep Audit Repair";
   }
 }
 

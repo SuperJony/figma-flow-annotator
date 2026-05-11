@@ -74,9 +74,24 @@ export interface PanelValidationReportMessage {
   report: ValidationReport;
 }
 
+export type PanelValidationOperation =
+  | "validate-bindings"
+  | "clean-stale-indexes"
+  | "deep-audit-repair-index";
+
+export type PanelValidationOperationState = "running" | "idle";
+
+export interface PanelValidationOperationMessage {
+  type: "validation-operation";
+  operation: PanelValidationOperation;
+  state: PanelValidationOperationState;
+  message?: string;
+}
+
 export type PanelOutboundMessage =
   | PanelSelectionStateMessage
   | PanelStatusMessage
+  | PanelValidationOperationMessage
   | PanelValidationReportMessage;
 
 export function classifyPanelMessage(message: unknown): PanelMessageDispatch {
@@ -159,6 +174,19 @@ export function buildPanelValidationReportMessage(
   return {
     type: "validation-report",
     report,
+  };
+}
+
+export function buildPanelValidationOperationMessage(input: {
+  message?: string;
+  operation: PanelValidationOperation;
+  state: PanelValidationOperationState;
+}): PanelValidationOperationMessage {
+  return {
+    type: "validation-operation",
+    operation: input.operation,
+    state: input.state,
+    ...(input.message === undefined ? {} : { message: input.message }),
   };
 }
 
