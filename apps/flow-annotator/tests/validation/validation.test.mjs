@@ -7,6 +7,7 @@ import {
   createNode,
   createPage,
   flushPluginMessage,
+  forbidPageFindAllWithCriteria,
   importCodeModule,
   moveNode,
   namespace,
@@ -111,6 +112,10 @@ test("validates Annotation bindings and locates validation issue nodes without s
   ];
   contextFrame.children = [subjectA, subjectB];
   page.children = [contextFrame, annotationsContainer];
+  forbidPageFindAllWithCriteria(
+    page,
+    "Validate Bindings must not call page-wide findAllWithCriteria for Annotation records.",
+  );
   globalThis.figma = createFigmaStub(page, messages, scrollEvents);
 
   await importCodeModule();
@@ -224,11 +229,11 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
 
   assert.deepEqual(
     page.selection.map((node) => node.id),
-    ["start-endpoint", "former-endpoint"],
+    ["start-endpoint"],
   );
   assert.deepEqual(
     scrollEvents.at(-1).map((node) => node.id),
-    ["start-endpoint", "former-endpoint"],
+    ["start-endpoint"],
   );
 
   messages.length = 0;
@@ -244,7 +249,10 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   assert.deepEqual(readConnectorRefs(start), ["connector-duplicate-a"]);
   assert.deepEqual(readConnectorRefs(end), ["connector-duplicate-a", "connector-duplicate-b"]);
   assert.deepEqual(readConnectorRefs(invalidEndpoint), ["connector-invalid"]);
-  assert.deepEqual(readConnectorRefs(formerEndpoint), ["connector-invalid"]);
+  assert.deepEqual(readConnectorRefs(formerEndpoint), [
+    "connector-deleted-root",
+    "connector-invalid",
+  ]);
   assert.equal(
     cleanReport.issues.some((issue) => issue.code === "connector-reverse-index-stale"),
     false,
@@ -260,7 +268,7 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   );
   assert.equal(
     cleanStatus.message,
-    "Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).",
+    "Cleaned stale indexes on 1 Flow Endpoint(s); removed 1 stale connector reference(s).",
   );
 });
 

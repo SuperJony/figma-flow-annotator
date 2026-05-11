@@ -91,7 +91,15 @@ export async function validateCurrentPageBindings(
 export async function cleanStaleIndexes(
   runtime: FlowConnectorCurrentPageRuntime,
 ): Promise<CleanStaleIndexesResult> {
-  const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(runtime);
+  const annotationsContainer = findContainer("FFA Annotations");
+  const cards =
+    annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
+  const badges =
+    annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
+  const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(
+    runtime,
+    collectAnnotationReferenceNodeIds(cards, badges),
+  );
   const batch = buildCleanStaleIndexesOperationBatch(toCleanStaleIndexesInput(connectorSnapshot));
 
   applyCleanStaleIndexesOperationBatch(

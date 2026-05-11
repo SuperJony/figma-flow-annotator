@@ -43,12 +43,19 @@ export function createPage() {
   page.selection = [];
   page.__page = page;
   page.__allNodes = new Set([page]);
+  page.__nodesById = new Map([[page.id, page]]);
   page.appendChild = (node) => {
     appendChild(page, node);
   };
   page.findAllWithCriteria = (criteria) =>
     [...page.__allNodes].filter((node) => matchesCriteria(node, criteria));
   return page;
+}
+
+export function forbidPageFindAllWithCriteria(page, message) {
+  page.findAllWithCriteria = () => {
+    throw new Error(message);
+  };
 }
 
 export function createNode(parent, id, x) {
@@ -232,7 +239,7 @@ export function createFigmaStub(page, messages, scrollEvents = []) {
     createFrame: () => createNode(null, "", 0),
     createText: createTextNode,
     currentPage: page,
-    getNodeByIdAsync: async (id) => findNodeById(page, id),
+    getNodeByIdAsync: async (id) => page.__nodesById?.get(id) ?? null,
     loadFontAsync: async () => {},
     notify: () => {},
     on: () => {},
@@ -271,6 +278,7 @@ function registerNode(parent, node) {
   }
   node.__page = page;
   page.__allNodes.add(node);
+  page.__nodesById.set(node.id, node);
   for (const child of node.children ?? []) {
     registerNode(node, child);
   }

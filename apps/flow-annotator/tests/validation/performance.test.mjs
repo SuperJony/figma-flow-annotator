@@ -6,9 +6,13 @@ import {
   createNode,
   createPage,
   flushPluginMessage,
+  forbidPageFindAllWithCriteria,
   importCodeModule,
+  moveNode,
   namespace,
   readConnectorRefs,
+  setBadgeRecord,
+  setCardRecord,
   setConnectorRecord,
   setConnectorRefs,
 } from "../support/plugin-test-helpers.mjs";
@@ -47,6 +51,10 @@ test("validates without scanning unrelated frame descendants", async () => {
   annotationsContainer.setSharedPluginData(namespace, "kind", "container");
   connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   page.children = [unrelatedFrame, annotationsContainer, connectorsContainer];
+  forbidPageFindAllWithCriteria(
+    page,
+    "Validate Bindings must not call page-wide findAllWithCriteria.",
+  );
   globalThis.figma = createFigmaStub(page, messages);
 
   await importCodeModule();
@@ -64,15 +72,41 @@ test("validates without scanning unrelated frame descendants", async () => {
   });
 });
 
-test("validates and cleans nested Stale Reverse Indexes without full-page traversal", async () => {
+test("validates and cleans explicitly referenced Stale Reverse Indexes without page-wide discovery", async () => {
   const page = createPage();
   const contextFrame = createNode(page, "context-frame", 0);
   const formerEndpoint = createNode(contextFrame, "former-endpoint", 20);
+  const annotationsContainer = createNode(page, "FFA Annotations", 500);
+  const card = createNode(annotationsContainer, "annotation-card", 540);
+  const badge = createNode(annotationsContainer, "annotation-badge", 580);
   const messages = [];
 
+  moveNode(card, { x: 0, y: 140, width: 280, height: 100 });
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  setCardRecord(card, 1, contextFrame.id);
+  card.setSharedPluginData(
+    namespace,
+    "annotation",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "annotation-1",
+      annotationNumber: 1,
+      body: "body 1",
+      contextFrameId: contextFrame.id,
+      subjectNodeIds: [formerEndpoint.id],
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+    }),
+  );
+  setBadgeRecord(badge, 1, formerEndpoint.id, contextFrame.id);
   setConnectorRefs(formerEndpoint, ["deleted-connector"]);
   contextFrame.children = [formerEndpoint];
-  page.children = [contextFrame];
+  annotationsContainer.children = [card, badge];
+  page.children = [contextFrame, annotationsContainer];
+  forbidPageFindAllWithCriteria(
+    page,
+    "Validate Bindings must not discover reverse refs with findAllWithCriteria.",
+  );
   globalThis.figma = createFigmaStub(page, messages);
 
   await importCodeModule();

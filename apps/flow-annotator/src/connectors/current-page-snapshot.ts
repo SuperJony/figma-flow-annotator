@@ -100,9 +100,8 @@ export async function collectBoundedFlowConnectorValidationSnapshot(
     nodeIds.add(connector.record.end.nodeId);
     nodeIds.add(connector.record.ownerContextFrameId);
   });
-  collectReverseReferenceNodes(currentPage, runtime.namespace).forEach((node) => {
-    nodeIds.add(node.id);
-  });
+  // Ordinary validation intentionally does not discover unknown reverse refs by scanning
+  // shared plugin data across the page. Deep audit/indexed repair nodes own that slower path.
 
   const pageNodes = await getExistingSceneNodesById(nodeIds, currentPage.id, getNodeByIdAsync);
   return {
@@ -277,15 +276,6 @@ function findFlowConnectorsContainer(
     }
   }
   return null;
-}
-
-function collectReverseReferenceNodes(page: PageNode, namespace: string): SceneNode[] {
-  return page.findAllWithCriteria({
-    sharedPluginData: {
-      keys: [SHARED_PLUGIN_DATA.keys.annotationRefs, SHARED_PLUGIN_DATA.keys.connectorRefs],
-      namespace,
-    },
-  });
 }
 
 async function getExistingSceneNodesById(
