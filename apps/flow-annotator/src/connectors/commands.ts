@@ -147,7 +147,7 @@ export async function refreshFlowConnectors(
     failedCount: failures.length,
     failures,
     refreshedCount: refreshedNodes.length,
-    selectedOnly: routeFactSnapshot.selectedOnly,
+    selectedOnly: layoutPlan.selectedOnly,
     nodes: refreshedNodes,
   };
 }

@@ -7,6 +7,7 @@ import type {
   UpdateFlowConnectorOperation,
 } from "@figma-flow-annotator/core";
 import type { FigmaFileOperationWriter } from "../figma/file-operations";
+import { CONNECTOR_ROUTE_NODE_NAME, FLOW_ACTION_LABEL_NODE_NAME } from "./visual-node-names";
 
 interface FlowConnectorVisualWriterRuntime {
   createText(
@@ -98,7 +99,7 @@ function createConnectorVisualNodes(
 
 function createConnectorRouteSvg(visual: ConnectorRouteVisualModel): FrameNode {
   const route = figma.createNodeFromSvg(visual.svg);
-  route.name = "FFA Connector Route";
+  route.name = CONNECTOR_ROUTE_NODE_NAME;
   route.x = visual.bounds.x;
   route.y = visual.bounds.y;
   route.clipsContent = false;
@@ -119,7 +120,7 @@ function createFlowActionLabel(
   );
   text.textAutoResize = "WIDTH_AND_HEIGHT";
 
-  label.name = "FFA Flow Action Label";
+  label.name = FLOW_ACTION_LABEL_NODE_NAME;
   label.fills = [hexToSolidPaint(visual.fill)];
   label.strokes = [hexToSolidPaint(visual.stroke)];
   label.strokeWeight = 1;

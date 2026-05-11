@@ -3,17 +3,11 @@ import {
   buildCleanStaleIndexesOperationBatch,
   buildRepairValidationStateOperationBatch,
   type CleanStaleIndexesOperationBatch,
-  CONNECTORS_CONTAINER_NAME,
-  createEmptyValidationIndexRecord,
-  decodeValidationIndexRecord,
   getValidationRepairStatus,
-  mergeValidationIndexRecord,
   runValidationComputation,
-  SHARED_PLUGIN_DATA,
   type ValidationIndexReadiness,
   type ValidationIndexRecord,
   type ValidationReport,
-  VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
 import {
   getAnnotationValidationBadges,
@@ -28,7 +22,8 @@ import {
   toFlowConnectorReferenceValidationInput,
 } from "../connectors/current-page-snapshot";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
-import { ensureContainer, findContainer } from "../figma/runtime";
+import { ensureContainer, findContainer, getExistingSceneNodesById } from "../figma/runtime";
+import { readMergedValidationIndexReadiness } from "../figma/validation-index";
 import { collectCurrentPageValidationSnapshot } from "./current-page-snapshot";
 
 export type CleanStaleIndexesResult =
@@ -79,7 +74,7 @@ async function collectIndexedFlowConnectorCleanupSnapshot(
 ): Promise<IndexedFlowConnectorCleanupSnapshotResult> {
   const currentPage = figma.currentPage;
   const getNodeByIdAsync = figma.getNodeByIdAsync.bind(figma);
-  const indexReadiness = readMergedValidationIndex(runtime);
+  const indexReadiness = readMergedValidationIndexReadiness(runtime);
   if (indexReadiness.kind !== "valid") {
     return {
       kind: "repair-required",
@@ -209,66 +204,6 @@ function ensureValidationIndexContainer(name: string): FrameNode {
   return container;
 }
 
-function readMergedValidationIndex(
-  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-):
-  | ({ kind: "valid"; index: ValidationIndexRecord } & ValidationIndexReadiness)
-  | Exclude<ValidationIndexReadiness, { kind: "valid" }> {
-  const containers = findValidationIndexContainers(runtime);
-  if (containers.length === 0) {
-    return { kind: "missing" };
-  }
-
-  const invalidSourceNodeIds: string[] = [];
-  const records: ValidationIndexRecord[] = [];
-  containers.forEach((container) => {
-    const raw = container.getSharedPluginData(
-      runtime.namespace,
-      SHARED_PLUGIN_DATA.keys.validationIndex,
-    );
-    if (raw.length === 0) {
-      return;
-    }
-    const record = decodeValidationIndexRecord(raw);
-    if (record === null) {
-      invalidSourceNodeIds.push(container.id);
-      return;
-    }
-    records.push(record);
-  });
-
-  if (invalidSourceNodeIds.length > 0) {
-    return { kind: "invalid", sourceNodeIds: invalidSourceNodeIds };
-  }
-  if (records.length === 0) {
-    return { kind: "missing" };
-  }
-
-  return {
-    kind: "valid",
-    index: records.reduce(
-      (merged, record) => mergeValidationIndexRecord(merged, record),
-      createEmptyValidationIndexRecord(),
-    ),
-  };
-}
-
-function findValidationIndexContainers(
-  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-): FrameNode[] {
-  return figma.currentPage.children.flatMap((child) => {
-    if (
-      child.type !== "FRAME" ||
-      (child.name !== ANNOTATIONS_CONTAINER_NAME && child.name !== CONNECTORS_CONTAINER_NAME) ||
-      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !==
-        VISUAL_NODE_KINDS.container
-    ) {
-      return [];
-    }
-    return [child];
-  });
-}
-
 async function getConnectorIndexInsufficiency(
   index: ValidationIndexRecord,
   connectorRecords: ReturnType<typeof collectFlowConnectorCurrentPageSnapshot>["connectorRecords"],
@@ -317,24 +252,6 @@ function collectValidationIndexNodeIds(index: ValidationIndexRecord): string[] {
     ...index.connectorRootNodeIds,
     ...index.connectorObstacleCandidateNodeIds,
   ];
-}
-
-async function getExistingSceneNodesById(
-  nodeIds: Iterable<string>,
-  currentPageId: string,
-  getNodeByIdAsync: (nodeId: string) => Promise<BaseNode | null>,
-): Promise<SceneNode[]> {
-  const nodes: SceneNode[] = [];
-  for (const nodeId of nodeIds) {
-    if (nodeId === currentPageId) {
-      continue;
-    }
-    const node = await getNodeByIdAsync(nodeId);
-    if (node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node) {
-      nodes.push(node as SceneNode);
-    }
-  }
-  return nodes;
 }
 
 async function getMissingNodeIds(

@@ -7,7 +7,6 @@ function routeEndpoint(id, bounds, contextFrameId = "context") {
   return {
     bounds,
     contextFrameId,
-    hasGeneratedAncestor: false,
     id,
     name: id,
   };

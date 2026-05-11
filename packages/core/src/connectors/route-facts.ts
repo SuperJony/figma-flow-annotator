@@ -3,8 +3,11 @@ import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
 import type { FlowEndpointInput } from "./operations.ts";
 import type { ConnectorObstacle } from "./routing.ts";
 
-export interface FlowConnectorRouteEndpointFact extends FlowEndpointInput {
+export interface FlowConnectorRouteGeometryEndpointFact extends FlowEndpointInput {
   bounds: RectLike;
+}
+
+export interface FlowConnectorRouteEndpointFact extends FlowConnectorRouteGeometryEndpointFact {
   hasGeneratedAncestor: boolean;
 }
 
@@ -36,8 +39,8 @@ export interface RefreshFlowConnectorRouteFacts {
 export interface ValidateFlowConnectorRouteConnectorFact {
   nodeId: string;
   record: FlowConnectorRecord;
-  start?: FlowConnectorRouteEndpointFact;
-  end?: FlowConnectorRouteEndpointFact;
+  start?: FlowConnectorRouteGeometryEndpointFact;
+  end?: FlowConnectorRouteGeometryEndpointFact;
   obstacles?: ConnectorObstacle[];
   labelRect?: RectLike;
 }

@@ -32,6 +32,7 @@ export async function collectCurrentPageValidationSnapshot(
     runtime,
     connectorSnapshot.connectorRecords,
     collectAnnotationObstacleCandidateNodeIds(cards, badges),
+    connectorSnapshot.validationNodes,
   );
   const validationNodes = connectorSnapshot.validationNodes;
   const allNodes = [currentPage, ...validationNodes];

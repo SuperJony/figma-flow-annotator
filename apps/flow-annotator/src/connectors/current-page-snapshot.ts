@@ -13,6 +13,7 @@ import {
   type ValidateFlowConnectorReferencesInput,
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
+import { getExistingSceneNodesById } from "../figma/runtime";
 
 export interface FlowConnectorCurrentPageRuntime {
   namespace: string;
@@ -197,27 +198,10 @@ function findFlowConnectorsContainer(
   return null;
 }
 
-async function getExistingSceneNodesById(
-  nodeIds: Iterable<string>,
-  currentPageId: string,
-  getNodeByIdAsync: (nodeId: string) => Promise<BaseNode | null>,
-): Promise<SceneNode[]> {
-  const nodes = await Promise.all(
-    [...new Set(nodeIds)]
-      .filter((nodeId) => nodeId !== currentPageId)
-      .map((nodeId) => getNodeByIdAsync(nodeId)),
-  );
-  return nodes.filter(isLiveSceneNode);
-}
-
 function addNodeIds(target: Set<string>, nodeIds: Iterable<string>): void {
   for (const nodeId of nodeIds) {
     target.add(nodeId);
   }
-}
-
-function isLiveSceneNode(node: BaseNode | null): node is SceneNode {
-  return node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node;
 }
 
 function isFlowEndpointEligibleNode(node: SceneNode, namespace: string): boolean {
