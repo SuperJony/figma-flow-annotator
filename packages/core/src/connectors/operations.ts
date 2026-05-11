@@ -45,6 +45,30 @@ export interface BuildRefreshFlowConnectorOperationBatchInput {
   startName: string;
 }
 
+export interface FlowConnectorValidationIndexNodeIds {
+  connectorObstacleCandidateNodeIds: string[];
+  contextFrameIds: string[];
+  flowEndpointNodeIds: string[];
+  ownerContextFrameIds: string[];
+}
+
+export function getFlowConnectorValidationIndexNodeIds(
+  record: FlowConnectorRecord,
+): FlowConnectorValidationIndexNodeIds {
+  const flowEndpointNodeIds = [record.start.nodeId, record.end.nodeId];
+  const contextFrameIds = [record.start.contextFrameId, record.end.contextFrameId];
+  return {
+    connectorObstacleCandidateNodeIds: [
+      ...flowEndpointNodeIds,
+      ...contextFrameIds,
+      record.ownerContextFrameId,
+    ],
+    contextFrameIds,
+    flowEndpointNodeIds,
+    ownerContextFrameIds: [record.ownerContextFrameId],
+  };
+}
+
 export function buildCreateFlowConnectorOperationBatch(
   input: BuildCreateFlowConnectorOperationBatchInput,
 ): CreateFlowConnectorOperationBatch {
@@ -308,22 +332,11 @@ function buildUpdateConnectorValidationIndexOperation(
     "connectorRootNodeRef" in input
       ? { kind: "created-node" as const, ref: input.connectorRootNodeRef }
       : { kind: "existing-node" as const, nodeId: input.connectorRootNodeId };
-  const endpointNodeIds = [record.start.nodeId, record.end.nodeId];
-  const contextFrameIds = [record.start.contextFrameId, record.end.contextFrameId];
   return {
     type: "update-validation-index",
     target: { kind: "container", ref: "connectors" },
     upsert: {
-      nodeIds: {
-        connectorObstacleCandidateNodeIds: [
-          ...endpointNodeIds,
-          ...contextFrameIds,
-          record.ownerContextFrameId,
-        ],
-        contextFrameIds,
-        flowEndpointNodeIds: endpointNodeIds,
-        ownerContextFrameIds: [record.ownerContextFrameId],
-      },
+      nodeIds: getFlowConnectorValidationIndexNodeIds(record),
       nodeTargets: {
         connectorRootNodeIds: [connectorRootTarget],
       },

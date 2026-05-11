@@ -337,18 +337,7 @@ test("reads connector snapshot facts from the provided namespace", async () => {
   generatedAncestor.children = [generatedEndpoint];
   connectorsContainer.children = [connectorRoot];
   page.children = [generatedAncestor, endpoint, connectorsContainer];
-  globalThis.figma = {
-    currentPage: page,
-    getNodeByIdAsync: async (id) => collectSceneNodes(page).find((node) => node.id === id) ?? null,
-  };
-  page.findAllWithCriteria = (criteria) =>
-    collectSceneNodes(page).filter(
-      (node) =>
-        node.type !== "PAGE" &&
-        criteria.sharedPluginData.keys.some(
-          (key) => node.getSharedPluginData(criteria.sharedPluginData.namespace, key).length > 0,
-        ),
-    );
+  globalThis.figma = createFigmaStub(page, []);
 
   const snapshot = await collectDeepAuditFlowConnectorCurrentPageSnapshot({ namespace });
   const input = toFlowConnectorReferenceValidationInput(snapshot);
@@ -364,20 +353,6 @@ test("reads connector snapshot facts from the provided namespace", async () => {
   assert.deepEqual(endpointInput.connectorIds, ["connector-endpoint"]);
   assert.equal(endpointInput.isEligibleFlowEndpoint, true);
 });
-
-function collectSceneNodes(root) {
-  const result = [];
-  const queue = [root];
-  while (queue.length > 0) {
-    const node = queue.shift();
-    if (node === undefined) {
-      continue;
-    }
-    result.push(node);
-    queue.push(...(node.children ?? []));
-  }
-  return result;
-}
 
 function createNamespacedNode(parent, id, type) {
   const sharedPluginData = new Map();

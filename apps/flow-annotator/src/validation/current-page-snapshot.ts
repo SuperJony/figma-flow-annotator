@@ -29,10 +29,10 @@ export async function collectCurrentPageValidationSnapshot(
     collectAnnotationReferenceNodeIds(cards, badges),
     collectAnnotationObstacleCandidateNodeIds(cards, badges),
   );
-  const pageNodes = connectorSnapshot.pageNodes;
-  const allNodes = [currentPage, ...pageNodes];
+  const validationNodes = connectorSnapshot.validationNodes;
+  const allNodes = [currentPage, ...validationNodes];
   const annotationNodeIds = new Set(collectAnnotationReferenceNodeIds(cards, badges));
-  const subjects = pageNodes.flatMap((node) => {
+  const subjects = validationNodes.flatMap((node) => {
     const annotationIds = readReferenceIds(
       node,
       SHARED_PLUGIN_DATA.keys.annotationRefs,

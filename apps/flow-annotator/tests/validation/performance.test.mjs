@@ -400,6 +400,8 @@ test("Deep Audit Repair keeps rebuilt Validation Index under the Figma plugin-da
     connectorIndexRaw.length < 100_000,
     `Validation Index entry length ${connectorIndexRaw.length} should stay below 100 kB.`,
   );
+  assert.deepEqual(connectorIndex.connectorObstacleCandidateNodeIds, [start.id, end.id]);
+  assert.deepEqual(connectorIndex.flowEndpointNodeIds, [start.id, end.id]);
   assert.equal(
     connectorIndex.connectorObstacleCandidateNodeIds.includes(unrelatedFrames[0].id),
     false,

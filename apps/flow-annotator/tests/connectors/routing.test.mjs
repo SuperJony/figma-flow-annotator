@@ -241,17 +241,28 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   connect.handleSelectionChange(runtime);
   connect.createFlowConnector("choose", runtime);
 
+  const originalFindAllWithCriteria = page.findAllWithCriteria.bind(page);
+  let obstacleDiscoveryCalls = 0;
+  page.findAllWithCriteria = (criteria) => {
+    if (criteria.types?.includes("FRAME")) {
+      obstacleDiscoveryCalls += 1;
+    }
+    return originalFindAllWithCriteria(criteria);
+  };
+
   const firstInitialRoute = readConnector(connectorGroups[0]).routeCache.points;
   const secondInitialRoute = readConnector(connectorGroups[1]).routeCache.points;
 
   moveNode(end, { x: 560, y: 0, width: 100, height: 100 });
   moveNode(alternateEnd, { x: 560, y: 220, width: 100, height: 100 });
   page.selection = [];
+  obstacleDiscoveryCalls = 0;
   const pageRefresh = await connect.refreshFlowConnectors(runtime);
 
   assert.equal(pageRefresh.selectedOnly, false);
   assert.equal(pageRefresh.refreshedCount, 2);
   assert.equal(pageRefresh.failedCount, 0);
+  assert.equal(obstacleDiscoveryCalls, 1);
   assert.notDeepEqual(readConnector(connectorGroups[0]).routeCache.points, firstInitialRoute);
   assert.notDeepEqual(readConnector(connectorGroups[1]).routeCache.points, secondInitialRoute);
 
@@ -261,11 +272,13 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   moveNode(end, { x: 700, y: 0, width: 100, height: 100 });
   moveNode(alternateEnd, { x: 700, y: 260, width: 100, height: 100 });
   page.selection = [connectorGroups[0]];
+  obstacleDiscoveryCalls = 0;
   const selectedRefresh = await connect.refreshFlowConnectors(runtime);
 
   assert.equal(selectedRefresh.selectedOnly, true);
   assert.equal(selectedRefresh.refreshedCount, 1);
   assert.equal(selectedRefresh.failedCount, 0);
+  assert.equal(obstacleDiscoveryCalls, 1);
   assert.deepEqual(
     selectedRefresh.nodes.map((node) => node.id),
     [connectorGroups[0].id],
