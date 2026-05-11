@@ -35,6 +35,7 @@ export interface FlowConnectorCurrentPageSnapshot {
 }
 
 export interface FullPageFlowConnectorCurrentPageSnapshot extends FlowConnectorCurrentPageSnapshot {
+  connectorObstacleCandidateNodes: SceneNode[];
   pageNodes: SceneNode[];
   pageNodesById: Map<string, SceneNode>;
 }
@@ -81,6 +82,7 @@ export function collectFullPageFlowConnectorCurrentPageSnapshot(
   const pageNodes = collectCurrentPageNodes();
   return {
     ...collectFlowConnectorCurrentPageSnapshot(runtime),
+    connectorObstacleCandidateNodes: pageNodes,
     pageNodes,
     pageNodesById: new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node])),
   };
@@ -89,23 +91,38 @@ export function collectFullPageFlowConnectorCurrentPageSnapshot(
 export async function collectBoundedFlowConnectorValidationSnapshot(
   runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
   candidateNodeIds: Iterable<string> = [],
+  obstacleCandidateNodeIds: Iterable<string> = [],
 ): Promise<FullPageFlowConnectorCurrentPageSnapshot> {
   const currentPage = figma.currentPage;
   const getNodeByIdAsync = figma.getNodeByIdAsync.bind(figma);
   const snapshot = collectFlowConnectorCurrentPageSnapshot(runtime);
   const nodeIds = new Set(candidateNodeIds);
+  const obstacleNodeIds = new Set([...nodeIds, ...obstacleCandidateNodeIds]);
 
   snapshot.connectorRecords.forEach((connector) => {
     nodeIds.add(connector.record.start.nodeId);
+    nodeIds.add(connector.record.start.contextFrameId);
     nodeIds.add(connector.record.end.nodeId);
+    nodeIds.add(connector.record.end.contextFrameId);
     nodeIds.add(connector.record.ownerContextFrameId);
+    obstacleNodeIds.add(connector.record.start.nodeId);
+    obstacleNodeIds.add(connector.record.start.contextFrameId);
+    obstacleNodeIds.add(connector.record.end.nodeId);
+    obstacleNodeIds.add(connector.record.end.contextFrameId);
+    obstacleNodeIds.add(connector.record.ownerContextFrameId);
   });
   // Ordinary validation intentionally does not discover unknown reverse refs by scanning
   // shared plugin data across the page. Deep audit/indexed repair nodes own that slower path.
 
   const pageNodes = await getExistingSceneNodesById(nodeIds, currentPage.id, getNodeByIdAsync);
+  const connectorObstacleCandidateNodes = await getExistingSceneNodesById(
+    obstacleNodeIds,
+    currentPage.id,
+    getNodeByIdAsync,
+  );
   return {
     ...snapshot,
+    connectorObstacleCandidateNodes,
     pageNodes,
     pageNodesById: new Map(pageNodes.map((node): [string, SceneNode] => [node.id, node])),
   };
@@ -221,7 +238,12 @@ export function toFlowConnectorRouteValidationInput(
       return {
         ...baseInput,
         endRect: getVisibleBounds(endNode),
-        obstacles: collectConnectorObstacles(startNode, endNode, runtime),
+        obstacles: collectConnectorObstacles(
+          startNode,
+          endNode,
+          runtime,
+          snapshot.connectorObstacleCandidateNodes,
+        ),
         startRect: getVisibleBounds(startNode),
       };
     },

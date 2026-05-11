@@ -13,14 +13,17 @@ export function collectConnectorObstacles(
   startNode: SceneNode,
   endNode: SceneNode,
   runtime: ConnectorObstacleRuntime,
+  candidates: Iterable<SceneNode> = figma.currentPage.findAllWithCriteria({ types: ["FRAME"] }),
 ): ConnectorObstacle[] {
   const obstacles: ConnectorObstacle[] = [];
   const obstacleRootIds = new Set<string>();
   const startAncestorIds = getAncestorIds(startNode);
   const endAncestorIds = getAncestorIds(endNode);
-  const candidates = figma.currentPage.findAllWithCriteria({ types: ["FRAME"] });
 
   for (const node of candidates) {
+    if (node.type !== "FRAME") {
+      continue;
+    }
     if (node === startNode || node === endNode) {
       continue;
     }

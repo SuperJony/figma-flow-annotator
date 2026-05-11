@@ -276,7 +276,9 @@ test("validates route, label, and trunk connector issues without shared report d
   const page = createPage();
   const startCrossing = createNode(page, "start-crossing", 0);
   const endCrossing = createNode(page, "end-crossing", 420);
-  const crossingObstacle = createNode(page, "middle-obstacle", 190);
+  const annotationsContainer = createNode(page, "FFA Annotations", 760);
+  const crossingObstacle = createNode(annotationsContainer, "middle-obstacle", 190);
+  const crossingBadge = createNode(annotationsContainer, "middle-badge", 250);
   const startFailure = createNode(page, "start-failure", 0);
   const endFailure = createNode(page, "end-failure", 320);
   const walls = [
@@ -314,6 +316,22 @@ test("validates route, label, and trunk connector issues without shared report d
     { x: -60, y: 400, width: 190, height: 50 },
   ].forEach((rect, index) => {
     moveNode(walls[index], rect);
+    walls[index].parent = annotationsContainer;
+    walls[index].setSharedPluginData(namespace, "kind", "annotation-card");
+    walls[index].setSharedPluginData(
+      namespace,
+      "annotation",
+      JSON.stringify({
+        schemaVersion: 1,
+        id: `annotation-wall-${index}`,
+        annotationNumber: index + 2,
+        body: `Routing wall ${index + 1}`,
+        contextFrameId: page.id,
+        subjectNodeIds: [startFailure.id],
+        createdAt: "2026-05-07T00:00:00.000Z",
+        updatedAt: "2026-05-07T00:00:00.000Z",
+      }),
+    );
   });
   moveNode(labelStartA, { x: 0, y: 620, width: 100, height: 100 });
   moveNode(labelEndA, { x: 220, y: 620, width: 100, height: 100 });
@@ -325,6 +343,23 @@ test("validates route, label, and trunk connector issues without shared report d
   moveNode(connectorsContainer, { x: 900, y: 0, width: 1, height: 1 });
 
   connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  setCardRecord(crossingObstacle, 1, page.id);
+  crossingObstacle.setSharedPluginData(
+    namespace,
+    "annotation",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "annotation-1",
+      annotationNumber: 1,
+      body: "Route obstacle card",
+      contextFrameId: page.id,
+      subjectNodeIds: [startCrossing.id],
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+    }),
+  );
+  setBadgeRecord(crossingBadge, 1, startCrossing.id, page.id);
   setConnectorRecord(
     crossingConnector,
     "connector-crossing",
@@ -366,12 +401,16 @@ test("validates route, label, and trunk connector issues without shared report d
     trunkConnectorA,
     trunkConnectorB,
   ];
+  annotationsContainer.children = [crossingObstacle, crossingBadge, ...walls];
+  forbidPageFindAllWithCriteria(
+    page,
+    "Validate Bindings must not call page-wide findAllWithCriteria for route obstacles.",
+  );
   page.children = [
     startCrossing,
-    crossingObstacle,
     endCrossing,
+    annotationsContainer,
     startFailure,
-    ...walls,
     endFailure,
     labelStartA,
     labelEndA,

@@ -42,6 +42,7 @@ export async function validateCurrentPageBindings(
   const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(
     runtime,
     collectAnnotationReferenceNodeIds(cards, badges),
+    collectAnnotationObstacleCandidateNodeIds(cards, badges),
   );
   const pageNodes = connectorSnapshot.pageNodes;
   const allNodes = [currentPage, ...pageNodes];
@@ -99,6 +100,7 @@ export async function cleanStaleIndexes(
   const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(
     runtime,
     collectAnnotationReferenceNodeIds(cards, badges),
+    collectAnnotationObstacleCandidateNodeIds(cards, badges),
   );
   const batch = buildCleanStaleIndexesOperationBatch(toCleanStaleIndexesInput(connectorSnapshot));
 
@@ -121,6 +123,13 @@ function collectAnnotationReferenceNodeIds(
     ...cards.flatMap((card) => [card.record.contextFrameId, ...card.record.subjectNodeIds]),
     ...badges.flatMap((badge) => [badge.record.contextFrameId, badge.record.subjectNodeId]),
   ];
+}
+
+function collectAnnotationObstacleCandidateNodeIds(
+  cards: ReturnType<typeof getAnnotationValidationCards>,
+  badges: ReturnType<typeof getAnnotationValidationBadges>,
+): string[] {
+  return [...cards.map((card) => card.nodeId), ...badges.map((badge) => badge.nodeId)];
 }
 
 function applyCleanStaleIndexesOperationBatch(

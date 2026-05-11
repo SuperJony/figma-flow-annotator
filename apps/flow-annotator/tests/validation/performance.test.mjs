@@ -184,3 +184,58 @@ test("validates connector routes without scanning unrelated group descendants", 
     false,
   );
 });
+
+test("validates multiple connector routes without repeated obstacle discovery", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "context-frame", 0);
+  const startA = createNode(contextFrame, "start-a", 0);
+  const endA = createNode(contextFrame, "end-a", 260);
+  const startB = createNode(contextFrame, "start-b", 0);
+  const endB = createNode(contextFrame, "end-b", 260);
+  const connectorsContainer = createNode(page, "FFA Connectors", 500);
+  const connectorA = createNode(connectorsContainer, "connector-root-a", 520);
+  const connectorB = createNode(connectorsContainer, "connector-root-b", 560);
+  const unrelatedFrame = createNode(page, "unrelated-large-frame", 900);
+  const messages = [];
+  let fullPageObstacleDiscoveryCalls = 0;
+
+  moveNode(startA, { x: 0, y: 0, width: 100, height: 100 });
+  moveNode(endA, { x: 260, y: 0, width: 100, height: 100 });
+  moveNode(startB, { x: 0, y: 180, width: 100, height: 100 });
+  moveNode(endB, { x: 260, y: 180, width: 100, height: 100 });
+  Object.defineProperty(unrelatedFrame, "children", {
+    get() {
+      throw new Error("Route validation must not scan unrelated frame descendants.");
+    },
+  });
+  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+  setConnectorRecord(connectorA, "connector-a", startA.id, endA.id, "A");
+  setConnectorRecord(connectorB, "connector-b", startB.id, endB.id, "B");
+
+  contextFrame.children = [startA, endA, startB, endB];
+  connectorsContainer.children = [connectorA, connectorB];
+  page.children = [contextFrame, connectorsContainer, unrelatedFrame];
+  page.findAllWithCriteria = () => {
+    fullPageObstacleDiscoveryCalls += 1;
+    return [];
+  };
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "validate-bindings" });
+  await flushPluginMessage(messages);
+
+  const reportMessage = messages.find((message) => message.type === "validation-report");
+  assert.ok(reportMessage);
+  assert.equal(fullPageObstacleDiscoveryCalls, 0);
+  assert.equal(
+    messages.some(
+      (message) =>
+        message.type === "status" &&
+        message.tone === "error" &&
+        message.message.includes("unrelated frame descendants"),
+    ),
+    false,
+  );
+});
