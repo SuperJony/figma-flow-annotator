@@ -216,8 +216,30 @@ export function formatDeepAuditRepairIndexPanelStatus(result: {
   cleanedEndpointCount: number;
   removedConnectorRefCount: number;
   repairedContainerCount: number;
+  validationReport?: ValidationReport;
 }): string {
-  return `Deep Audit Repair rebuilt the Validation Index on ${result.repairedContainerCount} container(s), cleaned ${result.cleanedEndpointCount} Flow Endpoint(s), and removed ${result.removedConnectorRefCount} stale connector reference(s).`;
+  const repairStatus = `Deep Audit Repair rebuilt the Validation Index on ${result.repairedContainerCount} container(s), cleaned ${result.cleanedEndpointCount} Flow Endpoint(s), and removed ${result.removedConnectorRefCount} stale connector reference(s).`;
+  if (result.validationReport === undefined) {
+    return repairStatus;
+  }
+  const remainingIssues = formatValidationIssueSummary(result.validationReport);
+  if (remainingIssues === "0 issue(s)") {
+    return `${repairStatus} Validation found 0 issue(s).`;
+  }
+  return `${repairStatus} Validation still reports ${remainingIssues}.`;
+}
+
+export function getDeepAuditRepairIndexPanelStatusTone(report: ValidationReport): PanelStatusTone {
+  return report.summary.errors > 0 ? "error" : "success";
+}
+
+function formatValidationIssueSummary(report: ValidationReport): string {
+  const parts = [
+    report.summary.errors === 0 ? null : `${report.summary.errors} error(s)`,
+    report.summary.warnings === 0 ? null : `${report.summary.warnings} warning(s)`,
+    report.summary.info === 0 ? null : `${report.summary.info} info issue(s)`,
+  ].filter((part): part is string => part !== null);
+  return parts.length === 0 ? "0 issue(s)" : parts.join(", ");
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

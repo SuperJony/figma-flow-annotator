@@ -356,7 +356,7 @@ test("Deep Audit Repair rebuilds the Validation Index and cleans unknown stale r
   assert.deepEqual(readConnectorRefs(unknownFormerEndpoint), []);
   assert.equal(
     repairStatus.message,
-    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 1 Flow Endpoint(s), and removed 1 stale connector reference(s).",
+    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 1 Flow Endpoint(s), and removed 1 stale connector reference(s). Validation found 0 issue(s).",
   );
   assert.deepEqual(readValidationIndex(connectorsContainer).flowEndpointNodeIds, [
     start.id,

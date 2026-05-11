@@ -8,6 +8,7 @@ import {
   flushPluginMessage,
   importCodeModule,
   namespace,
+  setConnectorRecord,
   setValidationIndex,
 } from "../support/plugin-test-helpers.mjs";
 
@@ -136,6 +137,44 @@ test("cleanup repair-required results notify failure without changing the panel 
   assert.deepEqual(notifications, [
     "Clean Stale Indexes started.",
     `Clean Stale Indexes failed: ${repairMessage}`,
+  ]);
+});
+
+test("deep audit repair reports remaining validation errors after rebuilding the index", async () => {
+  const page = createPage();
+  const liveEndpoint = createNode(page, "live-endpoint", 120);
+  const connectorsContainer = createNode(page, "FFA Connectors", 800);
+  const orphanConnector = createNode(connectorsContainer, "connector-orphan-root", 840);
+  const messages = [];
+  const notifications = [];
+
+  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
+  setConnectorRecord(orphanConnector, "connector-orphan", "deleted-start", liveEndpoint.id, "open");
+  connectorsContainer.children = [orphanConnector];
+  page.children = [liveEndpoint, connectorsContainer];
+  globalThis.figma = createFigmaStub(page, messages, [], notifications);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
+  await flushPluginMessage(messages);
+
+  const reportMessage = messages.find((message) => message.type === "validation-report");
+  const statusMessage = messages.find((message) => message.type === "status");
+
+  assert.ok(reportMessage);
+  assert.deepEqual(
+    reportMessage.report.issues.map((issue) => issue.code),
+    ["flow-connector-orphaned"],
+  );
+  assert.equal(statusMessage.tone, "error");
+  assert.equal(
+    statusMessage.message,
+    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).",
+  );
+  assert.deepEqual(notifications, [
+    "Deep Audit Repair started.",
+    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).",
   ]);
 });
 
