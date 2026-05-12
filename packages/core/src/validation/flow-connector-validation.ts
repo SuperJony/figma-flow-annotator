@@ -156,7 +156,7 @@ export function validateFlowConnectorRouteGeometry(
       }
       return routeIntersectsObstacles(
         routePoints,
-        connector.obstacles.map((obstacle) => obstacle.rect),
+        (connector.obstacles ?? []).map((obstacle) => obstacle.rect),
       );
     })
     .map((connector) => connector.nodeId);
@@ -172,15 +172,15 @@ export function validateFlowConnectorRouteGeometry(
   const routingFailureTargets: string[] = [];
   const refreshableTargets: string[] = [];
   input.connectors.forEach((connector) => {
-    if (connector.startRect === undefined || connector.endRect === undefined) {
+    if (connector.start === undefined || connector.end === undefined) {
       return;
     }
 
     try {
       const refreshedRoute = routeOrthogonalConnector({
-        startRect: connector.startRect,
-        endRect: connector.endRect,
-        obstacles: connector.obstacles,
+        startRect: connector.start.bounds,
+        endRect: connector.end.bounds,
+        obstacles: connector.obstacles ?? [],
       });
       if (
         connector.record.routeCache !== undefined &&

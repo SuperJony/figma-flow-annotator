@@ -167,12 +167,24 @@ export function readableName(name: string): string {
 }
 
 export async function getExistingSceneNodes(nodeIds: string[]): Promise<SceneNode[]> {
-  const nodes: SceneNode[] = [];
-  for (const nodeId of nodeIds) {
-    const node = await figma.getNodeByIdAsync(nodeId);
-    if (node !== null && node.type !== "PAGE" && "absoluteBoundingBox" in node) {
-      nodes.push(node as SceneNode);
-    }
-  }
-  return nodes;
+  return getExistingSceneNodesById(nodeIds);
+}
+
+export async function getExistingSceneNodesById(
+  nodeIds: Iterable<string>,
+  currentPageId = figma.currentPage.id,
+  getNodeByIdAsync: (nodeId: string) => Promise<BaseNode | null> = figma.getNodeByIdAsync.bind(
+    figma,
+  ),
+): Promise<SceneNode[]> {
+  const nodes = await Promise.all(
+    [...new Set(nodeIds)]
+      .filter((nodeId) => nodeId !== currentPageId)
+      .map((nodeId) => getNodeByIdAsync(nodeId)),
+  );
+  return nodes.filter(isLiveSceneNode);
+}
+
+function isLiveSceneNode(node: BaseNode | null): node is SceneNode {
+  return node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node;
 }

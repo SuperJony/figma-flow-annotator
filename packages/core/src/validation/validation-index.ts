@@ -91,36 +91,36 @@ export function serializeValidationIndexRecord(record: ValidationIndexRecord): s
   return JSON.stringify(createValidationIndexRecord(record));
 }
 
-export function describeValidationIndexReadiness(readiness: ValidationIndexReadiness): string {
+export function describeValidationDataReadiness(readiness: ValidationIndexReadiness): string {
   if (readiness.kind === "valid") {
-    return "Validation Index is valid.";
+    return "Validation data is ready.";
   }
 
   if (readiness.kind === "missing") {
-    return "Validation Index is missing.";
+    return "Validation data is missing.";
   }
 
   if (readiness.kind === "invalid") {
-    return `Validation Index is invalid on ${readiness.sourceNodeIds.length} container(s).`;
+    return `Validation data is unreadable in ${readiness.sourceNodeIds.length} project area(s).`;
   }
 
   if (readiness.kind === "stale") {
-    return `Validation Index references ${readiness.missingNodeIds.length} deleted node(s).`;
+    return `Validation data references ${readiness.missingNodeIds.length} deleted object(s).`;
   }
 
   const missingCount = Object.values(readiness.missingFieldIds).reduce(
     (count, ids) => count + (ids?.length ?? 0),
     0,
   );
-  return `Validation Index is missing ${missingCount} known validation input(s).`;
+  return `Validation data is missing ${missingCount} known project object(s).`;
 }
 
-export function getValidationIndexRepairStatus(readiness: ValidationIndexReadiness): string {
+export function getValidationRepairStatus(readiness: ValidationIndexReadiness): string {
   if (readiness.kind === "valid") {
-    return "Validation Index is ready for indexed cleanup.";
+    return "Validation data is ready for cleanup.";
   }
 
-  return `${describeValidationIndexReadiness(readiness)} Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.`;
+  return `${describeValidationDataReadiness(readiness)} Run Repair Validation State before cleaning stale connector references.`;
 }
 
 function mergeIds(existing: string[], next: string[] = []): string[] {

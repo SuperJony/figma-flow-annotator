@@ -121,7 +121,7 @@ export interface FigmaFileOperationBatch {
     | "create-flow-connector"
     | "refresh-flow-connector"
     | "clean-stale-indexes"
-    | "deep-audit-repair-index";
+    | "repair-validation-state";
   operations: FigmaFileOperation[];
 }
 

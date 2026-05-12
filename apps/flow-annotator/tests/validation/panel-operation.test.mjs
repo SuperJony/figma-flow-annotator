@@ -70,35 +70,35 @@ test("failed validation operations notify and return the panel to idle", async (
 
   globalThis.figma = createFigmaStub(page, messages, [], notifications);
   globalThis.figma.createFrame = () => {
-    throw new Error("Unable to create Validation Index containers.");
+    throw new Error("Unable to create validation containers.");
   };
 
   await importCodeModule();
 
-  globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
+  globalThis.figma.ui.onmessage({ type: "repair-validation-state" });
   await flushPluginMessage(messages);
 
   const statusMessage = messages.find((message) => message.type === "status");
 
   assert.deepEqual(readOperationMessages(messages), [
     {
-      operation: "deep-audit-repair-index",
+      operation: "repair-validation-state",
       state: "running",
-      message: "Deep Audit Repair is running.",
+      message: "Repair Validation State is running.",
     },
     {
-      operation: "deep-audit-repair-index",
+      operation: "repair-validation-state",
       state: "idle",
     },
   ]);
   assert.equal(statusMessage.tone, "error");
   assert.equal(
     statusMessage.message,
-    "Deep Audit Repair failed: Unable to create Validation Index containers.",
+    "Repair Validation State failed: Unable to create validation containers.",
   );
   assert.deepEqual(notifications, [
-    "Deep Audit Repair started.",
-    "Deep Audit Repair failed: Unable to create Validation Index containers.",
+    "Repair Validation State started.",
+    "Repair Validation State failed: Unable to create validation containers.",
   ]);
 });
 
@@ -119,7 +119,7 @@ test("cleanup repair-required results notify failure without changing the panel 
 
   const statusMessage = messages.find((message) => message.type === "status");
   const repairMessage =
-    "Validation Index is missing. Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.";
+    "Validation data is missing. Run Repair Validation State before cleaning stale connector references.";
 
   assert.deepEqual(readOperationMessages(messages), [
     {
@@ -134,13 +134,14 @@ test("cleanup repair-required results notify failure without changing the panel 
   ]);
   assert.equal(statusMessage.tone, "error");
   assert.equal(statusMessage.message, repairMessage);
+  assert.equal(statusMessage.validationRepairRequired, true);
   assert.deepEqual(notifications, [
     "Clean Stale Indexes started.",
     `Clean Stale Indexes failed: ${repairMessage}`,
   ]);
 });
 
-test("deep audit repair reports remaining validation errors after rebuilding the index", async () => {
+test("repair validation state reports remaining validation errors after rebuilding validation data", async () => {
   const page = createPage();
   const liveEndpoint = createNode(page, "live-endpoint", 120);
   const connectorsContainer = createNode(page, "FFA Connectors", 800);
@@ -156,11 +157,11 @@ test("deep audit repair reports remaining validation errors after rebuilding the
 
   await importCodeModule();
 
-  globalThis.figma.ui.onmessage({ type: "deep-audit-repair-index" });
+  globalThis.figma.ui.onmessage({ type: "repair-validation-state" });
   await flushPluginMessage(messages);
 
   const expectedStatus =
-    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).";
+    "Repair Validation State refreshed project validation data, cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).";
   const reportMessage = messages.find((message) => message.type === "validation-report");
   const statusMessage = messages.find((message) => message.type === "status");
 
@@ -171,7 +172,7 @@ test("deep audit repair reports remaining validation errors after rebuilding the
   );
   assert.equal(statusMessage.tone, "error");
   assert.equal(statusMessage.message, expectedStatus);
-  assert.deepEqual(notifications, ["Deep Audit Repair started.", expectedStatus]);
+  assert.deepEqual(notifications, ["Repair Validation State started.", expectedStatus]);
 });
 
 function readOperationMessages(messages) {

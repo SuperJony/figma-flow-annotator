@@ -35,9 +35,9 @@ test("classifies panel messages into adapter dispatch decisions", async () => {
     kind: "command",
     command: { type: "validate-bindings" },
   });
-  assert.deepEqual(core.classifyPanelMessage({ type: "deep-audit-repair-index" }), {
+  assert.deepEqual(core.classifyPanelMessage({ type: "repair-validation-state" }), {
     kind: "command",
-    command: { type: "deep-audit-repair-index" },
+    command: { type: "repair-validation-state" },
   });
 });
 
@@ -177,15 +177,15 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
     "Cleaned stale indexes on 2 Flow Endpoint(s); removed 2 stale connector reference(s).",
   );
   assert.equal(
-    core.formatDeepAuditRepairIndexPanelStatus({
+    core.formatRepairValidationStatePanelStatus({
       cleanedEndpointCount: 2,
       removedConnectorRefCount: 2,
       repairedContainerCount: 2,
     }),
-    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 2 Flow Endpoint(s), and removed 2 stale connector reference(s).",
+    "Repair Validation State refreshed project validation data, cleaned 2 Flow Endpoint(s), and removed 2 stale connector reference(s).",
   );
   assert.equal(
-    core.formatDeepAuditRepairIndexPanelStatus({
+    core.formatRepairValidationStatePanelStatus({
       cleanedEndpointCount: 0,
       removedConnectorRefCount: 0,
       repairedContainerCount: 2,
@@ -195,10 +195,10 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
         issues: [],
       },
     }),
-    "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s), 2 warning(s).",
+    "Repair Validation State refreshed project validation data, cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s), 2 warning(s).",
   );
   assert.deepEqual(
-    core.buildDeepAuditRepairIndexPanelStatusMessage({
+    core.buildRepairValidationStatePanelStatusMessage({
       cleanedEndpointCount: 0,
       removedConnectorRefCount: 0,
       repairedContainerCount: 2,
@@ -212,7 +212,7 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
       type: "status",
       tone: "error",
       message:
-        "Deep Audit Repair rebuilt the Validation Index on 2 container(s), cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).",
+        "Repair Validation State refreshed project validation data, cleaned 0 Flow Endpoint(s), and removed 0 stale connector reference(s). Validation still reports 1 error(s).",
     },
   );
 });

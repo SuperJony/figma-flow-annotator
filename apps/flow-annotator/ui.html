@@ -307,7 +307,7 @@
     }
 
     #cleanStaleIndexes,
-    #deepAuditRepairIndex {
+    #repairValidationState {
       min-width: 126px;
     }
 
@@ -439,7 +439,7 @@
           <div class="actions">
             <button id="runValidation" class="primary" type="button">Validate Bindings</button>
             <button id="cleanStaleIndexes" type="button" disabled>Clean Stale Indexes</button>
-            <button id="deepAuditRepairIndex" type="button">Deep Audit Repair</button>
+            <button id="repairValidationState" type="button" hidden>Repair Validation State</button>
           </div>
         </div>
         <div class="validation-summary" aria-label="Validation summary">
@@ -477,7 +477,7 @@
     const swapConnector = document.getElementById('swapConnector');
     const runValidation = document.getElementById('runValidation');
     const cleanStaleIndexes = document.getElementById('cleanStaleIndexes');
-    const deepAuditRepairIndex = document.getElementById('deepAuditRepairIndex');
+    const repairValidationState = document.getElementById('repairValidationState');
     const closeButton = document.getElementById('close');
     const status = document.getElementById('status');
     const selection = document.getElementById('selection');
@@ -504,6 +504,7 @@
     let currentRoutingStatus = 'Select two Flow Endpoints to preview a Connector Route.';
     let activeFilter = 'all';
     let validationOperation = null;
+    let validationRepairRequired = false;
     let validationReport = {
       schemaVersion: 1,
       issues: [],
@@ -561,9 +562,9 @@
       }
     });
 
-    deepAuditRepairIndex.addEventListener('click', () => {
-      if (startValidationOperation('deep-audit-repair-index')) {
-        post({ type: 'deep-audit-repair-index' });
+    repairValidationState.addEventListener('click', () => {
+      if (startValidationOperation('repair-validation-state')) {
+        post({ type: 'repair-validation-state' });
       }
     });
 
@@ -604,7 +605,11 @@
       }
 
       if (message.type === 'status') {
+        if (typeof message.validationRepairRequired === 'boolean') {
+          validationRepairRequired = message.validationRepairRequired;
+        }
         setStatus(message.tone, message.message);
+        renderValidationControls();
         return;
       }
 
@@ -718,15 +723,16 @@
       runValidation.disabled = isRunning;
       cleanStaleIndexes.disabled =
         isRunning || !issues.some((issue) => issue.code === 'connector-reverse-index-stale');
-      deepAuditRepairIndex.disabled = isRunning;
+      repairValidationState.hidden = !validationRepairRequired;
+      repairValidationState.disabled = isRunning || !validationRepairRequired;
     }
 
     function formatValidationOperationLabel(operation) {
       if (operation === 'clean-stale-indexes') {
         return 'Clean Stale Indexes';
       }
-      if (operation === 'deep-audit-repair-index') {
-        return 'Deep Audit Repair';
+      if (operation === 'repair-validation-state') {
+        return 'Repair Validation State';
       }
       return 'Validate Bindings';
     }

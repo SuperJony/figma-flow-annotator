@@ -72,10 +72,6 @@ export function collectConnectorObstacles(
   return obstacles;
 }
 
-export function collectCurrentPageConnectorObstacleCandidates(): SceneNode[] {
-  return figma.currentPage.findAllWithCriteria({ types: ["FRAME"] });
-}
-
 function toObstacleRect(obstacle: ConnectorObstacle): RectLike {
   return obstacle.rect;
 }

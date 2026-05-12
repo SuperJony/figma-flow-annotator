@@ -1,28 +1,21 @@
 import type { CreateFlowConnectorOperationBatch } from "../figma-file/operation-types.ts";
-import type { RectLike } from "../shared/geometry.ts";
-import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
 import { flowConnectorMatchesDirectedPair } from "../shared/plugin-data.ts";
-import { buildCreateFlowConnectorOperationBatch, type FlowEndpointInput } from "./operations.ts";
-import type { ConnectorObstacle } from "./routing.ts";
+import { buildCreateFlowConnectorOperationBatch } from "./operations.ts";
+import type {
+  CreateFlowConnectorRouteFacts,
+  ExistingFlowConnectorRouteFact,
+  FlowConnectorRouteEndpointFact,
+} from "./route-facts.ts";
 import { routeOrthogonalConnector } from "./routing.ts";
 
-export interface FlowConnectorAuthoringEndpointInput extends FlowEndpointInput {
-  bounds: RectLike;
-  hasGeneratedAncestor: boolean;
-}
-
-export interface ExistingFlowConnectorAuthoringInput {
-  nodeId: string;
-  record: FlowConnectorRecord;
-}
+export type FlowConnectorAuthoringEndpointInput = FlowConnectorRouteEndpointFact;
+export type ExistingFlowConnectorAuthoringInput = ExistingFlowConnectorRouteFact;
 
 export interface PlanCreateFlowConnectorAuthoringInput {
   createConnectorId: () => string;
-  endpoints: FlowConnectorAuthoringEndpointInput[];
-  existingConnectors: ExistingFlowConnectorAuthoringInput[];
   flowAction: string;
   now: string;
-  obstacles: ConnectorObstacle[];
+  routeFacts: CreateFlowConnectorRouteFacts;
 }
 
 export interface CreateFlowConnectorAuthoringPlan {
@@ -34,14 +27,14 @@ export interface CreateFlowConnectorAuthoringPlan {
 export function planCreateFlowConnectorAuthoring(
   input: PlanCreateFlowConnectorAuthoringInput,
 ): CreateFlowConnectorAuthoringPlan {
-  const [start, end] = normalizeCreateEndpoints(input.endpoints);
+  const [start, end] = normalizeCreateEndpoints(input.routeFacts.endpoints);
   const routePoints = routeOrthogonalConnector({
     startRect: start.bounds,
     endRect: end.bounds,
-    obstacles: input.obstacles,
+    obstacles: input.routeFacts.obstacles,
   }).points;
   const existingConnector =
-    input.existingConnectors.find((connector) =>
+    input.routeFacts.existingConnectors.find((connector) =>
       flowConnectorMatchesDirectedPair(connector.record, start.id, end.id),
     ) ?? null;
   const batch = buildCreateFlowConnectorOperationBatch({

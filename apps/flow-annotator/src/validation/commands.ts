@@ -1,22 +1,13 @@
 import {
   ANNOTATIONS_CONTAINER_NAME,
   buildCleanStaleIndexesOperationBatch,
+  buildRepairValidationStateOperationBatch,
   type CleanStaleIndexesOperationBatch,
-  CONNECTORS_CONTAINER_NAME,
-  createEmptyValidationIndexRecord,
-  createValidationIndexRecord,
-  decodeValidationIndexRecord,
-  type FigmaFileOperationBatch,
-  getFlowConnectorValidationIndexNodeIds,
-  getValidationIndexRepairStatus,
-  mergeValidationIndexRecord,
+  getValidationRepairStatus,
   runValidationComputation,
-  type SetSharedPluginDataOperation,
-  SHARED_PLUGIN_DATA,
   type ValidationIndexReadiness,
   type ValidationIndexRecord,
   type ValidationReport,
-  VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
 import {
   getAnnotationValidationBadges,
@@ -28,9 +19,11 @@ import {
   type FlowConnectorCurrentPageRuntime,
   type FlowConnectorValidationSnapshot,
   toCleanStaleIndexesInput,
+  toFlowConnectorReferenceValidationInput,
 } from "../connectors/current-page-snapshot";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
-import { ensureContainer, findContainer, readReferenceIds } from "../figma/runtime";
+import { ensureContainer, findContainer, getExistingSceneNodesById } from "../figma/runtime";
+import { readMergedValidationIndexReadiness } from "../figma/validation-index";
 import { collectCurrentPageValidationSnapshot } from "./current-page-snapshot";
 
 export type CleanStaleIndexesResult =
@@ -45,7 +38,7 @@ export type CleanStaleIndexesResult =
       readiness: Exclude<ValidationIndexReadiness, { kind: "valid" }>;
     };
 
-export interface DeepAuditRepairIndexResult {
+export interface RepairValidationStateResult {
   cleanedEndpointCount: number;
   removedConnectorRefCount: number;
   repairedContainerCount: number;
@@ -81,7 +74,7 @@ async function collectIndexedFlowConnectorCleanupSnapshot(
 ): Promise<IndexedFlowConnectorCleanupSnapshotResult> {
   const currentPage = figma.currentPage;
   const getNodeByIdAsync = figma.getNodeByIdAsync.bind(figma);
-  const indexReadiness = readMergedValidationIndex(runtime);
+  const indexReadiness = readMergedValidationIndexReadiness(runtime);
   if (indexReadiness.kind !== "valid") {
     return {
       kind: "repair-required",
@@ -118,21 +111,11 @@ async function collectIndexedFlowConnectorCleanupSnapshot(
     currentPage.id,
     getNodeByIdAsync,
   );
-  const connectorObstacleCandidateNodes = await getExistingSceneNodesById(
-    indexReadiness.index.connectorObstacleCandidateNodeIds,
-    currentPage.id,
-    getNodeByIdAsync,
-  );
-
   return {
     kind: "snapshot",
     snapshot: {
       ...snapshot,
-      connectorObstacleCandidateNodes,
       validationNodes,
-      validationNodesById: new Map(
-        validationNodes.map((node): [string, SceneNode] => [node.id, node]),
-      ),
     },
   };
 }
@@ -144,7 +127,7 @@ export async function cleanStaleIndexes(
   if (indexedSnapshot.kind === "repair-required") {
     return {
       kind: "repair-required",
-      message: getValidationIndexRepairStatus(indexedSnapshot.readiness),
+      message: getValidationRepairStatus(indexedSnapshot.readiness),
       readiness: indexedSnapshot.readiness,
     };
   }
@@ -167,9 +150,9 @@ export async function cleanStaleIndexes(
   };
 }
 
-export async function deepAuditRepairValidationIndex(
+export async function repairValidationState(
   runtime: FlowConnectorCurrentPageRuntime,
-): Promise<DeepAuditRepairIndexResult> {
+): Promise<RepairValidationStateResult> {
   const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
   const cards =
     annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
@@ -177,10 +160,21 @@ export async function deepAuditRepairValidationIndex(
     annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
   const fullSnapshot = await collectDeepAuditFlowConnectorCurrentPageSnapshot(runtime);
   const cleanBatch = buildCleanStaleIndexesOperationBatch(toCleanStaleIndexesInput(fullSnapshot));
-  const repairBatch = buildDeepAuditRepairIndexOperationBatch({
-    annotationsIndex: buildAnnotationsValidationIndex(cards, badges),
+  const connectorReferenceInput = toFlowConnectorReferenceValidationInput(fullSnapshot);
+  const repairBatch = buildRepairValidationStateOperationBatch({
+    annotations: {
+      badges,
+      cards,
+    },
     cleanBatch,
-    connectorsIndex: buildConnectorsValidationIndex(fullSnapshot),
+    flowConnectors: {
+      connectors: fullSnapshot.connectorRecords.map((connector) => ({
+        nodeId: connector.node.id,
+        record: connector.record,
+      })),
+      endpoints: connectorReferenceInput.endpoints,
+      liveValidationNodeIds: fullSnapshot.validationNodes.map((node) => node.id),
+    },
   });
   const existingNodes = new Map(
     fullSnapshot.validationNodes.map((node): [string, BaseNode] => [node.id, node]),
@@ -198,7 +192,7 @@ export async function deepAuditRepairValidationIndex(
   return {
     cleanedEndpointCount: cleanBatch.cleanedEndpointNodeIds.length,
     removedConnectorRefCount: cleanBatch.removedConnectorIds.length,
-    repairedContainerCount: 2,
+    repairedContainerCount: repairBatch.repairedContainerRefs.length,
   };
 }
 
@@ -208,66 +202,6 @@ function ensureValidationIndexContainer(name: string): FrameNode {
     figma.currentPage.appendChild(container);
   }
   return container;
-}
-
-function readMergedValidationIndex(
-  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-):
-  | ({ kind: "valid"; index: ValidationIndexRecord } & ValidationIndexReadiness)
-  | Exclude<ValidationIndexReadiness, { kind: "valid" }> {
-  const containers = findValidationIndexContainers(runtime);
-  if (containers.length === 0) {
-    return { kind: "missing" };
-  }
-
-  const invalidSourceNodeIds: string[] = [];
-  const records: ValidationIndexRecord[] = [];
-  containers.forEach((container) => {
-    const raw = container.getSharedPluginData(
-      runtime.namespace,
-      SHARED_PLUGIN_DATA.keys.validationIndex,
-    );
-    if (raw.length === 0) {
-      return;
-    }
-    const record = decodeValidationIndexRecord(raw);
-    if (record === null) {
-      invalidSourceNodeIds.push(container.id);
-      return;
-    }
-    records.push(record);
-  });
-
-  if (invalidSourceNodeIds.length > 0) {
-    return { kind: "invalid", sourceNodeIds: invalidSourceNodeIds };
-  }
-  if (records.length === 0) {
-    return { kind: "missing" };
-  }
-
-  return {
-    kind: "valid",
-    index: records.reduce(
-      (merged, record) => mergeValidationIndexRecord(merged, record),
-      createEmptyValidationIndexRecord(),
-    ),
-  };
-}
-
-function findValidationIndexContainers(
-  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-): FrameNode[] {
-  return figma.currentPage.children.flatMap((child) => {
-    if (
-      child.type !== "FRAME" ||
-      (child.name !== ANNOTATIONS_CONTAINER_NAME && child.name !== CONNECTORS_CONTAINER_NAME) ||
-      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !==
-        VISUAL_NODE_KINDS.container
-    ) {
-      return [];
-    }
-    return [child];
-  });
 }
 
 async function getConnectorIndexInsufficiency(
@@ -320,24 +254,6 @@ function collectValidationIndexNodeIds(index: ValidationIndexRecord): string[] {
   ];
 }
 
-async function getExistingSceneNodesById(
-  nodeIds: Iterable<string>,
-  currentPageId: string,
-  getNodeByIdAsync: (nodeId: string) => Promise<BaseNode | null>,
-): Promise<SceneNode[]> {
-  const nodes: SceneNode[] = [];
-  for (const nodeId of nodeIds) {
-    if (nodeId === currentPageId) {
-      continue;
-    }
-    const node = await getNodeByIdAsync(nodeId);
-    if (node !== null && node.type !== "PAGE" && !node.removed && "absoluteBoundingBox" in node) {
-      nodes.push(node as SceneNode);
-    }
-  }
-  return nodes;
-}
-
 async function getMissingNodeIds(
   nodeIds: Iterable<string>,
   getNodeByIdAsync: (nodeId: string) => Promise<BaseNode | null>,
@@ -361,113 +277,5 @@ function applyCleanStaleIndexesOperationBatch(
     batch,
     existingNodes,
     namespace: runtime.namespace,
-  });
-}
-
-function buildDeepAuditRepairIndexOperationBatch(input: {
-  annotationsIndex: ValidationIndexRecord;
-  cleanBatch: CleanStaleIndexesOperationBatch;
-  connectorsIndex: ValidationIndexRecord;
-}): FigmaFileOperationBatch {
-  return {
-    schemaVersion: 1,
-    kind: "deep-audit-repair-index",
-    operations: [
-      {
-        type: "ensure-container",
-        ref: "annotations-container",
-        name: ANNOTATIONS_CONTAINER_NAME,
-      },
-      setContainerKindOperation("annotations-container"),
-      setValidationIndexOperation("annotations-container", input.annotationsIndex),
-      {
-        type: "ensure-container",
-        ref: "connectors-container",
-        name: CONNECTORS_CONTAINER_NAME,
-      },
-      setContainerKindOperation("connectors-container"),
-      setValidationIndexOperation("connectors-container", input.connectorsIndex),
-      ...input.cleanBatch.operations,
-    ],
-  };
-}
-
-function setContainerKindOperation(containerRef: string): SetSharedPluginDataOperation {
-  return {
-    type: "set-shared-plugin-data",
-    target: { kind: "container", ref: containerRef },
-    key: SHARED_PLUGIN_DATA.keys.kind,
-    value: VISUAL_NODE_KINDS.container,
-  };
-}
-
-function setValidationIndexOperation(
-  containerRef: string,
-  record: ValidationIndexRecord,
-): SetSharedPluginDataOperation {
-  return {
-    type: "set-shared-plugin-data",
-    target: { kind: "container", ref: containerRef },
-    key: SHARED_PLUGIN_DATA.keys.validationIndex,
-    value: record,
-  };
-}
-
-function buildAnnotationsValidationIndex(
-  cards: ReturnType<typeof getAnnotationValidationCards>,
-  badges: ReturnType<typeof getAnnotationValidationBadges>,
-): ValidationIndexRecord {
-  return createValidationIndexRecord({
-    annotationBadgeNodeIds: badges.map((badge) => badge.nodeId),
-    annotationCardNodeIds: cards.map((card) => card.nodeId),
-    connectorObstacleCandidateNodeIds: cards.map((card) => card.nodeId),
-    contextFrameIds: [
-      ...cards.map((card) => card.record.contextFrameId),
-      ...badges.map((badge) => badge.record.contextFrameId),
-    ],
-    subjectNodeIds: [
-      ...cards.flatMap((card) => card.record.subjectNodeIds),
-      ...badges.map((badge) => badge.record.subjectNodeId),
-    ],
-  });
-}
-
-function buildConnectorsValidationIndex(
-  snapshot: FlowConnectorValidationSnapshot,
-): ValidationIndexRecord {
-  const liveConnectorIds = new Set(
-    snapshot.connectorRecords.map((connector) => connector.record.id),
-  );
-  const connectorIndexNodeIds = snapshot.connectorRecords.map((connector) =>
-    getFlowConnectorValidationIndexNodeIds(connector.record),
-  );
-  const liveValidationNodeIds = (nodeIds: string[]) =>
-    nodeIds.filter((nodeId) => snapshot.validationNodesById.has(nodeId));
-  const endpointsWithLiveConnectorRefs = snapshot.validationNodes.flatMap((node) => {
-    const connectorIds = readReferenceIds(
-      node,
-      SHARED_PLUGIN_DATA.keys.connectorRefs,
-      "connectorIds",
-    );
-    return connectorIds.some((connectorId) => liveConnectorIds.has(connectorId)) ? [node.id] : [];
-  });
-
-  return createValidationIndexRecord({
-    connectorObstacleCandidateNodeIds: liveValidationNodeIds(
-      connectorIndexNodeIds.flatMap((nodeIds) => nodeIds.connectorObstacleCandidateNodeIds),
-    ),
-    connectorRootNodeIds: snapshot.connectorRecords.map((connector) => connector.node.id),
-    contextFrameIds: liveValidationNodeIds(
-      connectorIndexNodeIds.flatMap((nodeIds) => nodeIds.contextFrameIds),
-    ),
-    flowEndpointNodeIds: [
-      ...liveValidationNodeIds(
-        connectorIndexNodeIds.flatMap((nodeIds) => nodeIds.flowEndpointNodeIds),
-      ),
-      ...endpointsWithLiveConnectorRefs,
-    ],
-    ownerContextFrameIds: liveValidationNodeIds(
-      connectorIndexNodeIds.flatMap((nodeIds) => nodeIds.ownerContextFrameIds),
-    ),
   });
 }

@@ -238,6 +238,25 @@ export function readConnectorRefs(node) {
   return data.length === 0 ? [] : JSON.parse(data).connectorIds;
 }
 
+export function setValidationIndex(node, update) {
+  node.setSharedPluginData(
+    "figma_flow_annotator",
+    "validationIndex",
+    JSON.stringify({
+      schemaVersion: 1,
+      subjectNodeIds: [],
+      annotationCardNodeIds: [],
+      annotationBadgeNodeIds: [],
+      flowEndpointNodeIds: [],
+      contextFrameIds: [],
+      ownerContextFrameIds: [],
+      connectorRootNodeIds: [],
+      connectorObstacleCandidateNodeIds: [],
+      ...update,
+    }),
+  );
+}
+
 function ensurePageRegistry(page) {
   if (page.__allNodes !== undefined) {
     return;

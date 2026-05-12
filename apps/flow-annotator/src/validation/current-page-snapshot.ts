@@ -11,8 +11,8 @@ import {
   collectBoundedFlowConnectorValidationSnapshot,
   type FlowConnectorCurrentPageRuntime,
   toFlowConnectorReferenceValidationInput,
-  toFlowConnectorRouteValidationInput,
 } from "../connectors/current-page-snapshot";
+import { collectValidationFlowConnectorRouteFacts } from "../connectors/route-facts";
 import { findContainer, readReferenceIds } from "../figma/runtime";
 
 export async function collectCurrentPageValidationSnapshot(
@@ -27,7 +27,12 @@ export async function collectCurrentPageValidationSnapshot(
   const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(
     runtime,
     collectAnnotationReferenceNodeIds(cards, badges),
+  );
+  const flowConnectorRouteGeometry = await collectValidationFlowConnectorRouteFacts(
+    runtime,
+    connectorSnapshot.connectorRecords,
     collectAnnotationObstacleCandidateNodeIds(cards, badges),
+    connectorSnapshot.validationNodes,
   );
   const validationNodes = connectorSnapshot.validationNodes;
   const allNodes = [currentPage, ...validationNodes];
@@ -64,7 +69,7 @@ export async function collectCurrentPageValidationSnapshot(
       subjects,
     },
     flowConnectorReferences: toFlowConnectorReferenceValidationInput(connectorSnapshot),
-    flowConnectorRouteGeometry: toFlowConnectorRouteValidationInput(connectorSnapshot, runtime),
+    flowConnectorRouteGeometry,
   };
 }
 

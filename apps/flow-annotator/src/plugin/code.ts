@@ -1,9 +1,9 @@
 import {
-  buildDeepAuditRepairIndexPanelStatusMessage,
   buildPanelSelectionStateMessage,
   buildPanelStatusMessage,
   buildPanelValidationOperationMessage,
   buildPanelValidationReportMessage,
+  buildRepairValidationStatePanelStatusMessage,
   classifyPanelMessage,
   formatCleanStaleIndexesPanelStatus,
   formatRefreshConnectorsPanelStatus,
@@ -44,7 +44,7 @@ import {
 } from "../figma/runtime";
 import {
   cleanStaleIndexes,
-  deepAuditRepairValidationIndex,
+  repairValidationState,
   validateCurrentPageBindings,
 } from "../validation/commands";
 
@@ -151,7 +151,7 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   }
 
   if (message.type === "create-connector") {
-    const created = createFlowConnector(message.flowAction, connectRuntime);
+    const created = await createFlowConnector(message.flowAction, connectRuntime);
     selectAndZoom([created]);
     postStatus("success", "Created or updated one flow connector.");
     return;
@@ -190,28 +190,30 @@ async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
       const result = await cleanStaleIndexes(connectRuntime);
       if (result.kind === "repair-required") {
         postValidationOperationFailure(message.type, result.message);
-        postStatus("error", result.message, false);
+        postStatus("error", result.message, false, { validationRepairRequired: true });
         return;
       }
       const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
       validationTargetsByIssueId = targetsByIssueId;
       postValidationReport(report);
-      postStatus("success", formatCleanStaleIndexesPanelStatus(result));
+      postStatus("success", formatCleanStaleIndexesPanelStatus(result), true, {
+        validationRepairRequired: false,
+      });
     });
     return;
   }
 
-  if (message.type === "deep-audit-repair-index") {
+  if (message.type === "repair-validation-state") {
     await runValidationOperation(message.type, async () => {
-      const result = await deepAuditRepairValidationIndex(connectRuntime);
+      const result = await repairValidationState(connectRuntime);
       const { report, targetsByIssueId } = await validateCurrentPageBindings(connectRuntime);
       validationTargetsByIssueId = targetsByIssueId;
       postValidationReport(report);
-      const status = buildDeepAuditRepairIndexPanelStatusMessage({
+      const status = buildRepairValidationStatePanelStatusMessage({
         ...result,
         validationReport: report,
       });
-      postStatus(status.tone, status.message, true);
+      postStatus(status.tone, status.message, true, { validationRepairRequired: false });
     });
     return;
   }
@@ -272,8 +274,13 @@ function selectAndZoom(nodes: SceneNode[]): void {
   figma.viewport.scrollAndZoomIntoView(nodes);
 }
 
-function postStatus(tone: PanelStatusTone, message: string, notify = tone === "success"): void {
-  const statusMessage = buildPanelStatusMessage(tone, message);
+function postStatus(
+  tone: PanelStatusTone,
+  message: string,
+  notify = tone === "success",
+  options?: { validationRepairRequired?: boolean },
+): void {
+  const statusMessage = buildPanelStatusMessage(tone, message, options);
   figma.ui.postMessage(statusMessage);
   if (notify) {
     figma.notify(message);
@@ -308,8 +315,8 @@ function formatValidationOperationLabel(operation: PanelValidationOperation): st
       return "Validate Bindings";
     case "clean-stale-indexes":
       return "Clean Stale Indexes";
-    case "deep-audit-repair-index":
-      return "Deep Audit Repair";
+    case "repair-validation-state":
+      return "Repair Validation State";
   }
 }
 

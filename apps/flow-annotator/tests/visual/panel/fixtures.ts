@@ -131,8 +131,9 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     name: "validate-repair-required",
     status: {
       message:
-        "Validation Index is missing. Run Deep Audit Repair to rebuild the Validation Index before ordinary cleanup.",
+        "Validation data is missing. Run Repair Validation State before cleaning stale connector references.",
       tone: "error",
+      validationRepairRequired: true,
     },
   },
   {
@@ -392,7 +393,7 @@ export const panelFixtureDefinitions: PanelFixtureDefinition[] = [
     activeTab: "validate",
     name: "validate-failure",
     status: {
-      message: "Validate Bindings failed: Unable to read Validation Index.",
+      message: "Validate Bindings failed: Unable to read validation data.",
       tone: "error",
     },
     validationOperation: {
@@ -459,7 +460,9 @@ export async function loadPanelFixture(
   if (definition.status !== undefined) {
     await postPluginMessage(
       page,
-      buildPanelStatusMessage(definition.status.tone, definition.status.message),
+      buildPanelStatusMessage(definition.status.tone, definition.status.message, {
+        validationRepairRequired: definition.status.validationRepairRequired,
+      }),
     );
   }
 
