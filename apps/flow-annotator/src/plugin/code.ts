@@ -9,6 +9,7 @@ import {
   formatRefreshConnectorsPanelStatus,
   type PanelCommandMessage,
   type PanelMessageDispatch,
+  type PanelSelectionNodeInput,
   type PanelStatusTone,
   type PanelValidationOperation,
   type ValidationReport,
@@ -19,7 +20,7 @@ import {
   arrangeBadgesForSelectedSubjects,
   createAnnotations,
 } from "../annotations/commands";
-import { isAnnotationCardNode } from "../annotations/records";
+import { resolveAnnotationCardSelection } from "../annotations/records";
 import {
   type ConnectRuntime,
   createFlowConnector,
@@ -347,10 +348,21 @@ function postSelectionState(): void {
   figma.ui.postMessage(
     buildPanelSelectionStateMessage({
       connector: connectState,
-      selectedNodes: selected.map((node) => ({
-        hasGeneratedAncestor: hasGeneratedAncestor(node),
-        isAnnotationCard: isAnnotationCardNode(node),
-      })),
+      selectedNodes: buildPanelSelectionNodes(selected),
     }),
   );
+}
+
+function buildPanelSelectionNodes(selected: readonly SceneNode[]): PanelSelectionNodeInput[] {
+  const { annotationCards, otherSelectedNodes } = resolveAnnotationCardSelection(selected);
+  return [
+    ...otherSelectedNodes.map((selectionNode) => ({
+      hasGeneratedAncestor: selectionNode.hasGeneratedAncestor,
+      isAnnotationCard: false,
+    })),
+    ...annotationCards.map(() => ({
+      hasGeneratedAncestor: true,
+      isAnnotationCard: true,
+    })),
+  ];
 }
