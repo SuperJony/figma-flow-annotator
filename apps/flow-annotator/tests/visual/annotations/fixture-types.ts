@@ -38,6 +38,7 @@ export interface FigmaStub {
   createFrame(): FakeNode;
   createText(): FakeNode;
   currentPage: FakePageNode;
+  getNodeByIdAsync(nodeId: string): Promise<FakeNode | null>;
   loadFontAsync(): Promise<void>;
   notify(): void;
   on(): void;

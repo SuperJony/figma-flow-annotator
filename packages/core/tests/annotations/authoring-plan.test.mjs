@@ -79,3 +79,57 @@ test("falls back to Temporary Page Context and seeds the next Annotation Number"
     "set-shared-plugin-data",
   );
 });
+
+test("uses the outermost shared Context Frame for nested subject ancestry", async () => {
+  const core = await importCoreModule();
+  const plan = core.planCreateAnnotationAuthoring({
+    annotationId: "annotation-new",
+    body: "Nested note",
+    contextRecords: [
+      { schemaVersion: 1, contextFrameId: "screen", nextAnnotationNumber: 5 },
+      { schemaVersion: 1, contextFrameId: "inner-group", nextAnnotationNumber: 12 },
+    ],
+    existingAnnotationNumberSeeds: [],
+    now: "2026-05-12T00:00:00.000Z",
+    pageId: "page",
+    subjects: [
+      {
+        ancestorFrameIds: ["screen", "inner-group"],
+        bounds: { x: 0, y: 0, width: 100, height: 50 },
+        existingAnnotationRefCount: 0,
+        id: "subject-a",
+        name: "Subject A",
+      },
+    ],
+  });
+
+  assert.equal(plan.contextFrameId, "screen");
+  assert.equal(plan.annotationNumber, 5);
+});
+
+test("does not trust a stale context next Annotation Number below existing seeds", async () => {
+  const core = await importCoreModule();
+  const plan = core.planCreateAnnotationAuthoring({
+    annotationId: "annotation-new",
+    body: "Non-duplicate note",
+    contextRecords: [{ schemaVersion: 1, contextFrameId: "frame-common", nextAnnotationNumber: 2 }],
+    existingAnnotationNumberSeeds: [
+      { contextFrameId: "frame-common", annotationNumber: 1 },
+      { contextFrameId: "frame-common", annotationNumber: 3 },
+    ],
+    now: "2026-05-12T00:00:00.000Z",
+    pageId: "page",
+    subjects: [
+      {
+        ancestorFrameIds: ["frame-common"],
+        bounds: { x: 0, y: 0, width: 100, height: 50 },
+        existingAnnotationRefCount: 0,
+        id: "subject-a",
+        name: "Subject A",
+      },
+    ],
+  });
+
+  assert.equal(plan.contextFrameId, "frame-common");
+  assert.equal(plan.annotationNumber, 4);
+});

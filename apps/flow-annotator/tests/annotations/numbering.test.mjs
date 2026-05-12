@@ -148,6 +148,207 @@ test("creates an Annotation in the shared Context Frame with existing subject re
   assert.equal(contextRecord.nextAnnotationNumber, 10);
 });
 
+test("increments Annotation Numbers for separate child-frame annotations in one Context Frame", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "context-frame", 0);
+  const subjectA = createNode(contextFrame, "subject-a", 20);
+  const subjectB = createNode(contextFrame, "subject-b", 180);
+  const annotationsContainer = createNode(page, "FFA Annotations", 800);
+  const messages = [];
+
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  contextFrame.children = [subjectA, subjectB];
+  page.children = [contextFrame, annotationsContainer];
+  page.selection = [subjectA];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "First note" });
+  await flushPluginMessage(messages);
+
+  messages.length = 0;
+  page.selection = [subjectB];
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "Second note" });
+  await flushPluginMessage(messages);
+
+  const createdRecords = annotationsContainer.children
+    .filter((child) => child.getSharedPluginData(namespace, "kind") === "annotation-card")
+    .map((card) => JSON.parse(card.getSharedPluginData(namespace, "annotation")));
+  const secondRecord = createdRecords.find((record) => record.subjectNodeIds.includes(subjectB.id));
+  const contextRecord = JSON.parse(contextFrame.getSharedPluginData(namespace, "context"));
+  const status = messages.find(
+    (message) => message.type === "status" && message.tone === "success",
+  );
+
+  assert.deepEqual(
+    createdRecords.map((record) => record.annotationNumber),
+    [1, 2],
+  );
+  assert.equal(secondRecord.contextFrameId, contextFrame.id);
+  assert.equal(contextRecord.nextAnnotationNumber, 3);
+  assert.equal(status.message, "Created annotation #2 with 1 badge(s).");
+});
+
+test("numbers nested-frame annotations from the top-level Context Frame and legacy card seeds", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "group-chat-screen", 0);
+  const head = createNode(contextFrame, "head", 20);
+  const existingSubject = createNode(head, "existing-subject", 40);
+  const inputGroup = createNode(contextFrame, "input-group", 180);
+  const newSubject = createNode(inputGroup, "new-subject", 220);
+  const annotationsContainer = createNode(page, "FFA Annotations", 800);
+  const legacyInnerContextCard = createNode(annotationsContainer, "FFA Annotation Card #1", 820);
+  const legacyPageContextCard = createNode(annotationsContainer, "FFA Annotation Card #2", 860);
+  const messages = [];
+
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  legacyInnerContextCard.setSharedPluginData(namespace, "kind", "annotation-card");
+  legacyInnerContextCard.setSharedPluginData(
+    namespace,
+    "annotation",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "annotation-legacy-inner-context",
+      annotationNumber: 1,
+      body: "legacy inner context body",
+      contextFrameId: head.id,
+      subjectNodeIds: [existingSubject.id],
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:00.000Z",
+    }),
+  );
+  legacyPageContextCard.setSharedPluginData(namespace, "kind", "annotation-card");
+  legacyPageContextCard.setSharedPluginData(
+    namespace,
+    "annotation",
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "annotation-legacy-page-context",
+      annotationNumber: 2,
+      body: "legacy page context body",
+      contextFrameId: page.id,
+      subjectNodeIds: [contextFrame.id],
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:00.000Z",
+    }),
+  );
+
+  head.children = [existingSubject];
+  inputGroup.children = [newSubject];
+  contextFrame.children = [head, inputGroup];
+  annotationsContainer.children = [legacyInnerContextCard, legacyPageContextCard];
+  page.children = [contextFrame, annotationsContainer];
+  page.selection = [newSubject];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "New nested note" });
+  await flushPluginMessage(messages);
+
+  const createdCards = annotationsContainer.children.filter(
+    (child) =>
+      child.getSharedPluginData(namespace, "kind") === "annotation-card" &&
+      child !== legacyInnerContextCard &&
+      child !== legacyPageContextCard,
+  );
+  const createdRecord = JSON.parse(createdCards[0].getSharedPluginData(namespace, "annotation"));
+  const contextRecord = JSON.parse(contextFrame.getSharedPluginData(namespace, "context"));
+  const status = messages.find(
+    (message) => message.type === "status" && message.tone === "success",
+  );
+
+  assert.equal(createdRecord.annotationNumber, 3);
+  assert.equal(createdRecord.contextFrameId, contextFrame.id);
+  assert.deepEqual(createdRecord.subjectNodeIds, [newSubject.id]);
+  assert.equal(contextRecord.nextAnnotationNumber, 4);
+  assert.equal(status.message, "Created annotation #3 with 1 badge(s).");
+});
+
+test("reuses a matching Annotation Body in the same top-level Context Frame", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "group-chat-screen", 0);
+  const subjectA = createNode(contextFrame, "subject-a", 20);
+  const subjectB = createNode(contextFrame, "subject-b", 180);
+  const annotationsContainer = createNode(page, "FFA Annotations", 800);
+  const messages = [];
+
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  contextFrame.children = [subjectA, subjectB];
+  page.children = [contextFrame, annotationsContainer];
+  page.selection = [subjectA];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "Shared note" });
+  await flushPluginMessage(messages);
+
+  messages.length = 0;
+  page.selection = [subjectB];
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "Shared note" });
+  await flushPluginMessage(messages);
+
+  const cards = annotationsContainer.children.filter(
+    (child) => child.getSharedPluginData(namespace, "kind") === "annotation-card",
+  );
+  const badges = annotationsContainer.children.filter(
+    (child) => child.getSharedPluginData(namespace, "kind") === "annotation-badge",
+  );
+  const updatedRecord = JSON.parse(cards[0].getSharedPluginData(namespace, "annotation"));
+  const status = messages.find(
+    (message) => message.type === "status" && message.tone === "success",
+  );
+
+  assert.equal(cards.length, 1);
+  assert.equal(badges.length, 2);
+  assert.equal(updatedRecord.annotationNumber, 1);
+  assert.deepEqual(updatedRecord.subjectNodeIds, [subjectA.id, subjectB.id]);
+  assert.deepEqual(readAnnotationRefs(subjectA), [updatedRecord.id]);
+  assert.deepEqual(readAnnotationRefs(subjectB), [updatedRecord.id]);
+  assert.equal(status.message, "Updated annotation #1 with 1 new badge(s).");
+});
+
+test("serializes repeated Annotation creation messages before snapshotting", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "group-chat-screen", 0);
+  const subject = createNode(contextFrame, "subject-a", 20);
+  const annotationsContainer = createNode(page, "FFA Annotations", 800);
+  const messages = [];
+
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  contextFrame.children = [subject];
+  page.children = [contextFrame, annotationsContainer];
+  page.selection = [subject];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "Shared note" });
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "Shared note" });
+  await flushStatusCount(messages, 2);
+
+  const cards = annotationsContainer.children.filter(
+    (child) => child.getSharedPluginData(namespace, "kind") === "annotation-card",
+  );
+  const badges = annotationsContainer.children.filter(
+    (child) => child.getSharedPluginData(namespace, "kind") === "annotation-badge",
+  );
+  const statuses = messages.filter((message) => message.type === "status");
+  const record = JSON.parse(cards[0].getSharedPluginData(namespace, "annotation"));
+
+  assert.equal(cards.length, 1);
+  assert.equal(badges.length, 1);
+  assert.equal(record.annotationNumber, 1);
+  assert.deepEqual(record.subjectNodeIds, [subject.id]);
+  assert.deepEqual(readAnnotationRefs(subject), [record.id]);
+  assert.deepEqual(
+    statuses.map((status) => status.message),
+    ["Created annotation #1 with 1 badge(s).", "Updated annotation #1 with 0 new badge(s)."],
+  );
+});
+
 test("adds Subject Nodes to a selected Annotation Card without renumbering or duplicate badges", async () => {
   const page = createPage();
   const subjectA = createNode(page, "subject-a", 0);
@@ -271,3 +472,12 @@ test("explicitly arranges Annotation Badges and Annotation Cards by Annotation N
   assert.equal(card7.x, 0);
   assert.equal(card7.y, 336);
 });
+
+async function flushStatusCount(messages, count) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (messages.filter((message) => message.type === "status").length >= count) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}

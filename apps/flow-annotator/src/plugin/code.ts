@@ -50,6 +50,7 @@ import {
 
 let validationTargetsByIssueId = new Map<string, string[]>();
 let activeValidationOperation: PanelValidationOperation | null = null;
+let panelMessageQueue: Promise<void> = Promise.resolve();
 
 const connectRuntime: ConnectRuntime = {
   namespace: NAMESPACE,
@@ -77,11 +78,20 @@ figma.on("selectionchange", () => {
   handleSelectionChange(connectRuntime);
 });
 
-figma.ui.onmessage = (message: unknown) => {
-  void handleMessage(message);
-};
+figma.ui.onmessage = enqueuePanelMessage;
 
-async function handleMessage(message: unknown): Promise<void> {
+function enqueuePanelMessage(message: unknown): void {
+  const selectionSnapshot = [...figma.currentPage.selection];
+  panelMessageQueue = panelMessageQueue.then(
+    () => handleMessage(message, selectionSnapshot),
+    () => handleMessage(message, selectionSnapshot),
+  );
+}
+
+async function handleMessage(
+  message: unknown,
+  selectionSnapshot: readonly SceneNode[],
+): Promise<void> {
   let dispatch: PanelMessageDispatch;
   try {
     dispatch = classifyPanelMessage(message);
@@ -104,6 +114,7 @@ async function handleMessage(message: unknown): Promise<void> {
   }
 
   try {
+    restoreSelectionSnapshot(selectionSnapshot);
     await ensureFont();
     await dispatchMessage(dispatch.command);
   } catch (error: unknown) {
@@ -115,13 +126,19 @@ async function handleMessage(message: unknown): Promise<void> {
   }
 }
 
+function restoreSelectionSnapshot(selectionSnapshot: readonly SceneNode[]): void {
+  figma.currentPage.selection = selectionSnapshot.filter((node) => !node.removed);
+}
+
 async function dispatchMessage(message: PanelCommandMessage): Promise<void> {
   if (message.type === "create-annotation") {
-    const created = createAnnotations(message.body);
+    const created = await createAnnotations(message.body);
     selectAndZoom(created.nodes);
     postStatus(
       "success",
-      `Created annotation #${created.annotationNumber} with ${created.badgeCount} badge(s).`,
+      created.mode === "created"
+        ? `Created annotation #${created.annotationNumber} with ${created.badgeCount} badge(s).`
+        : `Updated annotation #${created.annotationNumber} with ${created.badgeCount} new badge(s).`,
     );
     return;
   }

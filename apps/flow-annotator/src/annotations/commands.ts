@@ -10,6 +10,7 @@ import {
   type CreateAnnotationOperationBatch,
   type Point,
   planCreateAnnotationAuthoring,
+  selectAnnotationContextFrameId,
 } from "@figma-flow-annotator/core";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
@@ -25,7 +26,9 @@ import {
 import { createAnnotationVisualWriter } from "./annotation-visual-writer";
 import {
   collectAddAnnotationSubjectsAuthoringSnapshot,
+  collectAnnotationNumberSeedsForContext,
   collectCreateAnnotationAuthoringSnapshot,
+  findReusableAnnotationCard,
 } from "./authoring-snapshot";
 import {
   getAnnotationBadgeRecords,
@@ -37,6 +40,7 @@ import {
 export interface AnnotationCreationResult {
   annotationNumber: number;
   badgeCount: number;
+  mode: "created" | "updated";
   nodes: SceneNode[];
 }
 
@@ -52,13 +56,52 @@ export interface ArrangeResult {
   nodes: SceneNode[];
 }
 
-export function createAnnotations(bodyValue: string): AnnotationCreationResult {
+export async function createAnnotations(bodyValue: string): Promise<AnnotationCreationResult> {
   const snapshot = collectCreateAnnotationAuthoringSnapshot({
     annotationId: createId("annotation"),
     body: bodyValue,
     now: new Date().toISOString(),
   });
-  const plan = planCreateAnnotationAuthoring(snapshot.input);
+  const contextFrameId = selectAnnotationContextFrameId({
+    pageId: snapshot.input.pageId,
+    subjects: snapshot.input.subjects,
+  });
+  const reusable = await findReusableAnnotationCard({
+    annotationCards: snapshot.annotationCards,
+    body: bodyValue,
+    contextFrameId,
+  });
+
+  if (reusable !== null) {
+    const batch = buildAddAnnotationSubjectsOperationBatch({
+      annotation: reusable.record,
+      annotationCardNodeId: reusable.node.id,
+      existingBadgeSubjectNodeIds: reusable.existingBadgeSubjectNodeIds,
+      now: snapshot.input.now,
+      subjects: snapshot.input.subjects,
+    });
+    const applied = applyAnnotationOperationBatch(
+      batch,
+      new Map([...snapshot.existingNodesById, [reusable.node.id, reusable.node]]),
+    );
+
+    ensureLayerOrder();
+    return {
+      annotationNumber: batch.annotationNumber,
+      badgeCount: batch.badgeCount,
+      mode: "updated",
+      nodes: applied.nodes.length > 0 ? applied.nodes : [reusable.node],
+    };
+  }
+
+  const existingAnnotationNumberSeeds = await collectAnnotationNumberSeedsForContext(
+    snapshot.annotationCards,
+    contextFrameId,
+  );
+  const plan = planCreateAnnotationAuthoring({
+    ...snapshot.input,
+    existingAnnotationNumberSeeds,
+  });
   const batch = plan.batch;
   const applied = applyAnnotationOperationBatch(batch, snapshot.existingNodesById);
 
@@ -66,6 +109,7 @@ export function createAnnotations(bodyValue: string): AnnotationCreationResult {
   return {
     annotationNumber: batch.annotationNumber,
     badgeCount: batch.badgeCount,
+    mode: "created",
     nodes: applied.nodes,
   };
 }

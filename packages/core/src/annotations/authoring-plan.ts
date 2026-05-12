@@ -54,19 +54,16 @@ export function selectAnnotationContextFrameId(input: {
   pageId: string;
   subjects: { ancestorFrameIds: string[] }[];
 }): string {
-  const firstChain = input.subjects[0]?.ancestorFrameIds ?? [];
-  let commonFrameId: string | null = null;
+  const outermostFrameId = input.subjects[0]?.ancestorFrameIds[0];
 
-  for (let index = 0; index < firstChain.length; index += 1) {
-    const candidateId = firstChain[index];
-    if (input.subjects.every((subject) => subject.ancestorFrameIds[index] === candidateId)) {
-      commonFrameId = candidateId;
-      continue;
-    }
-    break;
+  if (
+    outermostFrameId !== undefined &&
+    input.subjects.every((subject) => subject.ancestorFrameIds[0] === outermostFrameId)
+  ) {
+    return outermostFrameId;
   }
 
-  return commonFrameId ?? input.pageId;
+  return input.pageId;
 }
 
 export function selectNextAnnotationNumber(input: {
@@ -77,12 +74,8 @@ export function selectNextAnnotationNumber(input: {
   const contextRecord = input.contextRecords.find(
     (record) => record.contextFrameId === input.contextFrameId,
   );
-  if (contextRecord !== undefined) {
-    return contextRecord.nextAnnotationNumber;
-  }
-
   const maxExistingNumber = input.existingAnnotationNumberSeeds
     .filter((seed) => seed.contextFrameId === input.contextFrameId)
     .reduce((max, seed) => Math.max(max, seed.annotationNumber), 0);
-  return maxExistingNumber + 1;
+  return Math.max(contextRecord?.nextAnnotationNumber ?? 1, maxExistingNumber + 1);
 }

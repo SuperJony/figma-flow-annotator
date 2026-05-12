@@ -48,6 +48,7 @@ export function createFigmaStub(pageNode: FakePageNode, messages: PostedMessage[
       return createTextNode(pageNode, `generated-text-${textSequence}`);
     },
     currentPage: pageNode,
+    getNodeByIdAsync: async (nodeId) => findNodeById(pageNode, nodeId),
     loadFontAsync: async () => {},
     notify: () => {},
     on: () => {},
@@ -179,4 +180,17 @@ function appendChild(parent: FakeNode, child: FakeNode): void {
   }
   child.parent = parent;
   parent.children.push(child);
+}
+
+function findNodeById(node: FakeNode, nodeId: string): FakeNode | null {
+  if (node.id === nodeId) {
+    return node;
+  }
+  for (const child of node.children) {
+    const match = findNodeById(child, nodeId);
+    if (match !== null) {
+      return match;
+    }
+  }
+  return null;
 }
