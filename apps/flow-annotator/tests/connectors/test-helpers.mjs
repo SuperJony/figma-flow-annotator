@@ -78,8 +78,15 @@ export function createNode(page, id, x) {
     removed: false,
     remove: () => {
       node.removed = true;
-      if (node.parent && Array.isArray(node.parent.children)) {
-        node.parent.children = node.parent.children.filter((child) => child !== node);
+      const parent = node.parent;
+      if (parent && Array.isArray(parent.children)) {
+        parent.children = parent.children.filter((child) => child !== node);
+        if (page.__removeEmptyGroups && parent.type === "GROUP" && parent.children.length === 0) {
+          parent.removed = true;
+          if (parent.parent && Array.isArray(parent.parent.children)) {
+            parent.parent.children = parent.parent.children.filter((child) => child !== parent);
+          }
+        }
       }
     },
     resize: (width, height) => {
@@ -156,8 +163,9 @@ export function createRuntime(page, connectorGroups = []) {
   };
 }
 
-export function createFigmaStub(page, connectorGroups) {
+export function createFigmaStub(page, connectorGroups, options = {}) {
   ensurePageRegistry(page);
+  page.__removeEmptyGroups = options.removeEmptyGroups === true;
   return {
     createFrame: () => {
       const frame = createNode(page, `frame-${Math.random().toString(36).slice(2)}`, 0);
@@ -185,6 +193,9 @@ export function createFigmaStub(page, connectorGroups) {
       group.parent = parent;
       group.type = "GROUP";
       group.appendChild = (child) => {
+        if (group.removed) {
+          throw new Error(`in appendChild: The node with id "${group.id}" does not exist`);
+        }
         child.parent = group;
         group.children.push(child);
         registerNode(page, child);

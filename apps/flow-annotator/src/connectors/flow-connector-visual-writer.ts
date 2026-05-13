@@ -141,11 +141,13 @@ function createFlowActionLabel(
 }
 
 function replaceConnectorVisualNodes(connectorRoot: GroupNode, nextVisualNodes: SceneNode[]): void {
-  [...connectorRoot.children].forEach((child) => {
-    child.remove();
-  });
+  const previousVisualNodes = [...connectorRoot.children];
+  // Figma deletes empty groups, so keep the connector root populated while swapping visuals.
   nextVisualNodes.forEach((node) => {
     connectorRoot.appendChild(node);
+  });
+  previousVisualNodes.forEach((child) => {
+    child.remove();
   });
 }
 
