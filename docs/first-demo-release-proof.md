@@ -2,6 +2,8 @@
 
 Date: 2026-05-09
 
+Updated: 2026-05-14 after real-Figma Design smoke testing.
+
 Branch: `codex/issues-4-13-first-demo-v2`
 
 Base: `82f088c` (`origin/main`)
@@ -15,6 +17,11 @@ Prior first-demo feature slice range: `749efd0..66636d8`
 This proof covers GitHub issue #13 only: first demo release proof and docs. It
 does not implement missing feature work from issues #4-#12. No missing feature
 was found during this proof pass.
+
+The follow-up real-Figma Design smoke found acceptance bugs in the Annotation
+and Flow Connector paths. Those bugs were fixed on `main`, the nine scenarios
+were rerun in Figma Design, and the maintainer reported all nine passing on
+2026-05-14.
 
 First phase remains limited to the ADR 0035 plugin scope: **Create Annotation**,
 **Add Subject Nodes**, **Create Flow Connector**, **Edit Flow Action** through
@@ -44,23 +51,31 @@ batch multi-endpoint connector creation.
 
 | # | Scenario | Proof surface | Evidence pointer | Status |
 |---|---|---|---|---|
-| 1 | Selecting one node and creating an **Annotation** creates one **Annotation Card**, one nearby **Annotation Badge**, and shared plugin data. | Browser visual + semantic core | `apps/flow-annotator/tests/visual/annotations/fixtures.ts` defines `single-subject-annotation`; `apps/flow-annotator/tests/visual/annotations/visual.spec.ts` asserts one card, one badge, and status through the real annotation creation path; `packages/core/tests/shared/plugin-data.test.mjs` asserts shared plugin data namespace/key conventions; `packages/core/tests/annotations/operation-batches.test.mjs` asserts create-annotation operation batch shape. | Automated PASS; real Figma smoke pending. |
-| 2 | Selecting multiple nodes and creating one **Annotation** creates one shared card and one same-number badge beside each **Subject Node**. | Browser visual + fake-Figma semantic test | `multi-subject-annotation` visual fixture plus `annotations/visual.spec.ts`; `apps/flow-annotator/tests/annotations/numbering.test.mjs` creates two selected subjects and asserts one created card, two badges, subject refs, and status. | Automated PASS; real Figma smoke pending. |
-| 3 | **Add Subject Nodes** appends selected subjects and same-number badges to an existing **Annotation** without changing its **Annotation Number**. | Fake-Figma semantic test + panel visual | `annotations/numbering.test.mjs` test `adds Subject Nodes...` asserts number `4`, updated subjects, one new badge, and no duplicate badge; `panel/ui.spec.ts` covers enabled Add Subject UI state. | Automated PASS; real Figma smoke pending. |
-| 4 | Deleting one badge causes validation to warn while the **Annotation** remains valid. | Core validation + panel visual | `packages/core/tests/validation/validation.test.mjs` reports `annotation-missing-badge` as `warning` while the card record remains present; `panel/fixtures.ts` and `panel/ui.spec.ts` render `Missing Annotation Badge` as a warning. | Automated PASS; real Figma smoke pending. |
-| 5 | After the plugin opens, selecting A then shift-selecting B creates a directed A -> B **Flow Connector** with shared plugin data. | Fake-Figma semantic test + panel visual | `connectors/selection.test.mjs` drives `resetObservedEndpointSelection`, sequential selection changes, and `createFlowConnector`; assertions read endpoint order and `connectorRefs`; `panel/ui.spec.ts` covers two pending endpoints. | Automated PASS; real Figma smoke pending. |
-| 6 | For three horizontal **Context Frames**, a 1 -> 3 connector routes around frame 2 and around **Annotation Cards**. | Fake-Figma semantic test + browser visual | `connectors/selection.test.mjs` asserts the route avoids the middle frame and `collectConnectorObstacles` includes context frames and annotation cards while excluding badges; `connectors/visual.spec.ts` covers obstacle-avoiding connector visuals. | Automated PASS; real Figma smoke pending. |
-| 7 | Different connectors with different starts, the same end, and the same incoming side share the final **Connector Trunk**. | Fake-Figma semantic test + browser visual | `connectors/selection.test.mjs` asserts both routes share the same final segment and labels stay off the shared trunk; `connectors/visual.spec.ts` covers `connector-trunk`. | Automated PASS; real Figma smoke pending. |
-| 8 | Creating A -> B when A -> B already exists updates the existing connector's **Flow Action** and route instead of creating a duplicate connector. | Core operation batch test + fake-Figma semantic test + panel visual | `packages/core/tests/connectors/operations.test.mjs` asserts directed-pair upsert update/idempotent modes; `connectors/selection.test.mjs` keeps connector count at one while updating action; `panel/ui.spec.ts` covers existing connector status. | Automated PASS; real Figma smoke pending. |
-| 9 | Deleting a **Flow Endpoint** used by an existing **Flow Connector** causes validation to report an **Orphaned Flow Connector** error. | Core validation + fake-Figma semantic test + panel visual | `packages/core/tests/validation/validation.test.mjs` and `apps/flow-annotator/tests/validation/validation.test.mjs` assert `flow-connector-orphaned`; `panel/ui.spec.ts` renders `Orphaned Flow Connector`. | Automated PASS; real Figma smoke pending. |
+| 1 | Selecting one node and creating an **Annotation** creates one **Annotation Card**, one nearby **Annotation Badge**, and shared plugin data. | Browser visual + semantic core | `apps/flow-annotator/tests/visual/annotations/fixtures.ts` defines `single-subject-annotation`; `apps/flow-annotator/tests/visual/annotations/visual.spec.ts` asserts one card, one badge, and status through the real annotation creation path; `packages/core/tests/shared/plugin-data.test.mjs` asserts shared plugin data namespace/key conventions; `packages/core/tests/annotations/operation-batches.test.mjs` asserts create-annotation operation batch shape. | Automated PASS; real Figma smoke PASS. |
+| 2 | Selecting multiple nodes and creating one **Annotation** creates one shared card and one same-number badge beside each **Subject Node**. | Browser visual + fake-Figma semantic test | `multi-subject-annotation` visual fixture plus `annotations/visual.spec.ts`; `apps/flow-annotator/tests/annotations/numbering.test.mjs` creates two selected subjects and asserts one created card, two badges, subject refs, and status. | Automated PASS; real Figma smoke PASS. |
+| 3 | **Add Subject Nodes** appends selected subjects and same-number badges to an existing **Annotation** without changing its **Annotation Number**. | Fake-Figma semantic test + panel visual | `annotations/numbering.test.mjs` test `adds Subject Nodes...` asserts number `4`, updated subjects, one new badge, and no duplicate badge; `panel/ui.spec.ts` covers enabled Add Subject UI state. | Automated PASS; real Figma smoke PASS. |
+| 4 | Deleting one badge causes validation to warn while the **Annotation** remains valid. | Core validation + panel visual | `packages/core/tests/validation/validation.test.mjs` reports `annotation-missing-badge` as `warning` while the card record remains present; `panel/fixtures.ts` and `panel/ui.spec.ts` render `Missing Annotation Badge` as a warning. | Automated PASS; real Figma smoke PASS. |
+| 5 | After the plugin opens, selecting A then shift-selecting B creates a directed A -> B **Flow Connector** with shared plugin data. | Fake-Figma semantic test + panel visual | `connectors/selection.test.mjs` drives `resetObservedEndpointSelection`, sequential selection changes, and `createFlowConnector`; assertions read endpoint order and `connectorRefs`; `panel/ui.spec.ts` covers two pending endpoints. | Automated PASS; real Figma smoke PASS. |
+| 6 | For three horizontal **Context Frames**, a 1 -> 3 connector routes around frame 2 and around **Annotation Cards**. | Fake-Figma semantic test + browser visual | `connectors/selection.test.mjs` asserts the route avoids the middle frame and `collectConnectorObstacles` includes context frames and annotation cards while excluding badges; `connectors/visual.spec.ts` covers obstacle-avoiding connector visuals. | Automated PASS; real Figma smoke PASS. |
+| 7 | Different connectors with different starts, the same end, and the same incoming side share the final **Connector Trunk**. | Fake-Figma semantic test + browser visual | `connectors/selection.test.mjs` asserts both routes share the same final segment and labels stay off the shared trunk; `connectors/visual.spec.ts` covers `connector-trunk`. | Automated PASS; real Figma smoke PASS. |
+| 8 | Creating A -> B when A -> B already exists updates the existing connector's **Flow Action** and route instead of creating a duplicate connector. | Core operation batch test + fake-Figma semantic test + panel visual | `packages/core/tests/connectors/operations.test.mjs` asserts directed-pair upsert update/idempotent modes; `connectors/selection.test.mjs` keeps connector count at one while updating action; `panel/ui.spec.ts` covers existing connector status. | Automated PASS; real Figma smoke PASS. |
+| 9 | Deleting a **Flow Endpoint** used by an existing **Flow Connector** causes validation to report an **Orphaned Flow Connector** error. | Core validation + fake-Figma semantic test + panel visual | `packages/core/tests/validation/validation.test.mjs` and `apps/flow-annotator/tests/validation/validation.test.mjs` assert `flow-connector-orphaned`; `panel/ui.spec.ts` renders `Orphaned Flow Connector`. | Automated PASS; real Figma smoke PASS. |
 
 ## Local Figma Smoke
 
-No verifiable real-Figma Design smoke was run in N13. The automated browser and
-fake-Figma surfaces above are the release-proof evidence for this node; real
-Figma remains a low-frequency manual smoke check per ADR 0047.
+The maintainer ran the nine real-Figma Design smoke scenarios on 2026-05-14.
+The run exposed acceptance bugs in Annotation numbering/deduplication, Add
+Subject Nodes selection from card descendants, and Flow Connector visual root
+replacement. The bugs were fixed and the nine scenarios were rerun successfully.
 
-Manual follow-up:
+Fix commits:
+
+- `7899b59` `fix(annotation): dedupe cards and stabilize numbering`
+- `e42e413` `fix(annotation): enable add subjects from card descendants`
+- `0b7f201` `fix(flow-annotator): keep connector roots alive while replacing visuals`
+- `026bb16` `test(flow-annotator): simplify connector creation helpers`
+
+Manual smoke path:
 
 1. Run `pnpm build`.
 2. In Figma Design, import `apps/flow-annotator/manifest.json` from the Plugins
@@ -129,6 +144,6 @@ Validate/Clean paths:
 
 ## Residual Risk
 
-Real Figma loading and the nine manual smoke scenarios are pending because N13
-did not run Figma Design with verifiable local evidence. This is acceptable for
-routine proof under ADR 0047, but it remains the release/demo smoke follow-up.
+No known release-proof blocker remains for issue #13. Real Figma loading remains
+a low-frequency smoke check before later demos or releases per ADR 0047, but the
+first-demo nine-scenario smoke gate has passed.
