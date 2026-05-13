@@ -3,10 +3,13 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { CONNECTORS_CONTAINER_NAME } from "@figma-flow-annotator/core";
 import { build } from "esbuild";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const buildDir = resolve(appRoot, ".test-build");
+export const CONNECTOR_ROUTE_NODE_NAME = "FFA Connector Route";
+export const FLOW_ACTION_LABEL_NODE_NAME = "FFA Flow Action Label";
 
 export async function importConnectModule() {
   await mkdir(buildDir, { recursive: true });
@@ -80,12 +83,9 @@ export function createNode(page, id, x) {
       node.removed = true;
       const parent = node.parent;
       if (parent && Array.isArray(parent.children)) {
-        parent.children = parent.children.filter((child) => child !== node);
+        removeChild(parent, node);
         if (page.__removeEmptyGroups && parent.type === "GROUP" && parent.children.length === 0) {
-          parent.removed = true;
-          if (parent.parent && Array.isArray(parent.parent.children)) {
-            parent.parent.children = parent.parent.children.filter((child) => child !== parent);
-          }
+          parent.remove();
         }
       }
     },
@@ -140,12 +140,12 @@ export function createRuntime(page, connectorGroups = []) {
       y: 0,
     }),
     ensureContainer: () => {
-      const existing = page.children.find((node) => node.name === "FFA Connectors");
+      const existing = page.children.find((node) => node.name === CONNECTORS_CONTAINER_NAME);
       if (existing) {
         return existing;
       }
       const container = createNode(page, "connector-container", 0);
-      container.name = "FFA Connectors";
+      container.name = CONNECTORS_CONTAINER_NAME;
       container.children = connectorGroups;
       container.setSharedPluginData("figma_flow_annotator", "kind", "container");
       page.children.push(container);
@@ -235,6 +235,14 @@ export function getPendingEndpointIds(connect, runtime) {
   return connect.getPendingConnectorEndpointNodes(runtime).map((node) => node.id);
 }
 
+export function selectConnectorEndpoints(connect, runtime, page, start, end) {
+  connect.resetObservedEndpointSelection(runtime);
+  page.selection = [start];
+  connect.handleSelectionChange(runtime);
+  page.selection = [start, end];
+  connect.handleSelectionChange(runtime);
+}
+
 export function readConnectorEndpointIds(connectorGroup) {
   const connector = readConnector(connectorGroup);
   return [connector.start.nodeId, connector.end.nodeId];
@@ -288,6 +296,13 @@ function registerNode(page, node) {
   }
 }
 
+function removeChild(parent, child) {
+  const index = parent.children.indexOf(child);
+  if (index !== -1) {
+    parent.children.splice(index, 1);
+  }
+}
+
 function matchesCriteria(node, criteria) {
   if (node.type === "PAGE" || node.removed) {
     return false;
@@ -335,7 +350,7 @@ export function finalSegment(points) {
 }
 
 export function getLabelCenter(connectorGroup) {
-  const label = connectorGroup.children.find((child) => child.name === "FFA Flow Action Label");
+  const label = connectorGroup.children.find((child) => child.name === FLOW_ACTION_LABEL_NODE_NAME);
   assert.ok(label, "expected Flow Action label visual node");
   return {
     x: label.x + label.width / 2,
