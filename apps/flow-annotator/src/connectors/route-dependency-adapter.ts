@@ -52,16 +52,16 @@ export interface ValidateFlowConnectorRouteDependencyAdapterInput {
 export async function rehydrateCreateFlowConnectorRouteFacts(
   input: CreateFlowConnectorRouteDependencyAdapterInput,
 ): Promise<CreateFlowConnectorRouteFacts> {
+  const existingConnectors = input.snapshot.connectorRecords.map((connector) => ({
+    nodeId: connector.node.id,
+    record: connector.record,
+  }));
   const dependencyPlan = planCreateFlowConnectorRouteDependencies({
     endpoints: input.endpointFacts.map((endpoint) => ({
       contextFrameId: endpoint.contextFrameId,
       id: endpoint.id,
-      name: endpoint.name,
     })),
-    existingConnectors: input.snapshot.connectorRecords.map((connector) => ({
-      nodeId: connector.node.id,
-      record: connector.record,
-    })),
+    existingConnectors,
     validationIndex: readBestEffortMergedValidationIndex(input.runtime),
   });
   const obstacleCandidates =
@@ -76,7 +76,7 @@ export async function rehydrateCreateFlowConnectorRouteFacts(
 
   return {
     endpoints: input.endpointFacts,
-    existingConnectors: dependencyPlan.existingConnectors,
+    existingConnectors,
     obstacles:
       input.endpoints.length === 2
         ? collectConnectorObstacles(
@@ -106,16 +106,16 @@ export async function rehydrateRefreshFlowConnectorRouteFacts(
     dependencyPlan.dependencies,
     routeNodesById,
   );
+  const includedConnectorNodeIds = collectIncludedRefreshConnectorNodeIds(
+    dependencyPlan.dependencies,
+    input.selectedConnectorNodeIds,
+  );
 
   return {
     connectors: input.connectors.map((connector) =>
       toRefreshFlowConnectorRouteFact(
         connector,
-        shouldIncludeRefreshRuntimeFacts(
-          connector.node.id,
-          input.selectedConnectorNodeIds,
-          dependencyPlan.dependencies,
-        ),
+        includedConnectorNodeIds === undefined || includedConnectorNodeIds.has(connector.node.id),
         input.runtime,
         routeNodesById,
         obstacleCandidates,
@@ -150,17 +150,19 @@ export async function rehydrateValidateFlowConnectorRouteGeometry(
     dependencyPlan.dependencies,
     routeNodesById,
   );
-  const labelNodesById = new Map(labelNodes.map((label) => [label.node.id, label.node]));
+  const labelRectByConnectorNodeId = collectPlannedFlowActionLabelRects(
+    dependencyPlan.dependencies,
+    new Map(labelNodes.map((label) => [label.node.id, label.node])),
+  );
 
   return {
     connectors: input.connectorRecords.map((connector) =>
       toValidationFlowConnectorRouteFact(
         connector,
         input.runtime,
-        dependencyPlan.dependencies,
         routeNodesById,
         obstacleCandidates,
-        labelNodesById,
+        labelRectByConnectorNodeId,
       ),
     ),
   };
@@ -197,25 +199,24 @@ function collectObstacleCandidateNodes(
   });
 }
 
-function shouldIncludeRefreshRuntimeFacts(
-  connectorNodeId: string,
-  selectedConnectorNodeIds: string[] | undefined,
+function collectIncludedRefreshConnectorNodeIds(
   dependencies: Iterable<FlowConnectorRouteDependency>,
-): boolean {
+  selectedConnectorNodeIds: string[] | undefined,
+): Set<string> | undefined {
   if (selectedConnectorNodeIds === undefined) {
-    return true;
+    return undefined;
   }
 
+  const includedConnectorNodeIds = new Set<string>();
   for (const dependency of dependencies) {
     if (
       dependency.role === "existing-flow-connector" &&
-      dependency.nodeId === connectorNodeId &&
-      dependency.sourceConnectorNodeId === connectorNodeId
+      dependency.nodeId === dependency.sourceConnectorNodeId
     ) {
-      return true;
+      includedConnectorNodeIds.add(dependency.nodeId);
     }
   }
-  return false;
+  return includedConnectorNodeIds;
 }
 
 function toRefreshFlowConnectorRouteFact(
@@ -259,14 +260,13 @@ function toRefreshFlowConnectorRouteFactWithoutRuntimeFacts(
 function toValidationFlowConnectorRouteFact(
   connector: FlowConnectorSnapshotRecord,
   runtime: FlowConnectorCurrentPageRuntime,
-  dependencies: Iterable<FlowConnectorRouteDependency>,
   routeNodesById: Map<string, SceneNode>,
   obstacleCandidates: Iterable<SceneNode>,
-  labelNodesById: Map<string, SceneNode>,
+  labelRectByConnectorNodeId: Map<string, Rect>,
 ): ValidateFlowConnectorRouteConnectorFact {
   const startNode = routeNodesById.get(connector.record.start.nodeId);
   const endNode = routeNodesById.get(connector.record.end.nodeId);
-  const labelRect = getPlannedFlowActionLabelRect(connector.node.id, dependencies, labelNodesById);
+  const labelRect = labelRectByConnectorNodeId.get(connector.node.id);
   const baseFact = {
     nodeId: connector.node.id,
     record: connector.record,
@@ -298,16 +298,13 @@ function toValidationEndpointFact(
   };
 }
 
-function getPlannedFlowActionLabelRect(
-  connectorNodeId: string,
+function collectPlannedFlowActionLabelRects(
   dependencies: Iterable<FlowConnectorRouteDependency>,
   labelNodesById: Map<string, SceneNode>,
-): Rect | undefined {
+): Map<string, Rect> {
+  const labelRectByConnectorNodeId = new Map<string, Rect>();
   for (const dependency of dependencies) {
-    if (
-      dependency.role !== "flow-action-label" ||
-      dependency.sourceConnectorNodeId !== connectorNodeId
-    ) {
+    if (dependency.role !== "flow-action-label" || dependency.sourceConnectorNodeId === undefined) {
       continue;
     }
 
@@ -317,11 +314,11 @@ function getPlannedFlowActionLabelRect(
       !("absoluteBoundingBox" in label) ||
       label.absoluteBoundingBox === null
     ) {
-      return undefined;
+      continue;
     }
-    return label.absoluteBoundingBox;
+    labelRectByConnectorNodeId.set(dependency.sourceConnectorNodeId, label.absoluteBoundingBox);
   }
-  return undefined;
+  return labelRectByConnectorNodeId;
 }
 
 function collectVisibleFlowActionLabelNodes(

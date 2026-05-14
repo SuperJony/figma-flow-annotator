@@ -21,11 +21,11 @@ test("plans Create Flow Connector route dependencies without runtime facts", asy
 
   const plan = core.planCreateFlowConnectorRouteDependencies({
     endpoints: [
-      { id: "node-a", name: "Start", contextFrameId: "frame-a" },
-      { id: "node-b", name: "End", contextFrameId: "frame-b" },
+      { id: "node-a", contextFrameId: "frame-a" },
+      { id: "node-b", contextFrameId: "frame-b" },
     ],
     existingConnectors: [{ nodeId: "connector-node", record: existingRecord }],
-    validationIndex: validationIndex({
+    validationIndex: core.createValidationIndexRecord({
       annotationBadgeNodeIds: ["badge-1"],
       annotationCardNodeIds: ["card-1"],
       connectorObstacleCandidateNodeIds: ["card-1", "badge-1", "frame-d"],
@@ -83,7 +83,7 @@ test("exposes shared route dependency planners for refresh and validation", asyn
   const refreshPlan = core.planRefreshFlowConnectorRouteDependencies({
     connectors: [connector],
     selectedConnectorNodeIds: ["connector-node"],
-    validationIndex: validationIndex({}),
+    validationIndex: core.createValidationIndexRecord({}),
   });
   const validationPlan = core.planValidateFlowConnectorRouteDependencies({
     connectors: [connector],
@@ -94,7 +94,7 @@ test("exposes shared route dependency planners for refresh and validation", asyn
         sourceConnectorNodeId: "connector-node",
       },
     ],
-    validationIndex: validationIndex({}),
+    validationIndex: core.createValidationIndexRecord({}),
   });
 
   assert.deepEqual(
@@ -149,7 +149,7 @@ test("plans selected and page Refresh Connectors dependencies without runtime fa
       start: { contextFrameId: "frame-c", nodeId: "node-c" },
     }),
   };
-  const sharedIndex = validationIndex({
+  const sharedIndex = core.createValidationIndexRecord({
     annotationBadgeNodeIds: ["badge-1"],
     annotationCardNodeIds: ["card-1"],
     connectorObstacleCandidateNodeIds: ["card-1", "badge-1", "indexed-frame"],
@@ -206,10 +206,6 @@ test("plans selected and page Refresh Connectors dependencies without runtime fa
     false,
   );
   assert.deepEqual(
-    selectedPlan.existingConnectors.map((connector) => connector.nodeId),
-    ["connector-node-a", "connector-node-b"],
-  );
-  assert.deepEqual(
     dependenciesFor(pagePlan, "existing-flow-connector").map((dependency) => dependency.nodeId),
     ["connector-node-a", "connector-node-b"],
   );
@@ -259,7 +255,7 @@ test("plans Validate Bindings route dependencies without runtime facts", async (
       { nodeId: "label-a", sourceConnectorNodeId: "connector-node-a" },
       { nodeId: "label-b", sourceConnectorNodeId: "connector-node-b" },
     ],
-    validationIndex: validationIndex({
+    validationIndex: core.createValidationIndexRecord({
       annotationBadgeNodeIds: ["badge-1"],
       annotationCardNodeIds: ["indexed-card"],
       connectorObstacleCandidateNodeIds: ["indexed-card", "badge-1", "indexed-frame"],
@@ -335,19 +331,4 @@ test("plans Validate Bindings route dependencies without runtime facts", async (
 
 function dependenciesFor(plan, role) {
   return plan.dependencies.filter((dependency) => dependency.role === role);
-}
-
-function validationIndex(update) {
-  return {
-    schemaVersion: 1,
-    subjectNodeIds: [],
-    annotationCardNodeIds: [],
-    annotationBadgeNodeIds: [],
-    flowEndpointNodeIds: [],
-    contextFrameIds: [],
-    ownerContextFrameIds: [],
-    connectorRootNodeIds: [],
-    connectorObstacleCandidateNodeIds: [],
-    ...update,
-  };
 }

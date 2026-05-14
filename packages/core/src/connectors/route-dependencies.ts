@@ -1,6 +1,5 @@
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
 import type { ValidationIndexRecord } from "../validation/validation-index.ts";
-import type { FlowEndpointInput } from "./operations.ts";
 import { getFlowConnectorValidationIndexNodeIds } from "./operations.ts";
 
 export type FlowConnectorRouteDependencyRole =
@@ -38,11 +37,15 @@ export interface ExistingFlowConnectorRouteDependencyInput {
 
 export interface FlowConnectorRouteDependencyPlan {
   dependencies: FlowConnectorRouteDependency[];
-  existingConnectors: ExistingFlowConnectorRouteDependencyInput[];
+}
+
+export interface FlowConnectorRouteDependencyEndpointInput {
+  contextFrameId: string;
+  id: string;
 }
 
 export interface PlanCreateFlowConnectorRouteDependenciesInput {
-  endpoints: FlowEndpointInput[];
+  endpoints: FlowConnectorRouteDependencyEndpointInput[];
   existingConnectors: ExistingFlowConnectorRouteDependencyInput[];
   validationIndex: ValidationIndexRecord;
 }
@@ -85,7 +88,6 @@ export function planCreateFlowConnectorRouteDependencies(
 
   return {
     dependencies: dependencies.toArray(),
-    existingConnectors: input.existingConnectors,
   };
 }
 
@@ -95,18 +97,19 @@ export function planRefreshFlowConnectorRouteDependencies(
   const dependencies = new RouteDependencyBuilder();
 
   addValidationIndexObstacleDependencies(dependencies, input.validationIndex);
+  const selectedConnectorNodeIds =
+    input.selectedConnectorNodeIds === undefined
+      ? undefined
+      : new Set(input.selectedConnectorNodeIds);
   addExistingConnectorDependencies(
     dependencies,
-    input.selectedConnectorNodeIds === undefined
+    selectedConnectorNodeIds === undefined
       ? input.connectors
-      : input.connectors.filter((connector) =>
-          input.selectedConnectorNodeIds?.includes(connector.nodeId),
-        ),
+      : input.connectors.filter((connector) => selectedConnectorNodeIds.has(connector.nodeId)),
   );
 
   return {
     dependencies: dependencies.toArray(),
-    existingConnectors: input.connectors,
   };
 }
 
@@ -135,7 +138,6 @@ export function planValidateFlowConnectorRouteDependencies(
 
   return {
     dependencies: dependencies.toArray(),
-    existingConnectors: input.connectors,
   };
 }
 
@@ -144,11 +146,13 @@ export function collectFlowConnectorRouteDependencyNodeIds(
   role?: FlowConnectorRouteDependencyRole,
 ): string[] {
   const nodeIds: string[] = [];
+  const seenNodeIds = new Set<string>();
   for (const dependency of dependencies) {
     if (role !== undefined && dependency.role !== role) {
       continue;
     }
-    if (!nodeIds.includes(dependency.nodeId)) {
+    if (!seenNodeIds.has(dependency.nodeId)) {
+      seenNodeIds.add(dependency.nodeId);
       nodeIds.push(dependency.nodeId);
     }
   }

@@ -1,6 +1,5 @@
 import type {
   CreateFlowConnectorRouteFacts,
-  FlowConnectorRecord,
   RefreshFlowConnectorRouteFacts,
   ValidateFlowConnectorRouteGeometryInput,
 } from "@figma-flow-annotator/core";
@@ -12,6 +11,7 @@ import {
   toFlowConnectorAuthoringEndpoint,
 } from "./current-page-snapshot";
 import {
+  type RefreshFlowConnectorRouteDependencyAdapterConnector,
   rehydrateCreateFlowConnectorRouteFacts,
   rehydrateRefreshFlowConnectorRouteFacts,
   rehydrateValidateFlowConnectorRouteGeometry,
@@ -87,16 +87,11 @@ export async function collectValidationFlowConnectorRouteFacts(
   });
 }
 
-interface RefreshConnectorRecord {
-  node: GroupNode;
-  record: FlowConnectorRecord | null;
-}
-
 function collectRefreshConnectorRecords(
   connectorRecords: FlowConnectorSnapshotRecord[],
   selectedConnectorRoots: GroupNode[],
   runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-): RefreshConnectorRecord[] {
+): RefreshFlowConnectorRouteDependencyAdapterConnector[] {
   if (selectedConnectorRoots.length === 0) {
     return connectorRecords;
   }
