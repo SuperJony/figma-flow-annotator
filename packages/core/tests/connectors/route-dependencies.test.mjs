@@ -109,6 +109,104 @@ test("exposes shared route dependency planners for refresh and validation", asyn
   );
 });
 
+test("plans selected and page Refresh Connectors dependencies without runtime facts", async () => {
+  const core = await importCoreModule();
+  const connectorA = {
+    nodeId: "connector-node-a",
+    record: core.createFlowConnectorRecord({
+      connectorId: "connector-a",
+      createdAt: "2026-05-13T00:00:00.000Z",
+      end: { contextFrameId: "frame-b", nodeId: "node-b" },
+      flowAction: null,
+      now: "2026-05-13T00:00:00.000Z",
+      ownerContextFrameId: "owner-a",
+      start: { contextFrameId: "frame-a", nodeId: "node-a" },
+    }),
+  };
+  const connectorB = {
+    nodeId: "connector-node-b",
+    record: core.createFlowConnectorRecord({
+      connectorId: "connector-b",
+      createdAt: "2026-05-13T00:00:00.000Z",
+      end: { contextFrameId: "frame-d", nodeId: "node-d" },
+      flowAction: null,
+      now: "2026-05-13T00:00:00.000Z",
+      ownerContextFrameId: "owner-c",
+      start: { contextFrameId: "frame-c", nodeId: "node-c" },
+    }),
+  };
+  const sharedIndex = validationIndex({
+    annotationBadgeNodeIds: ["badge-1"],
+    annotationCardNodeIds: ["card-1"],
+    connectorObstacleCandidateNodeIds: ["card-1", "badge-1", "indexed-frame"],
+    contextFrameIds: ["context-frame"],
+    ownerContextFrameIds: ["owner-frame"],
+  });
+
+  const selectedPlan = core.planRefreshFlowConnectorRouteDependencies({
+    connectors: [connectorA, connectorB],
+    selectedConnectorNodeIds: ["connector-node-a"],
+    validationIndex: sharedIndex,
+  });
+  const pagePlan = core.planRefreshFlowConnectorRouteDependencies({
+    connectors: [connectorA, connectorB],
+    validationIndex: sharedIndex,
+  });
+
+  assert.deepEqual(
+    dependenciesFor(selectedPlan, "existing-flow-connector").map((dependency) => [
+      dependency.nodeId,
+      dependency.sourceConnectorNodeId,
+    ]),
+    [["connector-node-a", "connector-node-a"]],
+  );
+  assert.deepEqual(
+    dependenciesFor(selectedPlan, "flow-endpoint").map((dependency) => [
+      dependency.nodeId,
+      dependency.sourceConnectorNodeId,
+    ]),
+    [
+      ["node-a", "connector-node-a"],
+      ["node-b", "connector-node-a"],
+    ],
+  );
+  assert.deepEqual(
+    core.collectFlowConnectorRouteDependencyNodeIds(
+      selectedPlan.dependencies,
+      "connector-obstacle-candidate",
+    ),
+    [
+      "card-1",
+      "context-frame",
+      "owner-frame",
+      "indexed-frame",
+      "frame-a",
+      "frame-b",
+      "owner-a",
+      "node-a",
+      "node-b",
+    ],
+  );
+  assert.equal(
+    selectedPlan.dependencies.some((dependency) => dependency.nodeId === "badge-1"),
+    false,
+  );
+  assert.deepEqual(
+    selectedPlan.existingConnectors.map((connector) => connector.nodeId),
+    ["connector-node-a", "connector-node-b"],
+  );
+  assert.deepEqual(
+    dependenciesFor(pagePlan, "existing-flow-connector").map((dependency) => dependency.nodeId),
+    ["connector-node-a", "connector-node-b"],
+  );
+  assert.deepEqual(
+    dependenciesFor(pagePlan, "flow-endpoint").map((dependency) => dependency.nodeId),
+    ["node-a", "node-b", "node-c", "node-d"],
+  );
+  assert.equal(JSON.stringify(selectedPlan).includes("bounds"), false);
+  assert.equal(JSON.stringify(selectedPlan).includes("absoluteBoundingBox"), false);
+});
+
 function dependenciesFor(plan, role) {
   return plan.dependencies.filter((dependency) => dependency.role === role);
 }

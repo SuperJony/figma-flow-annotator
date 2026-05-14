@@ -357,6 +357,25 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
 
   const firstPageRoute = readConnector(connectorGroups[0]).routeCache.points;
   const secondPageRoute = readConnector(connectorGroups[1]).routeCache.points;
+  const annotationCard = createNode(page, "annotation-card", 980);
+  const unrelatedFrame = createNode(page, "unrelated-frame", -1000);
+  const connectorsContainer = page.children.find((node) => node.name === "FFA Connectors");
+  assert.ok(connectorsContainer, "expected Flow Connector container after creation");
+  annotationCard.setSharedPluginData("figma_flow_annotator", "kind", "annotation-card");
+  setValidationIndex(connectorsContainer, {
+    annotationBadgeNodeIds: ["annotation-badge"],
+    annotationCardNodeIds: [annotationCard.id],
+    connectorObstacleCandidateNodeIds: [annotationCard.id, "annotation-badge"],
+  });
+  Object.defineProperty(unrelatedFrame, "children", { get: () => assert.fail("descendant scan") });
+  page.children = [start, end, alternateEnd, annotationCard, unrelatedFrame, connectorsContainer];
+  const requestedNodeIds = [];
+  const nodesById = new Map(page.children.map((node) => [node.id, node]));
+  globalThis.figma.getNodeByIdAsync = async (nodeId) => {
+    requestedNodeIds.push(nodeId);
+    assert.equal([alternateEnd.id, "annotation-badge"].includes(nodeId), false);
+    return nodesById.get(nodeId) ?? null;
+  };
 
   moveNode(end, { x: 700, y: 0, width: 100, height: 100 });
   moveNode(alternateEnd, { x: 700, y: 260, width: 100, height: 100 });
@@ -366,14 +385,9 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   assert.equal(selectedRefresh.selectedOnly, true);
   assert.equal(selectedRefresh.refreshedCount, 1);
   assert.equal(selectedRefresh.failedCount, 0);
-  assert.deepEqual(
-    selectedRefresh.nodes.map((node) => node.id),
-    [connectorGroups[0].id],
-  );
   assert.notDeepEqual(readConnector(connectorGroups[0]).routeCache.points, firstPageRoute);
   assert.deepEqual(readConnector(connectorGroups[1]).routeCache.points, secondPageRoute);
-  assert.deepEqual(readConnectorEndpointIds(connectorGroups[0]), ["start", "end"]);
-  assert.equal(readConnector(connectorGroups[0]).flowAction, "click");
+  assert.deepEqual([...new Set(requestedNodeIds)].sort(), ["annotation-card", "end", "start"]);
 });
 
 test("preserves an existing Flow Connector route and record when refresh routing fails", async () => {

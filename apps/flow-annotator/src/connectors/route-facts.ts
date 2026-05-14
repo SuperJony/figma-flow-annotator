@@ -3,7 +3,6 @@ import {
   type FlowConnectorRecord,
   type FlowConnectorRouteGeometryEndpointFact,
   getFlowConnectorValidationIndexNodeIds,
-  type RefreshFlowConnectorRouteConnectorFact,
   type RefreshFlowConnectorRouteFacts,
   type ValidateFlowConnectorRouteConnectorFact,
   type ValidateFlowConnectorRouteGeometryInput,
@@ -18,7 +17,10 @@ import {
   toFlowConnectorAuthoringEndpoint,
 } from "./current-page-snapshot";
 import { collectConnectorObstacles } from "./obstacles";
-import { rehydrateCreateFlowConnectorRouteFacts } from "./route-dependency-adapter";
+import {
+  rehydrateCreateFlowConnectorRouteFacts,
+  rehydrateRefreshFlowConnectorRouteFacts,
+} from "./route-dependency-adapter";
 import { FLOW_ACTION_LABEL_NODE_NAME } from "./visual-node-names";
 
 export interface CreateFlowConnectorRuntimeRouteFacts {
@@ -64,38 +66,16 @@ export async function collectRefreshFlowConnectorRouteFacts(
     selectedConnectorRoots,
     runtime,
   );
-  const targetConnectorNodeIds = selectedOnly
-    ? new Set(selectedConnectorRoots.map((node) => node.id))
-    : new Set(connectorRecords.map((connector) => connector.node.id));
-  const targetConnectors = connectorRecords.filter((connector) =>
-    targetConnectorNodeIds.has(connector.node.id),
-  );
-  const obstacleCandidates = await collectBoundedConnectorObstacleCandidates(
-    runtime,
-    collectEndpointContextFrameIds(targetConnectors),
-    connectorRecords.filter(hasFlowConnectorRecord),
-  );
-  const routeNodesById = new Map(
-    obstacleCandidates.map((node): [string, SceneNode] => [node.id, node]),
-  );
-  const connectors = connectorRecords.map((connector) =>
-    toRefreshFlowConnectorRouteFact(
-      connector,
-      targetConnectorNodeIds.has(connector.node.id),
-      runtime,
-      routeNodesById,
-      obstacleCandidates,
-    ),
-  );
 
   return {
     connectorNodesById: buildConnectorNodeMap(snapshot.connectorRecords, selectedConnectorRoots),
-    routeFacts: {
-      connectors,
+    routeFacts: await rehydrateRefreshFlowConnectorRouteFacts({
+      connectors: connectorRecords,
+      runtime,
       ...(selectedOnly
         ? { selectedConnectorNodeIds: selectedConnectorRoots.map((node) => node.id) }
         : {}),
-    },
+    }),
   };
 }
 
@@ -157,44 +137,6 @@ function collectRefreshConnectorRecords(
   );
 
   return [...selectedConnectors, ...remainingConnectors];
-}
-
-function toRefreshFlowConnectorRouteFact(
-  connector: RefreshConnectorRecord,
-  includeRuntimeFacts: boolean,
-  runtime: FlowConnectorCurrentPageRuntime,
-  routeNodesById: Map<string, SceneNode>,
-  obstacleCandidates: Iterable<SceneNode>,
-): RefreshFlowConnectorRouteConnectorFact {
-  const baseFact = toRefreshFlowConnectorRouteFactWithoutRuntimeFacts(connector);
-  if (!includeRuntimeFacts || connector.record === null) {
-    return baseFact;
-  }
-
-  const startNode = routeNodesById.get(connector.record.start.nodeId);
-  const endNode = routeNodesById.get(connector.record.end.nodeId);
-
-  return {
-    ...baseFact,
-    ...(startNode === undefined
-      ? {}
-      : { start: toFlowConnectorAuthoringEndpoint(startNode, runtime) }),
-    ...(endNode === undefined ? {} : { end: toFlowConnectorAuthoringEndpoint(endNode, runtime) }),
-    obstacles:
-      startNode === undefined || endNode === undefined
-        ? []
-        : collectConnectorObstacles(startNode, endNode, runtime, obstacleCandidates),
-  };
-}
-
-function toRefreshFlowConnectorRouteFactWithoutRuntimeFacts(
-  connector: RefreshConnectorRecord,
-): RefreshFlowConnectorRouteConnectorFact {
-  return {
-    name: connector.node.name,
-    nodeId: connector.node.id,
-    record: connector.record,
-  };
 }
 
 function toValidationFlowConnectorRouteFact(
@@ -285,12 +227,6 @@ function addNodeIds(target: Set<string>, nodeIds: Iterable<string>): void {
   for (const nodeId of nodeIds) {
     target.add(nodeId);
   }
-}
-
-function hasFlowConnectorRecord(
-  connector: RefreshConnectorRecord,
-): connector is { node: GroupNode; record: FlowConnectorRecord } {
-  return connector.record !== null;
 }
 
 function buildConnectorNodeMap(
