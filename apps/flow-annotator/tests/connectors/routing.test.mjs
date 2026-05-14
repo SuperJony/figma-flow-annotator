@@ -7,6 +7,7 @@ import {
   createRuntime,
   expandRect,
   finalSegment,
+  findNodeById,
   getLabelCenter,
   importConnectModule,
   moveNode,
@@ -43,7 +44,12 @@ test("routes around indexed Context Frames and Annotation Cards without page fra
     contextFrameIds: [middleFrame.id],
   });
   page.children = [start, middleFrame, annotationCard, annotationBadge, end, connectorsContainer];
+  const requestedNodeIds = [];
   globalThis.figma = createFigmaStub(page, connectorGroups);
+  globalThis.figma.getNodeByIdAsync = async (nodeId) => {
+    requestedNodeIds.push(nodeId);
+    return findNodeById(page, nodeId);
+  };
   page.findAllWithCriteria = () => {
     throw new Error("Create Flow Connector must not use page-level frame discovery.");
   };
@@ -66,6 +72,7 @@ test("routes around indexed Context Frames and Annotation Cards without page fra
     routeIntersectsRect(routePoints, expandRect(annotationCard.absoluteBoundingBox, 24)),
     false,
   );
+  assert.deepEqual(requestedNodeIds, ["start", "end", "annotation-card", "middle-frame"]);
   assert.deepEqual(readConnectorEndpointIds(created), ["start", "end"]);
 });
 

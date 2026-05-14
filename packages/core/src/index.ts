@@ -3,6 +3,7 @@ export * from "./annotations/operations.ts";
 export * from "./annotations/visual-model.ts";
 export * from "./connectors/authoring-plan.ts";
 export * from "./connectors/operations.ts";
+export * from "./connectors/route-dependencies.ts";
 export * from "./connectors/route-facts.ts";
 export * from "./connectors/route-layout-plan.ts";
 export type {

@@ -18,6 +18,7 @@ import {
   toFlowConnectorAuthoringEndpoint,
 } from "./current-page-snapshot";
 import { collectConnectorObstacles } from "./obstacles";
+import { rehydrateCreateFlowConnectorRouteFacts } from "./route-dependency-adapter";
 import { FLOW_ACTION_LABEL_NODE_NAME } from "./visual-node-names";
 
 export interface CreateFlowConnectorRuntimeRouteFacts {
@@ -43,26 +44,12 @@ export async function collectCreateFlowConnectorRouteFacts(
     existingConnectorNodesById: new Map(
       snapshot.connectorRecords.map((connector) => [connector.node.id, connector.node]),
     ),
-    routeFacts: {
-      endpoints: endpointFacts,
-      existingConnectors: snapshot.connectorRecords.map((connector) => ({
-        nodeId: connector.node.id,
-        record: connector.record,
-      })),
-      obstacles:
-        endpoints.length === 2
-          ? collectConnectorObstacles(
-              endpoints[0],
-              endpoints[1],
-              runtime,
-              await collectBoundedConnectorObstacleCandidates(
-                runtime,
-                endpointFacts.map((endpoint) => endpoint.contextFrameId),
-                snapshot.connectorRecords,
-              ),
-            )
-          : [],
-    },
+    routeFacts: await rehydrateCreateFlowConnectorRouteFacts({
+      endpointFacts,
+      endpoints,
+      runtime,
+      snapshot,
+    }),
   };
 }
 
