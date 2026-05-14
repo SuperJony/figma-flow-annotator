@@ -9,8 +9,7 @@ import {
   buildArrangeAnnotationCardsOperationBatch,
   type CreateAnnotationOperationBatch,
   type Point,
-  planCreateAnnotationAuthoring,
-  selectAnnotationContextFrameId,
+  planAnnotationAuthoring,
 } from "@figma-flow-annotator/core";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
 import {
@@ -26,9 +25,7 @@ import {
 import { createAnnotationVisualWriter } from "./annotation-visual-writer";
 import {
   collectAddAnnotationSubjectsAuthoringSnapshot,
-  collectAnnotationNumberSeedsForContext,
   collectCreateAnnotationAuthoringSnapshot,
-  findReusableAnnotationCard,
 } from "./authoring-snapshot";
 import {
   getAnnotationBadgeRecords,
@@ -57,60 +54,33 @@ export interface ArrangeResult {
 }
 
 export async function createAnnotations(bodyValue: string): Promise<AnnotationCreationResult> {
-  const snapshot = collectCreateAnnotationAuthoringSnapshot({
-    annotationId: createId("annotation"),
+  const snapshot = await collectCreateAnnotationAuthoringSnapshot({
     body: bodyValue,
     now: new Date().toISOString(),
   });
-  const contextFrameId = selectAnnotationContextFrameId({
-    pageId: snapshot.input.pageId,
-    subjects: snapshot.input.subjects,
-  });
-  const reusable = await findReusableAnnotationCard({
-    annotationCards: snapshot.annotationCards,
-    body: bodyValue,
-    contextFrameId,
-  });
-
-  if (reusable !== null) {
-    const batch = buildAddAnnotationSubjectsOperationBatch({
-      annotation: reusable.record,
-      annotationCardNodeId: reusable.node.id,
-      existingBadgeSubjectNodeIds: reusable.existingBadgeSubjectNodeIds,
-      now: snapshot.input.now,
-      subjects: snapshot.input.subjects,
-    });
-    const applied = applyAnnotationOperationBatch(
-      batch,
-      new Map([...snapshot.existingNodesById, [reusable.node.id, reusable.node]]),
-    );
-
-    ensureLayerOrder();
-    return {
-      annotationNumber: batch.annotationNumber,
-      badgeCount: batch.badgeCount,
-      mode: "updated",
-      nodes: applied.nodes.length > 0 ? applied.nodes : [reusable.node],
-    };
-  }
-
-  const existingAnnotationNumberSeeds = await collectAnnotationNumberSeedsForContext(
-    snapshot.annotationCards,
-    contextFrameId,
-  );
-  const plan = planCreateAnnotationAuthoring({
+  const plan = planAnnotationAuthoring({
     ...snapshot.input,
-    existingAnnotationNumberSeeds,
+    createAnnotationId: () => createId("annotation"),
   });
   const batch = plan.batch;
-  const applied = applyAnnotationOperationBatch(batch, snapshot.existingNodesById);
+  const reusableNode =
+    plan.mode === "reuse"
+      ? snapshot.annotationCardNodesById.get(plan.reusableAnnotationCardNodeId)
+      : undefined;
+  const applied = applyAnnotationOperationBatch(
+    batch,
+    reusableNode === undefined
+      ? snapshot.existingNodesById
+      : new Map([...snapshot.existingNodesById, [reusableNode.id, reusableNode]]),
+  );
 
   ensureLayerOrder();
   return {
     annotationNumber: batch.annotationNumber,
     badgeCount: batch.badgeCount,
-    mode: "created",
-    nodes: applied.nodes,
+    mode: plan.mode === "create" ? "created" : "updated",
+    nodes:
+      applied.nodes.length > 0 ? applied.nodes : reusableNode === undefined ? [] : [reusableNode],
   };
 }
 

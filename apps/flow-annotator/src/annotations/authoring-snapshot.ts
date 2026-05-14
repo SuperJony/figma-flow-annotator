@@ -6,8 +6,10 @@ import {
   decodeAnnotationNumberSeedRecord,
   decodeAnnotationRecord,
   decodeContextRecord,
-  type PlanCreateAnnotationAuthoringInput,
+  type ExistingAnnotationCardAuthoringInput,
+  type PlanAnnotationAuthoringInput,
   SHARED_PLUGIN_DATA,
+  selectAnnotationContextFrameId,
 } from "@figma-flow-annotator/core";
 import {
   findContainer,
@@ -17,61 +19,65 @@ import {
   NAMESPACE,
   readReferenceIds,
 } from "../figma/runtime";
-import { getBadgeSubjectNodeIds, isAnnotationCardNode } from "./records";
+import {
+  getBadgeSubjectNodeIds,
+  getBadgeSubjectNodeIdsByAnnotationId,
+  isAnnotationCardNode,
+} from "./records";
 
-type CreateAnnotationAuthoringBaseInput = Omit<
-  PlanCreateAnnotationAuthoringInput,
-  "existingAnnotationNumberSeeds"
->;
+type CreateAnnotationAuthoringInput = Omit<PlanAnnotationAuthoringInput, "createAnnotationId">;
 
-export interface CreateAnnotationAuthoringSnapshot {
-  annotationCards: AnnotationCardsSnapshot;
+interface CreateAnnotationAuthoringSnapshot {
+  annotationCardNodesById: Map<string, FrameNode>;
   existingNodesById: Map<string, BaseNode>;
-  input: CreateAnnotationAuthoringBaseInput;
+  input: CreateAnnotationAuthoringInput;
 }
 
-export interface AddAnnotationSubjectsAuthoringSnapshot {
+interface AddAnnotationSubjectsAuthoringSnapshot {
   existingNodesById: Map<string, BaseNode>;
   input: BuildAddAnnotationSubjectsOperationBatchInput;
 }
 
-export interface ReusableAnnotationCard {
-  existingBadgeSubjectNodeIds: string[];
+interface AnnotationCardsSnapshot {
+  cards: ExistingAnnotationCardAuthoringInput[];
+  nodesById: Map<string, FrameNode>;
+}
+
+interface RawAnnotationCardAuthoringSnapshot {
   node: FrameNode;
-  record: AnnotationRecord;
+  record: AnnotationRecord | null;
+  seed: AnnotationNumberSeedRecord;
 }
 
-export interface AnnotationCardsSnapshot {
-  cards: {
-    node: FrameNode;
-    record: AnnotationRecord | null;
-    seed: AnnotationNumberSeedRecord;
-  }[];
-  container: FrameNode | null;
-}
-
-export function collectCreateAnnotationAuthoringSnapshot(input: {
-  annotationId: string;
+export async function collectCreateAnnotationAuthoringSnapshot(input: {
   body: string;
   now: string;
-}): CreateAnnotationAuthoringSnapshot {
+}): Promise<CreateAnnotationAuthoringSnapshot> {
   const subjects = figma.currentPage.selection.filter((node) => !hasGeneratedAncestor(node));
+  const authoringSubjects = subjects.map(toCreateAnnotationAuthoringSubject);
+  const contextFrameId = selectAnnotationContextFrameId({
+    pageId: figma.currentPage.id,
+    subjects: authoringSubjects,
+  });
   const contextNodesById = collectAnnotationContextNodes(subjects);
-  const annotationCards = collectAnnotationCardsSnapshot(findContainer(ANNOTATIONS_CONTAINER_NAME));
+  const annotationCards = await collectAnnotationCardsSnapshot(
+    findContainer(ANNOTATIONS_CONTAINER_NAME),
+    contextFrameId,
+  );
 
   return {
-    annotationCards,
+    annotationCardNodesById: annotationCards.nodesById,
     existingNodesById: new Map([
       ...contextNodesById,
       ...subjects.map((subject): [string, BaseNode] => [subject.id, subject]),
     ]),
     input: {
-      annotationId: input.annotationId,
       body: input.body,
       contextRecords: collectContextRecords(contextNodesById),
+      existingAnnotationCards: annotationCards.cards,
       now: input.now,
       pageId: figma.currentPage.id,
-      subjects: subjects.map(toCreateAnnotationAuthoringSubject),
+      subjects: authoringSubjects,
     },
   };
 }
@@ -104,50 +110,6 @@ export function collectAddAnnotationSubjectsAuthoringSnapshot(input: {
   };
 }
 
-export async function findReusableAnnotationCard(input: {
-  annotationCards: AnnotationCardsSnapshot;
-  body: string;
-  contextFrameId: string;
-}): Promise<ReusableAnnotationCard | null> {
-  if (input.annotationCards.container === null) {
-    return null;
-  }
-
-  const normalizedBody = input.body.trim();
-  const candidates = input.annotationCards.cards.flatMap(({ node, record }) =>
-    record !== null && record.body.trim() === normalizedBody ? [{ node, record }] : [],
-  );
-  const subjectNodesById = await getSeedSubjectNodes(
-    candidates
-      .filter(({ record }) => record.contextFrameId !== input.contextFrameId)
-      .flatMap(({ record }) => record.subjectNodeIds),
-  );
-  const reusable = candidates
-    .flatMap(({ node, record }) => {
-      if (!isAnnotationInEffectiveContext(record, input.contextFrameId, subjectNodesById)) {
-        return [];
-      }
-
-      return [{ node, record }];
-    })
-    .sort(
-      (first, second) =>
-        first.record.annotationNumber - second.record.annotationNumber ||
-        first.record.id.localeCompare(second.record.id),
-    )[0];
-
-  return reusable === undefined
-    ? null
-    : {
-        existingBadgeSubjectNodeIds: getBadgeSubjectNodeIds(
-          input.annotationCards.container,
-          reusable.record.id,
-        ),
-        node: reusable.node,
-        record: reusable.record,
-      };
-}
-
 function collectAnnotationContextNodes(subjects: SceneNode[]): Map<string, FrameNode | PageNode> {
   const contextNodes = new Map<string, FrameNode | PageNode>([
     [figma.currentPage.id, figma.currentPage],
@@ -171,12 +133,44 @@ function collectContextRecords(contextNodes: Map<string, FrameNode | PageNode>) 
   });
 }
 
-function collectAnnotationCardsSnapshot(container: FrameNode | null): AnnotationCardsSnapshot {
+async function collectAnnotationCardsSnapshot(
+  container: FrameNode | null,
+  contextFrameId: string,
+): Promise<AnnotationCardsSnapshot> {
   if (container === null) {
-    return { cards: [], container };
+    return { cards: [], nodesById: new Map() };
   }
 
-  const cards = container.children.flatMap((node) => {
+  const badgeSubjectNodeIdsByAnnotationId = getBadgeSubjectNodeIdsByAnnotationId(container);
+  const rawCards = collectRawAnnotationCards(container);
+  const subjectNodesById = await getSeedSubjectNodes(
+    rawCards.flatMap(({ record }) =>
+      record !== null && record.contextFrameId !== contextFrameId ? record.subjectNodeIds : [],
+    ),
+  );
+  const cards: ExistingAnnotationCardAuthoringInput[] = rawCards.map(({ node, record, seed }) => ({
+    annotationCardNodeId: node.id,
+    existingBadgeSubjectNodeIds:
+      record === null ? [] : (badgeSubjectNodeIdsByAnnotationId.get(record.id) ?? []),
+    record,
+    seed,
+    subjectAncestorFrameIds:
+      record === null
+        ? []
+        : record.subjectNodeIds.flatMap((subjectNodeId) => {
+            const subject = subjectNodesById.get(subjectNodeId);
+            return subject === undefined ? [] : [getTopLevelFrameAncestorIds(subject)];
+          }),
+  }));
+
+  return {
+    cards,
+    nodesById: new Map(rawCards.map(({ node }) => [node.id, node])),
+  };
+}
+
+function collectRawAnnotationCards(container: FrameNode): RawAnnotationCardAuthoringSnapshot[] {
+  return container.children.flatMap((node) => {
     if (!isAnnotationCardNode(node)) {
       return [];
     }
@@ -186,36 +180,11 @@ function collectAnnotationCardsSnapshot(container: FrameNode | null): Annotation
     const record = decodeAnnotationRecord(value);
     return seed === null ? [] : [{ node, record, seed }];
   });
-
-  return { cards, container };
 }
 
-export async function collectAnnotationNumberSeedsForContext(
-  annotationCards: AnnotationCardsSnapshot,
-  contextFrameId: string,
-): Promise<AnnotationNumberSeedRecord[]> {
-  const recordsNeedingContextRecovery = annotationCards.cards.flatMap(({ record }) =>
-    record !== null && record.contextFrameId !== contextFrameId ? [record] : [],
-  );
-  const subjectNodesById = await getSeedSubjectNodes(
-    recordsNeedingContextRecovery.flatMap((record) => record.subjectNodeIds),
-  );
-
-  return [
-    ...annotationCards.cards.map(({ seed }) => seed),
-    ...recordsNeedingContextRecovery.flatMap((record) => {
-      return record.subjectNodeIds.flatMap((subjectNodeId) => {
-        const subjectNode = subjectNodesById.get(subjectNodeId);
-        if (
-          subjectNode === undefined ||
-          getEffectiveAnnotationContextId(subjectNode) !== contextFrameId
-        ) {
-          return [];
-        }
-        return [{ annotationNumber: record.annotationNumber, contextFrameId }];
-      });
-    }),
-  ];
+async function getSeedSubjectNodes(subjectNodeIds: string[]): Promise<Map<string, SceneNode>> {
+  const nodes = await getExistingSceneNodesById(subjectNodeIds);
+  return new Map(nodes.map((node) => [node.id, node]));
 }
 
 function toCreateAnnotationAuthoringSubject(subject: SceneNode) {
@@ -243,10 +212,6 @@ function getTopLevelFrameAncestorIds(node: SceneNode): string[] {
   return frame === null ? [] : [frame.id];
 }
 
-function getEffectiveAnnotationContextId(node: SceneNode): string {
-  return getTopLevelFrameAncestor(node)?.id ?? figma.currentPage.id;
-}
-
 function getTopLevelFrameAncestor(node: SceneNode): FrameNode | null {
   let topLevelFrame: FrameNode | null = null;
   let current: BaseNode | null = node;
@@ -257,24 +222,4 @@ function getTopLevelFrameAncestor(node: SceneNode): FrameNode | null {
     current = current.parent;
   }
   return topLevelFrame;
-}
-
-async function getSeedSubjectNodes(subjectNodeIds: string[]): Promise<Map<string, SceneNode>> {
-  const nodes = await getExistingSceneNodesById(subjectNodeIds);
-  return new Map(nodes.map((node) => [node.id, node]));
-}
-
-function isAnnotationInEffectiveContext(
-  record: AnnotationRecord,
-  contextFrameId: string,
-  subjectNodesById: Map<string, SceneNode>,
-): boolean {
-  if (record.contextFrameId === contextFrameId) {
-    return true;
-  }
-
-  return record.subjectNodeIds.some((subjectNodeId) => {
-    const subject = subjectNodesById.get(subjectNodeId);
-    return subject !== undefined && getEffectiveAnnotationContextId(subject) === contextFrameId;
-  });
 }

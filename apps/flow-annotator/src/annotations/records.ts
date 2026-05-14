@@ -117,10 +117,18 @@ export function getAnnotationBadgeRecords(
   });
 }
 
+export function getBadgeSubjectNodeIdsByAnnotationId(container: FrameNode): Map<string, string[]> {
+  const byAnnotationId = new Map<string, string[]>();
+  getAnnotationBadgeRecords(container).forEach(({ record }) => {
+    const subjectNodeIds = byAnnotationId.get(record.annotationId) ?? [];
+    subjectNodeIds.push(record.subjectNodeId);
+    byAnnotationId.set(record.annotationId, subjectNodeIds);
+  });
+  return byAnnotationId;
+}
+
 export function getBadgeSubjectNodeIds(container: FrameNode, annotationId: string): string[] {
-  return getAnnotationBadgeRecords(container)
-    .filter((badge) => badge.record.annotationId === annotationId)
-    .map((badge) => badge.record.subjectNodeId);
+  return getBadgeSubjectNodeIdsByAnnotationId(container).get(annotationId) ?? [];
 }
 
 export function getAnnotationCardRecords(

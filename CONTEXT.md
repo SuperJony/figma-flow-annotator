@@ -24,6 +24,10 @@ _Avoid_: Description, content
 The category of an **Annotation**, such as note, rule, interaction, or state.
 _Avoid_: Type, tag
 
+**Annotation Authoring Decision**:
+The core decision for a Create Annotation command: create a new **Annotation** or reuse an existing same-body **Annotation** by adding selected **Subject Nodes**, then emit one **Figma File Operation Batch**.
+_Avoid_: Reuse heuristic, create mode
+
 **Annotation Card**:
 The detailed visual representation of an **Annotation**, usually placed below the related UI frame.
 _Avoid_: Annotation, annotator
@@ -120,6 +124,8 @@ _Avoid_: Document Change Plan, plan
 - An **Annotation** may have one **Annotation Title**.
 - An **Annotation** must have one non-empty **Annotation Body**.
 - An **Annotation** may have one **Annotation Kind**.
+- A Create Annotation command produces one **Annotation Authoring Decision** before emitting a **Figma File Operation Batch**.
+- The plugin collects Figma file facts for an **Annotation Authoring Decision**; shared core owns whether to create or reuse an **Annotation**.
 - An **Annotation** may have zero or more **Annotation Badges**.
 - An **Annotation Card** and its **Annotation Badges** refer to the same **Annotation**.
 - An **Annotation** is bound to one or more **Subject Nodes**.

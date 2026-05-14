@@ -32,8 +32,11 @@ test("creates an Annotation without scanning unrelated frame descendants for num
       schemaVersion: 1,
       id: "annotation-existing",
       annotationNumber: 4,
+      body: "Existing note",
       contextFrameId: page.id,
       subjectNodeIds: ["old-subject"],
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:00.000Z",
     }),
   );
 
@@ -45,6 +48,13 @@ test("creates an Annotation without scanning unrelated frame descendants for num
   page.children = [subjectA, subjectB, unrelatedFrame, annotationsContainer];
   page.selection = [subjectA, subjectB];
   globalThis.figma = createFigmaStub(page, messages);
+  const getNodeByIdAsync = globalThis.figma.getNodeByIdAsync;
+  globalThis.figma.getNodeByIdAsync = async (id) => {
+    if (id === "old-subject") {
+      throw new Error("Same-context Annotation subjects must not be hydrated for numbering.");
+    }
+    return getNodeByIdAsync(id);
+  };
 
   await importCodeModule();
 

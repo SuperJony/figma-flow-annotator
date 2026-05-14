@@ -3,36 +3,76 @@ import { test } from "node:test";
 
 import { importCoreModule } from "../support/helpers.mjs";
 
+const NOW = "2026-05-10T00:00:00.000Z";
+
+function subject(overrides) {
+  return {
+    ancestorFrameIds: ["frame-common"],
+    bounds: { x: 20, y: 40, width: 120, height: 60 },
+    existingAnnotationRefCount: 0,
+    id: "subject-a",
+    name: "Subject A",
+    ...overrides,
+  };
+}
+
+function seed(contextFrameId, annotationNumber) {
+  return { contextFrameId, annotationNumber };
+}
+
+function annotationRecord(core, overrides) {
+  return core.createAnnotationRecord({
+    annotationId: "annotation-existing",
+    annotationNumber: 1,
+    body: "Existing body",
+    contextFrameId: "frame-common",
+    now: NOW,
+    subjectNodeIds: ["subject-a"],
+    ...overrides,
+  });
+}
+
+function existingAnnotationCard(seedRecord, options = {}) {
+  return {
+    annotationCardNodeId:
+      options.annotationCardNodeId ??
+      `card-${seedRecord.contextFrameId}-${seedRecord.annotationNumber}`,
+    existingBadgeSubjectNodeIds: options.existingBadgeSubjectNodeIds ?? [],
+    record: options.record ?? null,
+    seed: seedRecord,
+    subjectAncestorFrameIds: options.subjectAncestorFrameIds ?? [],
+  };
+}
+
 test("plans Annotation authoring from subject ancestry, context records, and number seeds", async () => {
   const core = await importCoreModule();
-  const plan = core.planCreateAnnotationAuthoring({
-    annotationId: "annotation-new",
+  const plan = core.planAnnotationAuthoring({
     body: "  Shared rule  ",
     contextRecords: [{ schemaVersion: 1, contextFrameId: "frame-common", nextAnnotationNumber: 9 }],
-    existingAnnotationNumberSeeds: [
-      { contextFrameId: "frame-common", annotationNumber: 3 },
-      { contextFrameId: "page", annotationNumber: 11 },
+    createAnnotationId: () => "annotation-new",
+    existingAnnotationCards: [
+      existingAnnotationCard(seed("frame-common", 3)),
+      existingAnnotationCard(seed("page", 11)),
     ],
-    now: "2026-05-10T00:00:00.000Z",
+    now: NOW,
     pageId: "page",
     subjects: [
-      {
+      subject({
         ancestorFrameIds: ["frame-common", "frame-a"],
-        bounds: { x: 20, y: 40, width: 120, height: 60 },
-        existingAnnotationRefCount: 0,
         id: "subject-a",
         name: "Subject A",
-      },
-      {
+      }),
+      subject({
         ancestorFrameIds: ["frame-common", "frame-b"],
         bounds: { x: 200, y: 40, width: 120, height: 60 },
         existingAnnotationRefCount: 1,
         id: "subject-b",
         name: "Subject B",
-      },
+      }),
     ],
   });
 
+  assert.equal(plan.mode, "create");
   assert.equal(plan.contextFrameId, "frame-common");
   assert.equal(plan.annotationNumber, 9);
   assert.equal(plan.batch.annotationNumber, 9);
@@ -43,34 +83,33 @@ test("plans Annotation authoring from subject ancestry, context records, and num
 
 test("falls back to Temporary Page Context and seeds the next Annotation Number", async () => {
   const core = await importCoreModule();
-  const plan = core.planCreateAnnotationAuthoring({
-    annotationId: "annotation-new",
+  const plan = core.planAnnotationAuthoring({
     body: "Page-owned note",
     contextRecords: [],
-    existingAnnotationNumberSeeds: [
-      { contextFrameId: "page", annotationNumber: 2 },
-      { contextFrameId: "frame-a", annotationNumber: 8 },
+    createAnnotationId: () => "annotation-new",
+    existingAnnotationCards: [
+      existingAnnotationCard(seed("page", 2)),
+      existingAnnotationCard(seed("frame-a", 8)),
     ],
-    now: "2026-05-10T00:00:00.000Z",
+    now: NOW,
     pageId: "page",
     subjects: [
-      {
+      subject({
         ancestorFrameIds: ["frame-a"],
         bounds: { x: 0, y: 0, width: 100, height: 50 },
-        existingAnnotationRefCount: 0,
         id: "subject-a",
         name: "Subject A",
-      },
-      {
+      }),
+      subject({
         ancestorFrameIds: ["frame-b"],
         bounds: { x: 160, y: 0, width: 100, height: 50 },
-        existingAnnotationRefCount: 0,
         id: "subject-b",
         name: "Subject B",
-      },
+      }),
     ],
   });
 
+  assert.equal(plan.mode, "create");
   assert.equal(plan.contextFrameId, "page");
   assert.equal(plan.annotationNumber, 3);
   assert.equal(plan.batch.record.contextFrameId, "page");
@@ -82,54 +121,130 @@ test("falls back to Temporary Page Context and seeds the next Annotation Number"
 
 test("uses the outermost shared Context Frame for nested subject ancestry", async () => {
   const core = await importCoreModule();
-  const plan = core.planCreateAnnotationAuthoring({
-    annotationId: "annotation-new",
+  const plan = core.planAnnotationAuthoring({
     body: "Nested note",
     contextRecords: [
       { schemaVersion: 1, contextFrameId: "screen", nextAnnotationNumber: 5 },
       { schemaVersion: 1, contextFrameId: "inner-group", nextAnnotationNumber: 12 },
     ],
-    existingAnnotationNumberSeeds: [],
+    createAnnotationId: () => "annotation-new",
+    existingAnnotationCards: [],
     now: "2026-05-12T00:00:00.000Z",
     pageId: "page",
     subjects: [
-      {
+      subject({
         ancestorFrameIds: ["screen", "inner-group"],
         bounds: { x: 0, y: 0, width: 100, height: 50 },
-        existingAnnotationRefCount: 0,
         id: "subject-a",
         name: "Subject A",
-      },
+      }),
     ],
   });
 
+  assert.equal(plan.mode, "create");
   assert.equal(plan.contextFrameId, "screen");
   assert.equal(plan.annotationNumber, 5);
 });
 
 test("does not trust a stale context next Annotation Number below existing seeds", async () => {
   const core = await importCoreModule();
-  const plan = core.planCreateAnnotationAuthoring({
-    annotationId: "annotation-new",
+  const plan = core.planAnnotationAuthoring({
     body: "Non-duplicate note",
     contextRecords: [{ schemaVersion: 1, contextFrameId: "frame-common", nextAnnotationNumber: 2 }],
-    existingAnnotationNumberSeeds: [
-      { contextFrameId: "frame-common", annotationNumber: 1 },
-      { contextFrameId: "frame-common", annotationNumber: 3 },
+    createAnnotationId: () => "annotation-new",
+    existingAnnotationCards: [
+      existingAnnotationCard(seed("frame-common", 1)),
+      existingAnnotationCard(seed("frame-common", 3)),
     ],
     now: "2026-05-12T00:00:00.000Z",
     pageId: "page",
     subjects: [
-      {
+      subject({
         ancestorFrameIds: ["frame-common"],
         bounds: { x: 0, y: 0, width: 100, height: 50 },
-        existingAnnotationRefCount: 0,
         id: "subject-a",
         name: "Subject A",
-      },
+      }),
     ],
   });
 
+  assert.equal(plan.mode, "create");
   assert.equal(plan.contextFrameId, "frame-common");
   assert.equal(plan.annotationNumber, 4);
+});
+
+test("reuses a same-body Annotation in the effective Context Frame", async () => {
+  const core = await importCoreModule();
+  const plan = core.planAnnotationAuthoring({
+    body: "  Shared rule  ",
+    contextRecords: [{ schemaVersion: 1, contextFrameId: "frame-common", nextAnnotationNumber: 9 }],
+    createAnnotationId: () => {
+      throw new Error("Reuse mode must not create a new Annotation id.");
+    },
+    existingAnnotationCards: [
+      existingAnnotationCard(seed("frame-common", 2), {
+        annotationCardNodeId: "card-existing",
+        existingBadgeSubjectNodeIds: ["subject-a"],
+        record: annotationRecord(core, {
+          annotationId: "annotation-existing",
+          annotationNumber: 2,
+          body: "Shared rule",
+          contextFrameId: "frame-common",
+          subjectNodeIds: ["subject-a"],
+        }),
+        subjectAncestorFrameIds: [["frame-common"]],
+      }),
+    ],
+    now: "2026-05-12T00:00:00.000Z",
+    pageId: "page",
+    subjects: [
+      subject({
+        bounds: { x: 160, y: 0, width: 100, height: 50 },
+        id: "subject-b",
+        name: "Subject B",
+      }),
+    ],
+  });
+
+  assert.equal(plan.mode, "reuse");
+  assert.equal(plan.contextFrameId, "frame-common");
+  assert.equal(plan.annotationNumber, 2);
+  assert.equal(plan.reusableAnnotationCardNodeId, "card-existing");
+  assert.equal(plan.batch.kind, "add-annotation-subjects");
+  assert.equal(plan.batch.badgeCount, 1);
+  assert.deepEqual(plan.batch.record.subjectNodeIds, ["subject-a", "subject-b"]);
+});
+
+test("recovers legacy Annotation Number seeds from effective Subject Node contexts", async () => {
+  const core = await importCoreModule();
+  const plan = core.planAnnotationAuthoring({
+    body: "Nested note",
+    contextRecords: [{ schemaVersion: 1, contextFrameId: "screen", nextAnnotationNumber: 1 }],
+    createAnnotationId: () => "annotation-new",
+    existingAnnotationCards: [
+      existingAnnotationCard(seed("inner-group", 4), {
+        record: annotationRecord(core, {
+          annotationId: "annotation-nested",
+          annotationNumber: 4,
+          body: "Old nested note",
+          contextFrameId: "inner-group",
+          subjectNodeIds: ["subject-existing"],
+        }),
+        subjectAncestorFrameIds: [["screen", "inner-group"]],
+      }),
+    ],
+    now: "2026-05-12T00:00:00.000Z",
+    pageId: "page",
+    subjects: [
+      subject({
+        ancestorFrameIds: ["screen", "inner-group"],
+        id: "subject-new",
+        name: "Subject New",
+      }),
+    ],
+  });
+
+  assert.equal(plan.mode, "create");
+  assert.equal(plan.contextFrameId, "screen");
+  assert.equal(plan.annotationNumber, 5);
 });
