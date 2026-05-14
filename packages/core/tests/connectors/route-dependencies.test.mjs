@@ -87,7 +87,13 @@ test("exposes shared route dependency planners for refresh and validation", asyn
   });
   const validationPlan = core.planValidateFlowConnectorRouteDependencies({
     connectors: [connector],
-    explicitObstacleCandidateNodeIds: ["explicit-obstacle"],
+    explicitAnnotationCardNodeIds: ["explicit-card"],
+    flowActionLabelNodeIds: [
+      {
+        nodeId: "label-node",
+        sourceConnectorNodeId: "connector-node",
+      },
+    ],
     validationIndex: validationIndex({}),
   });
 
@@ -104,8 +110,16 @@ test("exposes shared route dependency planners for refresh and validation", asyn
         validationPlan.dependencies,
         "connector-obstacle-candidate",
       )
-      .includes("explicit-obstacle"),
+      .includes("explicit-card"),
     true,
+  );
+  assert.deepEqual(
+    dependenciesFor(validationPlan, "flow-action-label").map((dependency) => [
+      dependency.nodeId,
+      dependency.classification,
+      dependency.sourceConnectorNodeId,
+    ]),
+    [["label-node", "flow-action-label", "connector-node"]],
   );
 });
 
@@ -205,6 +219,118 @@ test("plans selected and page Refresh Connectors dependencies without runtime fa
   );
   assert.equal(JSON.stringify(selectedPlan).includes("bounds"), false);
   assert.equal(JSON.stringify(selectedPlan).includes("absoluteBoundingBox"), false);
+});
+
+test("plans Validate Bindings route dependencies without runtime facts", async () => {
+  const core = await importCoreModule();
+  const connectorA = {
+    nodeId: "connector-node-a",
+    record: core.createFlowConnectorRecord({
+      connectorId: "connector-a",
+      createdAt: "2026-05-13T00:00:00.000Z",
+      end: { contextFrameId: "frame-b", nodeId: "node-b" },
+      flowAction: "open",
+      now: "2026-05-13T00:00:00.000Z",
+      ownerContextFrameId: "owner-a",
+      routePoints: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      start: { contextFrameId: "frame-a", nodeId: "node-a" },
+    }),
+  };
+  const connectorB = {
+    nodeId: "connector-node-b",
+    record: core.createFlowConnectorRecord({
+      connectorId: "connector-b",
+      createdAt: "2026-05-13T00:00:00.000Z",
+      end: { contextFrameId: "frame-d", nodeId: "node-d" },
+      flowAction: null,
+      now: "2026-05-13T00:00:00.000Z",
+      ownerContextFrameId: "owner-c",
+      start: { contextFrameId: "frame-c", nodeId: "node-c" },
+    }),
+  };
+
+  const plan = core.planValidateFlowConnectorRouteDependencies({
+    connectors: [connectorA, connectorB],
+    explicitAnnotationCardNodeIds: ["explicit-card"],
+    flowActionLabelNodeIds: [
+      { nodeId: "label-a", sourceConnectorNodeId: "connector-node-a" },
+      { nodeId: "label-b", sourceConnectorNodeId: "connector-node-b" },
+    ],
+    validationIndex: validationIndex({
+      annotationBadgeNodeIds: ["badge-1"],
+      annotationCardNodeIds: ["indexed-card"],
+      connectorObstacleCandidateNodeIds: ["indexed-card", "badge-1", "indexed-frame"],
+      contextFrameIds: ["context-frame"],
+      ownerContextFrameIds: ["owner-frame"],
+    }),
+  });
+
+  assert.deepEqual(
+    dependenciesFor(plan, "existing-flow-connector").map((dependency) => [
+      dependency.nodeId,
+      dependency.classification,
+      dependency.sourceConnectorNodeId,
+    ]),
+    [
+      ["connector-node-a", "existing-flow-connector-root", "connector-node-a"],
+      ["connector-node-b", "existing-flow-connector-root", "connector-node-b"],
+    ],
+  );
+  assert.deepEqual(
+    dependenciesFor(plan, "flow-endpoint").map((dependency) => [
+      dependency.nodeId,
+      dependency.classification,
+      dependency.sourceConnectorNodeId,
+    ]),
+    [
+      ["node-a", "connector-record-endpoint", "connector-node-a"],
+      ["node-b", "connector-record-endpoint", "connector-node-a"],
+      ["node-c", "connector-record-endpoint", "connector-node-b"],
+      ["node-d", "connector-record-endpoint", "connector-node-b"],
+    ],
+  );
+  assert.deepEqual(
+    core.collectFlowConnectorRouteDependencyNodeIds(
+      plan.dependencies,
+      "connector-obstacle-candidate",
+    ),
+    [
+      "indexed-card",
+      "context-frame",
+      "owner-frame",
+      "indexed-frame",
+      "explicit-card",
+      "frame-a",
+      "frame-b",
+      "owner-a",
+      "node-a",
+      "node-b",
+      "frame-c",
+      "frame-d",
+      "owner-c",
+      "node-c",
+      "node-d",
+    ],
+  );
+  assert.deepEqual(
+    dependenciesFor(plan, "flow-action-label").map((dependency) => [
+      dependency.nodeId,
+      dependency.sourceConnectorNodeId,
+    ]),
+    [
+      ["label-a", "connector-node-a"],
+      ["label-b", "connector-node-b"],
+    ],
+  );
+  assert.equal(
+    plan.dependencies.some((dependency) => dependency.nodeId === "badge-1"),
+    false,
+  );
+  assert.equal(JSON.stringify(plan).includes("bounds"), false);
+  assert.equal(JSON.stringify(plan).includes("absoluteBoundingBox"), false);
 });
 
 function dependenciesFor(plan, role) {

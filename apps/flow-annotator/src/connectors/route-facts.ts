@@ -1,14 +1,9 @@
-import {
-  type CreateFlowConnectorRouteFacts,
-  type FlowConnectorRecord,
-  type FlowConnectorRouteGeometryEndpointFact,
-  getFlowConnectorValidationIndexNodeIds,
-  type RefreshFlowConnectorRouteFacts,
-  type ValidateFlowConnectorRouteConnectorFact,
-  type ValidateFlowConnectorRouteGeometryInput,
+import type {
+  CreateFlowConnectorRouteFacts,
+  FlowConnectorRecord,
+  RefreshFlowConnectorRouteFacts,
+  ValidateFlowConnectorRouteGeometryInput,
 } from "@figma-flow-annotator/core";
-import { getExistingSceneNodesById } from "../figma/runtime";
-import { readBestEffortMergedValidationIndex } from "../figma/validation-index";
 import {
   collectFlowConnectorCurrentPageSnapshot,
   type FlowConnectorCurrentPageRuntime,
@@ -16,12 +11,11 @@ import {
   readFlowConnectorRecord,
   toFlowConnectorAuthoringEndpoint,
 } from "./current-page-snapshot";
-import { collectConnectorObstacles } from "./obstacles";
 import {
   rehydrateCreateFlowConnectorRouteFacts,
   rehydrateRefreshFlowConnectorRouteFacts,
+  rehydrateValidateFlowConnectorRouteGeometry,
 } from "./route-dependency-adapter";
-import { FLOW_ACTION_LABEL_NODE_NAME } from "./visual-node-names";
 
 export interface CreateFlowConnectorRuntimeRouteFacts {
   existingConnectorNodesById: Map<string, GroupNode>;
@@ -82,29 +76,15 @@ export async function collectRefreshFlowConnectorRouteFacts(
 export async function collectValidationFlowConnectorRouteFacts(
   runtime: FlowConnectorCurrentPageRuntime,
   connectorRecords: Iterable<FlowConnectorSnapshotRecord>,
-  explicitObstacleCandidateNodeIds: Iterable<string> = [],
+  explicitAnnotationCardNodeIds: Iterable<string> = [],
   preloadedNodes: Iterable<SceneNode> = [],
 ): Promise<ValidateFlowConnectorRouteGeometryInput> {
-  const connectors = [...connectorRecords];
-  const preloadedNodesById = new Map(
-    [...preloadedNodes].map((node): [string, SceneNode] => [node.id, node]),
-  );
-  const obstacleCandidates = await collectBoundedConnectorObstacleCandidates(
+  return rehydrateValidateFlowConnectorRouteGeometry({
+    connectorRecords: [...connectorRecords],
+    explicitAnnotationCardNodeIds,
+    preloadedNodes,
     runtime,
-    collectEndpointContextFrameIds(connectors),
-    connectors,
-    explicitObstacleCandidateNodeIds,
-    preloadedNodesById,
-  );
-  const routeNodesById = new Map(
-    obstacleCandidates.map((node): [string, SceneNode] => [node.id, node]),
-  );
-
-  return {
-    connectors: connectors.map((connector) =>
-      toValidationFlowConnectorRouteFact(connector, runtime, routeNodesById, obstacleCandidates),
-    ),
-  };
+  });
 }
 
 interface RefreshConnectorRecord {
@@ -139,96 +119,6 @@ function collectRefreshConnectorRecords(
   return [...selectedConnectors, ...remainingConnectors];
 }
 
-function toValidationFlowConnectorRouteFact(
-  connector: FlowConnectorSnapshotRecord,
-  runtime: FlowConnectorCurrentPageRuntime,
-  routeNodesById: Map<string, SceneNode>,
-  obstacleCandidates: Iterable<SceneNode>,
-): ValidateFlowConnectorRouteConnectorFact {
-  const startNode = routeNodesById.get(connector.record.start.nodeId);
-  const endNode = routeNodesById.get(connector.record.end.nodeId);
-  const labelRect = getFlowActionLabelRect(connector.node);
-  const baseFact = {
-    nodeId: connector.node.id,
-    record: connector.record,
-    ...(labelRect === undefined ? {} : { labelRect }),
-  };
-
-  if (startNode === undefined || endNode === undefined) {
-    return baseFact;
-  }
-
-  return {
-    ...baseFact,
-    end: toValidationEndpointFact(endNode, connector.record.end, runtime),
-    obstacles: collectConnectorObstacles(startNode, endNode, runtime, obstacleCandidates),
-    start: toValidationEndpointFact(startNode, connector.record.start, runtime),
-  };
-}
-
-function toValidationEndpointFact(
-  node: SceneNode,
-  endpoint: { contextFrameId: string; nodeId: string },
-  runtime: Pick<FlowConnectorCurrentPageRuntime, "getVisibleBounds">,
-): FlowConnectorRouteGeometryEndpointFact {
-  return {
-    bounds: runtime.getVisibleBounds(node),
-    contextFrameId: endpoint.contextFrameId,
-    id: endpoint.nodeId,
-    name: node.name,
-  };
-}
-
-async function collectBoundedConnectorObstacleCandidates(
-  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-  endpointContextFrameIds: Iterable<string>,
-  connectorRecords: Iterable<{ record: FlowConnectorRecord }>,
-  explicitObstacleCandidateNodeIds: Iterable<string> = [],
-  preloadedNodesById: Map<string, SceneNode> = new Map(),
-): Promise<SceneNode[]> {
-  const currentPage = figma.currentPage;
-  const nodeIds = new Set<string>(endpointContextFrameIds);
-  const validationIndex = readBestEffortMergedValidationIndex(runtime);
-
-  addNodeIds(nodeIds, explicitObstacleCandidateNodeIds);
-  addNodeIds(nodeIds, validationIndex.annotationCardNodeIds);
-  addNodeIds(nodeIds, validationIndex.contextFrameIds);
-  addNodeIds(nodeIds, validationIndex.ownerContextFrameIds);
-  addNodeIds(nodeIds, validationIndex.connectorObstacleCandidateNodeIds);
-  for (const connector of connectorRecords) {
-    const indexNodeIds = getFlowConnectorValidationIndexNodeIds(connector.record);
-    addNodeIds(nodeIds, indexNodeIds.connectorObstacleCandidateNodeIds);
-  }
-
-  return [
-    ...preloadedNodesById.values(),
-    ...(await getExistingSceneNodesById(
-      [...nodeIds].filter((nodeId) => !preloadedNodesById.has(nodeId)),
-      currentPage.id,
-      figma.getNodeByIdAsync.bind(figma),
-    )),
-  ];
-}
-
-function* collectEndpointContextFrameIds(
-  connectors: Iterable<{ record: FlowConnectorRecord | null }>,
-): Iterable<string> {
-  for (const connector of connectors) {
-    if (connector.record === null) {
-      continue;
-    }
-    yield connector.record.start.contextFrameId;
-    yield connector.record.end.contextFrameId;
-    yield connector.record.ownerContextFrameId;
-  }
-}
-
-function addNodeIds(target: Set<string>, nodeIds: Iterable<string>): void {
-  for (const nodeId of nodeIds) {
-    target.add(nodeId);
-  }
-}
-
 function buildConnectorNodeMap(
   connectorRecords: FlowConnectorSnapshotRecord[],
   selectedConnectorRoots: GroupNode[],
@@ -238,19 +128,4 @@ function buildConnectorNodeMap(
       (node) => [node.id, node],
     ),
   );
-}
-
-function getFlowActionLabelRect(connectorRoot: GroupNode): Rect | undefined {
-  const label = connectorRoot.children.find(
-    (child) =>
-      child.name === FLOW_ACTION_LABEL_NODE_NAME &&
-      child.visible !== false &&
-      "absoluteBoundingBox" in child &&
-      child.absoluteBoundingBox !== null,
-  );
-  return label === undefined ||
-    !("absoluteBoundingBox" in label) ||
-    label.absoluteBoundingBox === null
-    ? undefined
-    : label.absoluteBoundingBox;
 }

@@ -45,6 +45,7 @@ test("validates route obstacles from bounded connector route facts", async () =>
     { x: 420, y: 50 },
   ]);
   setValidationIndex(connectorsContainer, {
+    annotationBadgeNodeIds: [indexedBadge.id],
     connectorRootNodeIds: [connector.id],
     connectorObstacleCandidateNodeIds: [
       start.id,
@@ -90,5 +91,6 @@ test("validates route obstacles from bounded connector route facts", async () =>
   );
   assert.ok(crossingIssue);
   assert.deepEqual(crossingIssue.locationNodeIds, ["connector-indexed-root"]);
+  assert.equal(resolvedNodeIds.includes(indexedBadge.id), false);
   assert.equal(resolvedNodeIds.includes(unrelatedFrame.id), false);
 });

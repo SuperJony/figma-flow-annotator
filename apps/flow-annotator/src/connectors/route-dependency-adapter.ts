@@ -4,19 +4,25 @@ import {
   type FlowConnectorRecord,
   type FlowConnectorRouteDependency,
   type FlowConnectorRouteEndpointFact,
+  type FlowConnectorRouteGeometryEndpointFact,
   planCreateFlowConnectorRouteDependencies,
   planRefreshFlowConnectorRouteDependencies,
+  planValidateFlowConnectorRouteDependencies,
   type RefreshFlowConnectorRouteConnectorFact,
   type RefreshFlowConnectorRouteFacts,
+  type ValidateFlowConnectorRouteConnectorFact,
+  type ValidateFlowConnectorRouteGeometryInput,
 } from "@figma-flow-annotator/core";
 import { getExistingSceneNodesById } from "../figma/runtime";
 import { readBestEffortMergedValidationIndex } from "../figma/validation-index";
 import type {
   FlowConnectorCurrentPageRuntime,
   FlowConnectorCurrentPageSnapshot,
+  FlowConnectorSnapshotRecord,
 } from "./current-page-snapshot";
 import { toFlowConnectorAuthoringEndpoint } from "./current-page-snapshot";
 import { collectConnectorObstacles } from "./obstacles";
+import { FLOW_ACTION_LABEL_NODE_NAME } from "./visual-node-names";
 
 export interface CreateFlowConnectorRouteDependencyAdapterInput {
   endpointFacts: FlowConnectorRouteEndpointFact[];
@@ -34,6 +40,13 @@ export interface RefreshFlowConnectorRouteDependencyAdapterInput {
   connectors: RefreshFlowConnectorRouteDependencyAdapterConnector[];
   runtime: FlowConnectorCurrentPageRuntime;
   selectedConnectorNodeIds?: string[];
+}
+
+export interface ValidateFlowConnectorRouteDependencyAdapterInput {
+  connectorRecords: FlowConnectorSnapshotRecord[];
+  explicitAnnotationCardNodeIds?: Iterable<string>;
+  preloadedNodes?: Iterable<SceneNode>;
+  runtime: FlowConnectorCurrentPageRuntime;
 }
 
 export async function rehydrateCreateFlowConnectorRouteFacts(
@@ -114,15 +127,61 @@ export async function rehydrateRefreshFlowConnectorRouteFacts(
   };
 }
 
+export async function rehydrateValidateFlowConnectorRouteGeometry(
+  input: ValidateFlowConnectorRouteDependencyAdapterInput,
+): Promise<ValidateFlowConnectorRouteGeometryInput> {
+  const labelNodes = collectVisibleFlowActionLabelNodes(input.connectorRecords);
+  const dependencyPlan = planValidateFlowConnectorRouteDependencies({
+    connectors: input.connectorRecords.map((connector) => ({
+      nodeId: connector.node.id,
+      record: connector.record,
+    })),
+    ...(input.explicitAnnotationCardNodeIds === undefined
+      ? {}
+      : { explicitAnnotationCardNodeIds: input.explicitAnnotationCardNodeIds }),
+    flowActionLabelNodeIds: labelNodes.map((label) => ({
+      nodeId: label.node.id,
+      sourceConnectorNodeId: label.sourceConnectorNodeId,
+    })),
+    validationIndex: readBestEffortMergedValidationIndex(input.runtime),
+  });
+  const routeNodesById = await getRouteNodesById(dependencyPlan.dependencies, input.preloadedNodes);
+  const obstacleCandidates = collectObstacleCandidateNodes(
+    dependencyPlan.dependencies,
+    routeNodesById,
+  );
+  const labelNodesById = new Map(labelNodes.map((label) => [label.node.id, label.node]));
+
+  return {
+    connectors: input.connectorRecords.map((connector) =>
+      toValidationFlowConnectorRouteFact(
+        connector,
+        input.runtime,
+        dependencyPlan.dependencies,
+        routeNodesById,
+        obstacleCandidates,
+        labelNodesById,
+      ),
+    ),
+  };
+}
+
 async function getRouteNodesById(
   dependencies: Iterable<FlowConnectorRouteDependency>,
+  preloadedNodes: Iterable<SceneNode> = [],
 ): Promise<Map<string, SceneNode>> {
+  const preloadedNodesById = new Map(
+    [...preloadedNodes].map((node): [string, SceneNode] => [node.id, node]),
+  );
   const nodeIds = [
     ...collectFlowConnectorRouteDependencyNodeIds(dependencies, "flow-endpoint"),
     ...collectFlowConnectorRouteDependencyNodeIds(dependencies, "connector-obstacle-candidate"),
-  ];
+  ].filter((nodeId) => !preloadedNodesById.has(nodeId));
   const nodes = await getExistingSceneNodesById(nodeIds);
-  return new Map(nodes.map((node): [string, SceneNode] => [node.id, node]));
+  return new Map([
+    ...preloadedNodesById,
+    ...nodes.map((node): [string, SceneNode] => [node.id, node]),
+  ]);
 }
 
 function collectObstacleCandidateNodes(
@@ -195,4 +254,91 @@ function toRefreshFlowConnectorRouteFactWithoutRuntimeFacts(
     nodeId: connector.node.id,
     record: connector.record,
   };
+}
+
+function toValidationFlowConnectorRouteFact(
+  connector: FlowConnectorSnapshotRecord,
+  runtime: FlowConnectorCurrentPageRuntime,
+  dependencies: Iterable<FlowConnectorRouteDependency>,
+  routeNodesById: Map<string, SceneNode>,
+  obstacleCandidates: Iterable<SceneNode>,
+  labelNodesById: Map<string, SceneNode>,
+): ValidateFlowConnectorRouteConnectorFact {
+  const startNode = routeNodesById.get(connector.record.start.nodeId);
+  const endNode = routeNodesById.get(connector.record.end.nodeId);
+  const labelRect = getPlannedFlowActionLabelRect(connector.node.id, dependencies, labelNodesById);
+  const baseFact = {
+    nodeId: connector.node.id,
+    record: connector.record,
+    ...(labelRect === undefined ? {} : { labelRect }),
+  };
+
+  if (startNode === undefined || endNode === undefined) {
+    return baseFact;
+  }
+
+  return {
+    ...baseFact,
+    end: toValidationEndpointFact(endNode, connector.record.end, runtime),
+    obstacles: collectConnectorObstacles(startNode, endNode, runtime, obstacleCandidates),
+    start: toValidationEndpointFact(startNode, connector.record.start, runtime),
+  };
+}
+
+function toValidationEndpointFact(
+  node: SceneNode,
+  endpoint: { contextFrameId: string; nodeId: string },
+  runtime: Pick<FlowConnectorCurrentPageRuntime, "getVisibleBounds">,
+): FlowConnectorRouteGeometryEndpointFact {
+  return {
+    bounds: runtime.getVisibleBounds(node),
+    contextFrameId: endpoint.contextFrameId,
+    id: endpoint.nodeId,
+    name: node.name,
+  };
+}
+
+function getPlannedFlowActionLabelRect(
+  connectorNodeId: string,
+  dependencies: Iterable<FlowConnectorRouteDependency>,
+  labelNodesById: Map<string, SceneNode>,
+): Rect | undefined {
+  for (const dependency of dependencies) {
+    if (
+      dependency.role !== "flow-action-label" ||
+      dependency.sourceConnectorNodeId !== connectorNodeId
+    ) {
+      continue;
+    }
+
+    const label = labelNodesById.get(dependency.nodeId);
+    if (
+      label === undefined ||
+      !("absoluteBoundingBox" in label) ||
+      label.absoluteBoundingBox === null
+    ) {
+      return undefined;
+    }
+    return label.absoluteBoundingBox;
+  }
+  return undefined;
+}
+
+function collectVisibleFlowActionLabelNodes(
+  connectors: Iterable<FlowConnectorSnapshotRecord>,
+): Array<{ node: SceneNode; sourceConnectorNodeId: string }> {
+  const labels: Array<{ node: SceneNode; sourceConnectorNodeId: string }> = [];
+  for (const connector of connectors) {
+    const label = connector.node.children.find(
+      (child) =>
+        child.name === FLOW_ACTION_LABEL_NODE_NAME &&
+        child.visible !== false &&
+        "absoluteBoundingBox" in child &&
+        child.absoluteBoundingBox !== null,
+    );
+    if (label !== undefined && "absoluteBoundingBox" in label) {
+      labels.push({ node: label, sourceConnectorNodeId: connector.node.id });
+    }
+  }
+  return labels;
 }

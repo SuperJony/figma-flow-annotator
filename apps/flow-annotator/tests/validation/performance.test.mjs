@@ -260,7 +260,7 @@ test("validates and cleans explicitly referenced Stale Reverse Indexes without p
   );
 });
 
-test("requires validation state repair for missing, invalid, or stale validation data", async () => {
+test("requires validation state repair for missing, invalid, stale, or insufficient validation data", async () => {
   const cases = [
     {
       expected: "Validation data is missing.",
@@ -284,6 +284,16 @@ test("requires validation state repair for missing, invalid, or stale validation
         });
       },
     },
+    {
+      expected: "Validation data is missing 1 known project object(s).",
+      name: "insufficient",
+      prepareIndex: (connectorsContainer, start, _end, connector) => {
+        setValidationIndex(connectorsContainer, {
+          connectorRootNodeIds: [connector.id],
+          flowEndpointNodeIds: [start.id],
+        });
+      },
+    },
   ];
 
   for (const testCase of cases) {
@@ -300,6 +310,10 @@ test("requires validation state repair for missing, invalid, or stale validation
     testCase.prepareIndex(connectorsContainer, start, end, connector);
     connectorsContainer.children = [connector];
     page.children = [start, end, connectorsContainer];
+    forbidPageFindAllWithCriteria(
+      page,
+      "Clean Stale Indexes must not use page-wide discovery for repair-required data.",
+    );
     globalThis.figma = createFigmaStub(page, messages);
 
     await importCodeModule();

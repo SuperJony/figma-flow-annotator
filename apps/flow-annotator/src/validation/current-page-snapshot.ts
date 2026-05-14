@@ -31,7 +31,7 @@ export async function collectCurrentPageValidationSnapshot(
   const flowConnectorRouteGeometry = await collectValidationFlowConnectorRouteFacts(
     runtime,
     connectorSnapshot.connectorRecords,
-    collectAnnotationObstacleCandidateNodeIds(cards, badges),
+    collectAnnotationCardNodeIds(cards),
     connectorSnapshot.validationNodes,
   );
   const validationNodes = connectorSnapshot.validationNodes;
@@ -83,9 +83,8 @@ function collectAnnotationReferenceNodeIds(
   ];
 }
 
-function collectAnnotationObstacleCandidateNodeIds(
+function collectAnnotationCardNodeIds(
   cards: ReturnType<typeof getAnnotationValidationCards>,
-  badges: ReturnType<typeof getAnnotationValidationBadges>,
 ): string[] {
-  return [...cards.map((card) => card.nodeId), ...badges.map((badge) => badge.nodeId)];
+  return cards.map((card) => card.nodeId);
 }

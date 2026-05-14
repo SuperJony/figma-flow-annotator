@@ -55,7 +55,11 @@ export interface PlanRefreshFlowConnectorRouteDependenciesInput {
 
 export interface PlanValidateFlowConnectorRouteDependenciesInput {
   connectors: ExistingFlowConnectorRouteDependencyInput[];
-  explicitObstacleCandidateNodeIds?: Iterable<string>;
+  explicitAnnotationCardNodeIds?: Iterable<string>;
+  flowActionLabelNodeIds?: Iterable<{
+    nodeId: string;
+    sourceConnectorNodeId: string;
+  }>;
   validationIndex: ValidationIndexRecord;
 }
 
@@ -112,14 +116,22 @@ export function planValidateFlowConnectorRouteDependencies(
   const dependencies = new RouteDependencyBuilder();
 
   addValidationIndexObstacleDependencies(dependencies, input.validationIndex);
-  for (const nodeId of input.explicitObstacleCandidateNodeIds ?? []) {
+  for (const nodeId of input.explicitAnnotationCardNodeIds ?? []) {
     dependencies.add({
       nodeId,
       role: "connector-obstacle-candidate",
-      classification: "validation-index-obstacle-candidate",
+      classification: "annotation-card",
     });
   }
   addExistingConnectorDependencies(dependencies, input.connectors);
+  for (const label of input.flowActionLabelNodeIds ?? []) {
+    dependencies.add({
+      nodeId: label.nodeId,
+      role: "flow-action-label",
+      classification: "flow-action-label",
+      sourceConnectorNodeId: label.sourceConnectorNodeId,
+    });
+  }
 
   return {
     dependencies: dependencies.toArray(),
