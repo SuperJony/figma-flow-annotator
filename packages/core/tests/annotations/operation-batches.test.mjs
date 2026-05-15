@@ -9,6 +9,7 @@ test("builds v1 Annotation records and a Figma File Operation Batch shape", asyn
     annotationId: "annotation-1",
     annotationNumber: 3,
     body: "  Explain this state.  ",
+    contextFrameBounds: { x: 10, y: 20, width: 240, height: 50 },
     contextFrameId: "frame-1",
     now: "2026-05-09T00:00:00.000Z",
     subjects: [

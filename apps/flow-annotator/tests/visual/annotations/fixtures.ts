@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { build } from "esbuild";
 
-import { createFigmaStub, createPage, createSubjectNode } from "./figma-stub";
+import { createContextFrame, createFigmaStub, createPage, createSubjectNode } from "./figma-stub";
 import type {
   AnnotationFixture,
   AnnotationFixtureDefinition,
@@ -35,14 +35,25 @@ export const annotationFixtureDefinitions: AnnotationFixtureDefinition[] = [
       { name: "Secondary CTA", x: 278, y: 68, width: 154, height: 86 },
     ],
   },
+  {
+    body: "Keep the generated note in the Design Notes Area below the screen, not beside the selected row.",
+    contextFrame: { height: 320, name: "Slash Panel", width: 360, x: 72, y: 48 },
+    description: "A nested subject places its Annotation Card below the owning Context Frame.",
+    name: "nested-subject-annotation",
+    subjects: [{ name: "Schedule Row", x: 96, y: 104, width: 300, height: 42 }],
+  },
 ];
 
 export async function buildAnnotationFixture(
   definition: AnnotationFixtureDefinition,
 ): Promise<AnnotationFixture> {
   const pageNode = createPage();
+  const contextFrame =
+    definition.contextFrame === undefined
+      ? null
+      : createContextFrame(pageNode, definition.contextFrame);
   const subjects = definition.subjects.map((subject, index) =>
-    createSubjectNode(pageNode, subject, index),
+    createSubjectNode(contextFrame ?? pageNode, subject, index),
   );
   const messages: PostedMessage[] = [];
   const figmaStub = createFigmaStub(pageNode, messages);

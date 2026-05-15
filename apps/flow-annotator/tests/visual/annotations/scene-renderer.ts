@@ -1,3 +1,4 @@
+import { unionRects } from "@figma-flow-annotator/core";
 import type {
   AnnotationFixtureDefinition,
   FakeNode,
@@ -13,8 +14,12 @@ export function renderAnnotationScene(
   definition: AnnotationFixtureDefinition,
   pageNode: FakePageNode,
 ): string {
-  const sceneBounds = calculateSceneBounds(definition, pageNode);
-  const subjectsHtml = definition.subjects
+  const fixtureNodes = getFixtureSceneNodes(pageNode);
+  const sceneBounds = calculateSceneBounds(fixtureNodes, pageNode);
+  const contextFrameHtml = fixtureNodes.contextFrames
+    .map((contextFrame) => renderContextFrame(contextFrame, sceneBounds))
+    .join("");
+  const subjectsHtml = fixtureNodes.subjects
     .map((subject) => renderSubject(subject, sceneBounds))
     .join("");
   const generatedHtml = getGeneratedAnnotationNodes(pageNode)
@@ -56,10 +61,17 @@ export function renderAnnotationScene(
       }
 
       .subject,
+      .context-frame,
       .annotation-card,
       .annotation-badge,
       .annotation-text {
         position: absolute;
+      }
+
+      .context-frame {
+        background: #ffffff;
+        border: 2px solid #d1d5db;
+        border-radius: 18px;
       }
 
       .subject {
@@ -87,6 +99,7 @@ export function renderAnnotationScene(
   </head>
   <body>
     <main aria-label="${escapeHtml(definition.description)}" class="scene" data-fixture="${definition.name}">
+      ${contextFrameHtml}
       ${subjectsHtml}
       ${generatedHtml}
     </main>
@@ -107,8 +120,12 @@ export function annotationKind(node: FakeNode): string {
   return node.getSharedPluginData(NAMESPACE, "kind");
 }
 
-function renderSubject(subject: FixtureRect & { name: string }, sceneBounds: FixtureRect): string {
-  return `<div class="subject" style="${rectStyle(subject, sceneBounds)}">${escapeHtml(subject.name)}</div>`;
+function renderContextFrame(contextFrame: FakeNode, sceneBounds: FixtureRect): string {
+  return `<div aria-label="${escapeHtml(contextFrame.name)}" class="context-frame" style="${rectStyle(localRect(contextFrame), sceneBounds)}"></div>`;
+}
+
+function renderSubject(subject: FakeNode, sceneBounds: FixtureRect): string {
+  return `<div class="subject" style="${rectStyle(localRect(subject), sceneBounds)}">${escapeHtml(subject.name)}</div>`;
 }
 
 function renderGeneratedNode(
@@ -158,21 +175,44 @@ function renderTextNode(node: FakeNode, sceneBounds: FixtureRect, isSceneChild: 
 }
 
 function calculateSceneBounds(
-  definition: AnnotationFixtureDefinition,
+  fixtureNodes: ReturnType<typeof getFixtureSceneNodes>,
   pageNode: FakePageNode,
 ): FixtureRect {
   const generatedRects = getGeneratedAnnotationNodes(pageNode).map(localRect);
-  const rects = [...definition.subjects, ...generatedRects];
-  const left = Math.min(...rects.map((rect) => rect.x)) - SCENE_PADDING;
-  const top = Math.min(...rects.map((rect) => rect.y)) - SCENE_PADDING;
-  const right = Math.max(...rects.map((rect) => rect.x + rect.width)) + SCENE_PADDING;
-  const bottom = Math.max(...rects.map((rect) => rect.y + rect.height)) + SCENE_PADDING;
+  const fixtureRects = [...fixtureNodes.contextFrames, ...fixtureNodes.subjects].map(localRect);
+  const contentBounds = unionRects([...fixtureRects, ...generatedRects]);
   return {
-    height: bottom - top,
-    width: right - left,
-    x: left,
-    y: top,
+    height: contentBounds.height + SCENE_PADDING * 2,
+    width: contentBounds.width + SCENE_PADDING * 2,
+    x: contentBounds.x - SCENE_PADDING,
+    y: contentBounds.y - SCENE_PADDING,
   };
+}
+
+function getFixtureSceneNodes(pageNode: FakePageNode): {
+  contextFrames: FakeNode[];
+  subjects: FakeNode[];
+} {
+  const contextFrames: FakeNode[] = [];
+  const subjects: FakeNode[] = [];
+
+  function visit(node: FakeNode): void {
+    if (node.getSharedPluginData(NAMESPACE, "kind") !== "") {
+      return;
+    }
+
+    if (node.type === "FRAME" && node.id === "context-frame") {
+      contextFrames.push(node);
+    }
+    if (node.type === "FRAME" && node.id.startsWith("subject-")) {
+      subjects.push(node);
+    }
+
+    node.children.forEach(visit);
+  }
+
+  pageNode.children.forEach(visit);
+  return { contextFrames, subjects };
 }
 
 function localRect(node: FakeNode): FixtureRect {

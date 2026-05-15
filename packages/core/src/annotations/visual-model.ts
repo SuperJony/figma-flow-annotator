@@ -129,10 +129,10 @@ export function buildAnnotationBadgeVisualModel(input: {
   };
 }
 
-export function getAnnotationCardCreationBasePosition(input: { subjectBounds: RectLike }): Point {
+export function getAnnotationCardCreationBasePosition(input: { anchorBounds: RectLike }): Point {
   return {
-    x: input.subjectBounds.x,
-    y: input.subjectBounds.y + input.subjectBounds.height + ANNOTATION_CARD_LAYOUT.offsetY,
+    x: input.anchorBounds.x,
+    y: input.anchorBounds.y + input.anchorBounds.height + ANNOTATION_CARD_LAYOUT.offsetY,
   };
 }
 

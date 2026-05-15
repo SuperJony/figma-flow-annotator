@@ -73,7 +73,7 @@ export async function collectCreateAnnotationAuthoringSnapshot(input: {
     ]),
     input: {
       body: input.body,
-      contextRecords: collectContextRecords(contextNodesById),
+      contexts: collectAnnotationContexts(contextNodesById, contextFrameId),
       existingAnnotationCards: annotationCards.cards,
       now: input.now,
       pageId: figma.currentPage.id,
@@ -123,14 +123,26 @@ function collectAnnotationContextNodes(subjects: SceneNode[]): Map<string, Frame
   return contextNodes;
 }
 
-function collectContextRecords(contextNodes: Map<string, FrameNode | PageNode>) {
-  return [...contextNodes.values()].flatMap((node) => {
-    const record = decodeContextRecord(
-      node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.context),
-      node.id,
-    );
-    return record === null ? [] : [record];
-  });
+function collectAnnotationContexts(
+  contextNodes: Map<string, FrameNode | PageNode>,
+  contextFrameId: string,
+) {
+  const node = contextNodes.get(contextFrameId);
+  if (node === undefined) {
+    return [];
+  }
+
+  const record = decodeContextRecord(
+    node.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.context),
+    node.id,
+  );
+  return [
+    {
+      bounds: node.type === "PAGE" ? null : getVisibleBounds(node),
+      id: node.id,
+      record,
+    },
+  ];
 }
 
 async function collectAnnotationCardsSnapshot(

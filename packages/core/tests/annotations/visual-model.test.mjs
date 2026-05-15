@@ -38,7 +38,7 @@ test("centralizes Annotation visual layout positions used by operation batches",
 
   assert.deepEqual(
     core.getAnnotationCardCreationBasePosition({
-      subjectBounds: { x: 10, y: 20, width: 240, height: 50 },
+      anchorBounds: { x: 10, y: 20, width: 240, height: 50 },
     }),
     { x: 10, y: 110 },
   );
@@ -54,6 +54,7 @@ test("centralizes Annotation visual layout positions used by operation batches",
     annotationId: "annotation-1",
     annotationNumber: 3,
     body: "Body",
+    contextFrameBounds: { x: 0, y: 0, width: 320, height: 200 },
     contextFrameId: "frame-1",
     now: "2026-05-10T00:00:00.000Z",
     subjects: [

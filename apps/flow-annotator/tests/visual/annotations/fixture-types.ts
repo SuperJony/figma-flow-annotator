@@ -15,8 +15,13 @@ export interface AnnotationSubjectDefinition extends FixtureRect {
   name: string;
 }
 
+export interface AnnotationContextFrameDefinition extends FixtureRect {
+  name: string;
+}
+
 export interface AnnotationFixtureDefinition {
   body: string;
+  contextFrame?: AnnotationContextFrameDefinition;
   description: string;
   name: string;
   subjects: AnnotationSubjectDefinition[];

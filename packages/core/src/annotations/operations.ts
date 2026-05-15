@@ -41,6 +41,7 @@ export interface BuildCreateAnnotationOperationBatchInput {
   annotationId: string;
   annotationNumber: number;
   body: string;
+  contextFrameBounds: RectLike | null;
   contextFrameId: string;
   now: string;
   subjects: AnnotationSubjectInput[];
@@ -101,7 +102,8 @@ export function buildCreateAnnotationOperationBatch(
   });
   const contextRecord = createContextRecord(input.contextFrameId, input.annotationNumber + 1);
   const cardRef = "annotation-card";
-  const annotationBounds = unionRects(input.subjects.map((subject) => subject.bounds));
+  const cardAnchorBounds =
+    input.contextFrameBounds ?? unionRects(input.subjects.map((subject) => subject.bounds));
   const subjectSummary = summarizeSubjectNames(input.subjects.map((subject) => subject.name));
   const operations: FigmaFileOperation[] = [
     {
@@ -129,7 +131,7 @@ export function buildCreateAnnotationOperationBatch(
       annotationNumber: input.annotationNumber,
       body,
       subjectSummary,
-      basePosition: getAnnotationCardCreationBasePosition({ subjectBounds: annotationBounds }),
+      basePosition: getAnnotationCardCreationBasePosition({ anchorBounds: cardAnchorBounds }),
       visual: buildAnnotationCardVisualModel({
         annotationNumber: input.annotationNumber,
         body,

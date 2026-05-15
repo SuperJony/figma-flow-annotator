@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { getAnnotationCardCreationBasePosition } from "@figma-flow-annotator/core";
+
 import {
   createFigmaStub,
   createNode,
   createPage,
   flushPluginMessage,
   importCodeModule,
+  moveNode,
   namespace,
   readAnnotationRefs,
   setBadgeRecord,
@@ -156,6 +159,38 @@ test("creates an Annotation in the shared Context Frame with existing subject re
   ]);
   assert.deepEqual(readAnnotationRefs(subjectB), [createdRecord.id]);
   assert.equal(contextRecord.nextAnnotationNumber, 10);
+});
+
+test("places a new Annotation Card below the shared Context Frame", async () => {
+  const page = createPage();
+  const contextFrame = createNode(page, "slash-screen", 0);
+  const subject = createNode(contextFrame, "schedule-row", 0);
+  const annotationsContainer = createNode(page, "FFA Annotations", 800);
+  const messages = [];
+
+  moveNode(contextFrame, { x: 120, y: 164, width: 526, height: 1138 });
+  moveNode(subject, { x: 142, y: 388, width: 480, height: 45 });
+  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
+  contextFrame.children = [subject];
+  page.children = [contextFrame, annotationsContainer];
+  page.selection = [subject];
+  globalThis.figma = createFigmaStub(page, messages);
+
+  await importCodeModule();
+
+  globalThis.figma.ui.onmessage({ type: "create-annotation", body: "Position note" });
+  await flushPluginMessage(messages);
+
+  const createdCard = annotationsContainer.children.find(
+    (child) => child.getSharedPluginData(namespace, "kind") === "annotation-card",
+  );
+
+  assert.ok(createdCard);
+  const expectedPosition = getAnnotationCardCreationBasePosition({
+    anchorBounds: contextFrame.absoluteBoundingBox,
+  });
+  assert.equal(createdCard.x, expectedPosition.x);
+  assert.equal(createdCard.y, expectedPosition.y);
 });
 
 test("increments Annotation Numbers for separate child-frame annotations in one Context Frame", async () => {

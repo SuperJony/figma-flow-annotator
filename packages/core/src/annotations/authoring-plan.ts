@@ -2,6 +2,7 @@ import type {
   AddAnnotationSubjectsOperationBatch,
   CreateAnnotationOperationBatch,
 } from "../figma-file/operation-types.ts";
+import type { RectLike } from "../shared/geometry.ts";
 import type {
   AnnotationNumberSeedRecord,
   AnnotationRecord,
@@ -25,9 +26,15 @@ export interface ExistingAnnotationCardAuthoringInput {
   subjectAncestorFrameIds: string[][];
 }
 
+export interface AnnotationAuthoringContextInput {
+  bounds: RectLike | null;
+  id: string;
+  record: ContextRecord | null;
+}
+
 export interface PlanAnnotationAuthoringInput {
   body: string;
-  contextRecords: ContextRecord[];
+  contexts: AnnotationAuthoringContextInput[];
   createAnnotationId: () => string;
   existingAnnotationCards: ExistingAnnotationCardAuthoringInput[];
   now: string;
@@ -87,9 +94,10 @@ export function planAnnotationAuthoring(
     };
   }
 
+  const context = selectAnnotationContext({ contextFrameId, contexts: input.contexts });
   const annotationNumber = selectNextAnnotationNumber({
     contextFrameId,
-    contextRecords: input.contextRecords,
+    contextRecord: context?.record ?? null,
     existingAnnotationNumberSeeds: collectAnnotationNumberSeedsForContext({
       contextFrameId,
       existingAnnotationCards: input.existingAnnotationCards,
@@ -100,6 +108,7 @@ export function planAnnotationAuthoring(
     annotationId: input.createAnnotationId(),
     annotationNumber,
     body: input.body,
+    contextFrameBounds: context?.bounds ?? null,
     contextFrameId,
     now: input.now,
     subjects: input.subjects.map(({ ancestorFrameIds: _ancestorFrameIds, ...subject }) => subject),
@@ -131,16 +140,20 @@ export function selectAnnotationContextFrameId(input: {
 
 function selectNextAnnotationNumber(input: {
   contextFrameId: string;
-  contextRecords: ContextRecord[];
+  contextRecord: ContextRecord | null;
   existingAnnotationNumberSeeds: AnnotationNumberSeedRecord[];
 }): number {
-  const contextRecord = input.contextRecords.find(
-    (record) => record.contextFrameId === input.contextFrameId,
-  );
   const maxExistingNumber = input.existingAnnotationNumberSeeds
     .filter((seed) => seed.contextFrameId === input.contextFrameId)
     .reduce((max, seed) => Math.max(max, seed.annotationNumber), 0);
-  return Math.max(contextRecord?.nextAnnotationNumber ?? 1, maxExistingNumber + 1);
+  return Math.max(input.contextRecord?.nextAnnotationNumber ?? 1, maxExistingNumber + 1);
+}
+
+function selectAnnotationContext(input: {
+  contextFrameId: string;
+  contexts: AnnotationAuthoringContextInput[];
+}): AnnotationAuthoringContextInput | null {
+  return input.contexts.find((context) => context.id === input.contextFrameId) ?? null;
 }
 
 function selectReusableAnnotation(input: {

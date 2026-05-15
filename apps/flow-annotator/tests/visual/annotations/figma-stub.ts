@@ -1,4 +1,5 @@
 import type {
+  AnnotationContextFrameDefinition,
   AnnotationSubjectDefinition,
   FakeNode,
   FakePageNode,
@@ -19,12 +20,19 @@ export function createPage(): FakePageNode {
   return page;
 }
 
-export function createSubjectNode(
+export function createContextFrame(
   pageNode: FakePageNode,
+  definition: AnnotationContextFrameDefinition,
+): FakeNode {
+  return createNode(pageNode, "context-frame", definition.name, definition, "FRAME");
+}
+
+export function createSubjectNode(
+  parent: FakeNode,
   definition: AnnotationSubjectDefinition,
   index: number,
 ): FakeNode {
-  return createNode(pageNode, `subject-${index + 1}`, definition.name, definition, "FRAME");
+  return createNode(parent, `subject-${index + 1}`, definition.name, definition, "FRAME");
 }
 
 export function createFigmaStub(pageNode: FakePageNode, messages: PostedMessage[]): FigmaStub {
