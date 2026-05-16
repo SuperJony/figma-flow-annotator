@@ -169,14 +169,28 @@ export function createFigmaStub(page, connectorGroups, options = {}) {
   return {
     createFrame: () => {
       const frame = createNode(page, `frame-${Math.random().toString(36).slice(2)}`, 0);
+      frame.counterAxisAlignItems = "MIN";
+      frame.counterAxisSizingMode = "FIXED";
+      frame.itemSpacing = 0;
+      frame.layoutMode = "NONE";
+      frame.minHeight = null;
+      frame.minWidth = null;
+      frame.paddingBottom = 0;
+      frame.paddingLeft = 0;
+      frame.paddingRight = 0;
+      frame.paddingTop = 0;
+      frame.primaryAxisAlignItems = "MIN";
+      frame.primaryAxisSizingMode = "FIXED";
       frame.appendChild = (child) => {
         child.parent = frame;
         frame.children.push(child);
         registerNode(page, child);
+        layoutHorizontalAutoFrame(frame);
       };
       frame.resize = (width, height) => {
         frame.width = width;
         frame.height = height;
+        frame.absoluteBoundingBox = { ...frame.absoluteBoundingBox, width, height };
       };
       return frame;
     },
@@ -301,6 +315,47 @@ function removeChild(parent, child) {
   if (index !== -1) {
     parent.children.splice(index, 1);
   }
+}
+
+function layoutHorizontalAutoFrame(frame) {
+  if (frame.layoutMode === "NONE") {
+    return;
+  }
+  assert.equal(frame.layoutMode, "HORIZONTAL");
+  assert.equal(frame.primaryAxisSizingMode, "AUTO");
+  assert.equal(frame.counterAxisSizingMode, "AUTO");
+
+  const children = frame.children;
+  const paddingX = frame.paddingLeft + frame.paddingRight;
+  const paddingY = frame.paddingTop + frame.paddingBottom;
+  const spacing = Math.max(0, children.length - 1) * frame.itemSpacing;
+  const contentWidth = children.reduce((width, child) => width + child.width, 0) + spacing;
+  const contentHeight = children.reduce((height, child) => Math.max(height, child.height), 0);
+
+  frame.width = Math.max(frame.minWidth ?? 0, contentWidth + paddingX);
+  frame.height = Math.max(frame.minHeight ?? 0, contentHeight + paddingY);
+  frame.absoluteBoundingBox = {
+    ...frame.absoluteBoundingBox,
+    width: frame.width,
+    height: frame.height,
+  };
+
+  const extraPrimarySpace = Math.max(
+    0,
+    frame.width - frame.paddingLeft - frame.paddingRight - contentWidth,
+  );
+  const extraCounterSpace = Math.max(
+    0,
+    frame.height - frame.paddingTop - frame.paddingBottom - contentHeight,
+  );
+  let x =
+    frame.paddingLeft + (frame.primaryAxisAlignItems === "CENTER" ? extraPrimarySpace / 2 : 0);
+  frame.children.forEach((child) => {
+    child.x = x;
+    child.y =
+      frame.paddingTop + (frame.counterAxisAlignItems === "CENTER" ? extraCounterSpace / 2 : 0);
+    x += child.width + frame.itemSpacing;
+  });
 }
 
 function matchesCriteria(node, criteria) {

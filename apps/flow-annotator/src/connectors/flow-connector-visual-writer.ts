@@ -126,16 +126,21 @@ function createFlowActionLabel(
   label.strokeWeight = 1;
   label.cornerRadius = visual.radius;
   label.clipsContent = false;
-  label.resize(
-    Math.max(visual.minWidth, text.width + visual.paddingX * 2),
-    Math.max(visual.minHeight, text.height + visual.paddingY * 2),
-  );
+  label.layoutMode = "HORIZONTAL";
+  label.primaryAxisSizingMode = "AUTO";
+  label.counterAxisSizingMode = "AUTO";
+  label.primaryAxisAlignItems = "CENTER";
+  label.counterAxisAlignItems = "CENTER";
+  label.paddingLeft = visual.paddingX;
+  label.paddingRight = visual.paddingX;
+  label.paddingTop = visual.paddingY;
+  label.paddingBottom = visual.paddingY;
+  label.itemSpacing = 0;
+  label.minWidth = visual.minWidth;
+  label.minHeight = visual.minHeight;
+  label.appendChild(text);
   label.x = visual.center.x - label.width / 2;
   label.y = visual.center.y - label.height / 2;
-
-  label.appendChild(text);
-  text.x = visual.paddingX;
-  text.y = visual.paddingY;
 
   return label;
 }
