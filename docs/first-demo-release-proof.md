@@ -120,8 +120,8 @@ Selection hot path:
 
 Create hot paths:
 
-- **Create Annotation** uses the current selection plus bounded project-owned
-  containers for numbering and generated-node checks.
+- **Create Annotation** uses the current selection plus current-page generated
+  **Annotation Card** roots for numbering and generated-node checks.
 - **Create Flow Connector** uses the two runtime-selected endpoints. Obstacle
   collection scans current-page top-level nodes and prunes generated ancestors,
   whole frame obstacles, and endpoint ancestors instead of descending through
@@ -132,9 +132,8 @@ Create hot paths:
 Refresh path:
 
 - **Refresh Connectors** refreshes selected connector roots when present;
-  otherwise it scans the project-owned `FFA Connectors` container for current
-  page connectors. That page-level connector scan is acceptable for an explicit
-  command.
+  otherwise it scans current-page **Flow Connector** roots. That page-level
+  connector scan is acceptable for an explicit command.
 
 Validate/Clean paths:
 

@@ -1,5 +1,4 @@
 import {
-  ANNOTATIONS_CONTAINER_NAME,
   buildCleanStaleIndexesOperationBatch,
   buildRepairValidationStateOperationBatch,
   type CleanStaleIndexesOperationBatch,
@@ -22,7 +21,7 @@ import {
   toFlowConnectorReferenceValidationInput,
 } from "../connectors/current-page-snapshot";
 import { applyFigmaFileOperationBatch } from "../figma/file-operations";
-import { ensureContainer, findContainer, getExistingSceneNodesById } from "../figma/runtime";
+import { getExistingSceneNodesById } from "../figma/runtime";
 import { readMergedValidationIndexReadiness } from "../figma/validation-index";
 import { collectCurrentPageValidationSnapshot } from "./current-page-snapshot";
 
@@ -41,7 +40,7 @@ export type CleanStaleIndexesResult =
 export interface RepairValidationStateResult {
   cleanedEndpointCount: number;
   removedConnectorRefCount: number;
-  repairedContainerCount: number;
+  repairedIndexTargetCount: number;
 }
 
 type IndexedFlowConnectorCleanupSnapshotResult =
@@ -153,11 +152,8 @@ export async function cleanStaleIndexes(
 export async function repairValidationState(
   runtime: FlowConnectorCurrentPageRuntime,
 ): Promise<RepairValidationStateResult> {
-  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
-  const cards =
-    annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
-  const badges =
-    annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
+  const cards = getAnnotationValidationCards(figma.currentPage);
+  const badges = getAnnotationValidationBadges(figma.currentPage);
   const fullSnapshot = await collectDeepAuditFlowConnectorCurrentPageSnapshot(runtime);
   const cleanBatch = buildCleanStaleIndexesOperationBatch(toCleanStaleIndexesInput(fullSnapshot));
   const connectorReferenceInput = toFlowConnectorReferenceValidationInput(fullSnapshot);
@@ -182,26 +178,16 @@ export async function repairValidationState(
 
   applyFigmaFileOperationBatch({
     batch: repairBatch,
+    currentPage: figma.currentPage,
     existingNodes,
     namespace: runtime.namespace,
-    writer: {
-      ensureContainer: ensureValidationIndexContainer,
-    },
   });
 
   return {
     cleanedEndpointCount: cleanBatch.cleanedEndpointNodeIds.length,
     removedConnectorRefCount: cleanBatch.removedConnectorIds.length,
-    repairedContainerCount: repairBatch.repairedContainerRefs.length,
+    repairedIndexTargetCount: repairBatch.repairedIndexTargetCount,
   };
-}
-
-function ensureValidationIndexContainer(name: string): FrameNode {
-  const container = ensureContainer(name);
-  if (container.parent === null) {
-    figma.currentPage.appendChild(container);
-  }
-  return container;
 }
 
 async function getConnectorIndexInsufficiency(

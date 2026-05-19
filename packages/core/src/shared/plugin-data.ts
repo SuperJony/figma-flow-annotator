@@ -22,13 +22,9 @@ export const VISUAL_NODE_KINDS = {
   annotationCard: "annotation-card",
   annotationBadge: "annotation-badge",
   flowConnector: "flow-connector",
-  container: "container",
 } as const;
 
 export type VisualNodeKind = (typeof VISUAL_NODE_KINDS)[keyof typeof VISUAL_NODE_KINDS];
-
-export const ANNOTATIONS_CONTAINER_NAME = "FFA Annotations";
-export const CONNECTORS_CONTAINER_NAME = "FFA Connectors";
 
 export interface AnnotationRecord {
   schemaVersion: 1;

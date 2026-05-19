@@ -9,7 +9,6 @@ import {
   forbidPageFindAllWithCriteria,
   importCodeModule,
   moveNode,
-  namespace,
   setBadgeRecord,
   setConnectorRecord,
   setValidationIndex,
@@ -23,8 +22,7 @@ test("validates route obstacles from bounded connector route facts", async () =>
   const indexedObstacle = createNode(page, "indexed-middle-frame", 190);
   const indexedBadge = createNode(page, "indexed-badge", 250);
   const unrelatedFrame = createNode(page, "unrelated-frame", 700);
-  const connectorsContainer = createNode(page, "FFA Connectors", 900);
-  const connector = createNode(connectorsContainer, "connector-indexed-root", 920);
+  const connector = createNode(page, "connector-indexed-root", 920);
   const messages = [];
   const resolvedNodeIds = [];
 
@@ -38,13 +36,12 @@ test("validates route obstacles from bounded connector route facts", async () =>
       throw new Error("Validate Bindings must not scan unrelated route obstacle descendants.");
     },
   });
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   setBadgeRecord(indexedBadge, 1, start.id, contextFrame.id);
   setConnectorRecord(connector, "connector-indexed", start.id, end.id, "open", [
     { x: 100, y: 50 },
     { x: 420, y: 50 },
   ]);
-  setValidationIndex(connectorsContainer, {
+  setValidationIndex(page, {
     annotationBadgeNodeIds: [indexedBadge.id],
     connectorRootNodeIds: [connector.id],
     connectorObstacleCandidateNodeIds: [
@@ -59,14 +56,7 @@ test("validates route obstacles from bounded connector route facts", async () =>
   });
 
   contextFrame.children = [start, end];
-  connectorsContainer.children = [connector];
-  page.children = [
-    contextFrame,
-    indexedObstacle,
-    indexedBadge,
-    unrelatedFrame,
-    connectorsContainer,
-  ];
+  page.children = [contextFrame, indexedObstacle, indexedBadge, unrelatedFrame, connector];
   forbidPageFindAllWithCriteria(
     page,
     "Validate Bindings must not call page-wide findAllWithCriteria for route facts.",

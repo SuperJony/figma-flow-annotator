@@ -7,7 +7,6 @@ import type {
 import type { Point } from "../shared/geometry.ts";
 import type { FlowConnectorRecord } from "../shared/plugin-data.ts";
 import {
-  CONNECTORS_CONTAINER_NAME,
   createFlowConnectorRecord,
   flowConnectorMatchesDirectedPair,
   formatFlowConnectorName,
@@ -123,7 +122,6 @@ export function buildCreateFlowConnectorOperationBatch(
     }
 
     const operations: FigmaFileOperation[] = [
-      ...buildConnectorIndexPreambleOperations(),
       {
         type: "update-flow-connector",
         targetNodeId: existingConnector.nodeId,
@@ -161,20 +159,8 @@ export function buildCreateFlowConnectorOperationBatch(
 
   const operations: FigmaFileOperation[] = [
     {
-      type: "ensure-container",
-      ref: "connectors",
-      name: CONNECTORS_CONTAINER_NAME,
-    },
-    {
-      type: "set-shared-plugin-data",
-      target: { kind: "container", ref: "connectors" },
-      key: SHARED_PLUGIN_DATA.keys.kind,
-      value: VISUAL_NODE_KINDS.container,
-    },
-    {
       type: "create-flow-connector",
       ref: connectorRef,
-      containerRef: "connectors",
       name: formatFlowConnectorName(input.start.name, input.end.name),
       routePoints: input.routePoints,
       flowAction: record.flowAction,
@@ -263,7 +249,6 @@ export function buildRefreshFlowConnectorOperationBatch(
     mode: "update",
     existingNodeRefs: [input.connectorNodeId],
     operations: [
-      ...buildConnectorIndexPreambleOperations(),
       {
         type: "update-flow-connector",
         targetNodeId: input.connectorNodeId,
@@ -294,26 +279,7 @@ function buildConnectorIndexOperations(input: {
   connectorRootNodeId: string;
   record: FlowConnectorRecord;
 }): FigmaFileOperation[] {
-  return [
-    ...buildConnectorIndexPreambleOperations(),
-    buildUpdateConnectorValidationIndexOperation(input),
-  ];
-}
-
-function buildConnectorIndexPreambleOperations(): FigmaFileOperation[] {
-  return [
-    {
-      type: "ensure-container",
-      ref: "connectors",
-      name: CONNECTORS_CONTAINER_NAME,
-    },
-    {
-      type: "set-shared-plugin-data",
-      target: { kind: "container", ref: "connectors" },
-      key: SHARED_PLUGIN_DATA.keys.kind,
-      value: VISUAL_NODE_KINDS.container,
-    },
-  ];
+  return [buildUpdateConnectorValidationIndexOperation(input)];
 }
 
 function buildUpdateConnectorValidationIndexOperation(
@@ -334,7 +300,7 @@ function buildUpdateConnectorValidationIndexOperation(
       : { kind: "existing-node" as const, nodeId: input.connectorRootNodeId };
   return {
     type: "update-validation-index",
-    target: { kind: "container", ref: "connectors" },
+    target: { kind: "current-page" },
     upsert: {
       nodeIds: getFlowConnectorValidationIndexNodeIds(record),
       nodeTargets: {

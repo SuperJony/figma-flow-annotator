@@ -3,7 +3,6 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { CONNECTORS_CONTAINER_NAME } from "@figma-flow-annotator/core";
 import { build } from "esbuild";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -106,7 +105,7 @@ export function createNode(page, id, x) {
   return node;
 }
 
-export function createRuntime(page, connectorGroups = []) {
+export function createRuntime() {
   let connectorId = 0;
   return {
     appendConnectorReference: (node, connectorId) => {
@@ -139,19 +138,6 @@ export function createRuntime(page, connectorGroups = []) {
       x: 0,
       y: 0,
     }),
-    ensureContainer: () => {
-      const existing = page.children.find((node) => node.name === CONNECTORS_CONTAINER_NAME);
-      if (existing) {
-        return existing;
-      }
-      const container = createNode(page, "connector-container", 0);
-      container.name = CONNECTORS_CONTAINER_NAME;
-      container.children = connectorGroups;
-      container.setSharedPluginData("figma_flow_annotator", "kind", "container");
-      page.children.push(container);
-      registerNode(page, container);
-      return container;
-    },
     ensureLayerOrder: () => {},
     findContextFrameId: (node) => node.id,
     getVisibleBounds: (node) => node.absoluteBoundingBox,
@@ -206,6 +192,11 @@ export function createFigmaStub(page, connectorGroups, options = {}) {
       });
       group.parent = parent;
       group.type = "GROUP";
+      const removeGroup = group.remove;
+      group.remove = () => {
+        removeGroup();
+        removeChild({ children: connectorGroups }, group);
+      };
       group.appendChild = (child) => {
         if (group.removed) {
           throw new Error(`in appendChild: The node with id "${group.id}" does not exist`);
@@ -215,6 +206,7 @@ export function createFigmaStub(page, connectorGroups, options = {}) {
         registerNode(page, child);
       };
       connectorGroups.push(group);
+      parent.children.push(group);
       registerNode(page, group);
       return group;
     },
@@ -294,6 +286,11 @@ function ensurePageRegistry(page) {
   if (page.__allNodes !== undefined) {
     return;
   }
+  const sharedPluginData = new Map();
+  page.getSharedPluginData ??= (_namespace, key) => sharedPluginData.get(key) ?? "";
+  page.setSharedPluginData ??= (_namespace, key, value) => {
+    sharedPluginData.set(key, value);
+  };
   page.__allNodes = new Set([page]);
   page.findAllWithCriteria = (criteria) =>
     [...page.__allNodes].filter((node) => matchesCriteria(node, criteria));

@@ -12,7 +12,7 @@ const namespace = "figma_flow_annotator";
 
 test("applies Figma File Operation Batches through one writer seam", async () => {
   const { applyFigmaFileOperationBatch } = await importFileOperationsModule();
-  const containers = new Map();
+  const page = createNode("page", "PAGE", "Page");
   const subject = createNode("subject");
   const endpoint = createNode("endpoint");
   const movable = createNode("movable");
@@ -30,17 +30,9 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
       schemaVersion: 1,
       kind: "create-annotation",
       operations: [
-        { type: "ensure-container", ref: "annotations", name: "FFA Annotations" },
-        {
-          type: "set-shared-plugin-data",
-          target: { kind: "container", ref: "annotations" },
-          key: "kind",
-          value: "container",
-        },
         {
           type: "create-annotation-card",
           ref: "annotation-card",
-          containerRef: "annotations",
           name: "FFA Annotation Card #1",
           annotationNumber: 1,
           body: "Body",
@@ -50,7 +42,6 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
         {
           type: "create-annotation-badge",
           ref: "annotation-badge",
-          containerRef: "annotations",
           name: "FFA Annotation Badge #1",
           annotationNumber: 1,
           subjectNodeId: subject.id,
@@ -87,7 +78,7 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
         },
         {
           type: "update-validation-index",
-          target: { kind: "container", ref: "annotations" },
+          target: { kind: "current-page" },
           upsert: {
             nodeIds: {
               contextFrameIds: ["context"],
@@ -103,11 +94,9 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
             },
           },
         },
-        { type: "ensure-container", ref: "connectors", name: "FFA Connectors" },
         {
           type: "create-flow-connector",
           ref: "flow-connector",
-          containerRef: "connectors",
           name: "FFA Connector A -> B",
           routePoints: [
             { x: 0, y: 0 },
@@ -124,7 +113,7 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
         },
         {
           type: "update-validation-index",
-          target: { kind: "container", ref: "connectors" },
+          target: { kind: "current-page" },
           upsert: {
             nodeIds: {
               flowEndpointNodeIds: [endpoint.id],
@@ -147,6 +136,7 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
         { type: "move-node", targetNodeId: movable.id, position: { x: 5, y: 8 } },
       ],
     },
+    currentPage: page,
     existingNodes: new Map([
       [subject.id, subject],
       [endpoint.id, endpoint],
@@ -155,30 +145,17 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
     ]),
     namespace,
     writer: {
-      createAnnotationBadge: (_container, operation) =>
-        createNode(operation.ref, "FRAME", operation.name),
-      createAnnotationCard: (_container, operation) =>
-        createNode(operation.ref, "FRAME", operation.name),
-      createFlowConnector: (_container, operation) =>
-        createNode(operation.ref, "GROUP", operation.name),
-      ensureContainer: (name) => {
-        const container = createNode(name, "FRAME", name);
-        containers.set(name, container);
-        return container;
-      },
+      createAnnotationBadge: (operation) => createNode(operation.ref, "FRAME", operation.name),
+      createAnnotationCard: (operation) => createNode(operation.ref, "FRAME", operation.name),
+      createFlowConnector: (operation) => createNode(operation.ref, "GROUP", operation.name),
       updateFlowConnector: (operation) => updates.push(operation),
     },
   });
 
-  assert.equal(applied.containers.size, 2);
   assert.equal(applied.createdNodes.get("annotation-card")?.name, "FFA Annotation Card #1");
   assert.equal(applied.createdNodes.get("flow-connector")?.type, "GROUP");
   assert.equal(applied.movedNodes[0], movable);
   assert.deepEqual({ x: movable.x, y: movable.y }, { x: 5, y: 8 });
-  assert.equal(
-    containers.get("FFA Annotations").getSharedPluginData(namespace, "kind"),
-    "container",
-  );
   assert.equal(
     JSON.parse(
       applied.createdNodes.get("annotation-card").getSharedPluginData(namespace, "annotation"),
@@ -193,34 +170,17 @@ test("applies Figma File Operation Batches through one writer seam", async () =>
     schemaVersion: 1,
     connectorIds: ["connector-1"],
   });
-  assert.deepEqual(
-    JSON.parse(containers.get("FFA Annotations").getSharedPluginData(namespace, "validationIndex")),
-    {
-      schemaVersion: 1,
-      subjectNodeIds: [subject.id],
-      annotationCardNodeIds: ["annotation-card"],
-      annotationBadgeNodeIds: ["annotation-badge"],
-      flowEndpointNodeIds: [],
-      contextFrameIds: ["context"],
-      ownerContextFrameIds: [],
-      connectorRootNodeIds: [],
-      connectorObstacleCandidateNodeIds: ["annotation-card", subject.id],
-    },
-  );
-  assert.deepEqual(
-    JSON.parse(containers.get("FFA Connectors").getSharedPluginData(namespace, "validationIndex")),
-    {
-      schemaVersion: 1,
-      subjectNodeIds: [],
-      annotationCardNodeIds: [],
-      annotationBadgeNodeIds: [],
-      flowEndpointNodeIds: [endpoint.id],
-      contextFrameIds: [],
-      ownerContextFrameIds: [],
-      connectorRootNodeIds: ["flow-connector"],
-      connectorObstacleCandidateNodeIds: [],
-    },
-  );
+  assert.deepEqual(JSON.parse(page.getSharedPluginData(namespace, "validationIndex")), {
+    schemaVersion: 1,
+    subjectNodeIds: [subject.id],
+    annotationCardNodeIds: ["annotation-card"],
+    annotationBadgeNodeIds: ["annotation-badge"],
+    flowEndpointNodeIds: [endpoint.id],
+    contextFrameIds: ["context"],
+    ownerContextFrameIds: [],
+    connectorRootNodeIds: ["flow-connector"],
+    connectorObstacleCandidateNodeIds: ["annotation-card", subject.id],
+  });
   assert.equal(updates[0].name, "FFA Connector A -> C");
 });
 

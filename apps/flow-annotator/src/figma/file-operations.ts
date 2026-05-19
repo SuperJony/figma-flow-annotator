@@ -22,31 +22,27 @@ import {
 } from "@figma-flow-annotator/core";
 
 export interface OperationNodeRefs {
-  containers: Map<string, FrameNode>;
   createdNodes: Map<string, SceneNode>;
+  currentPage?: PageNode;
   existingNodes: Map<string, BaseNode>;
 }
 
 export interface FigmaFileOperationWriter {
-  createAnnotationBadge?(
-    container: FrameNode,
-    operation: CreateAnnotationBadgeOperation,
-  ): SceneNode;
-  createAnnotationCard?(container: FrameNode, operation: CreateAnnotationCardOperation): SceneNode;
-  createFlowConnector?(container: FrameNode, operation: CreateFlowConnectorOperation): SceneNode;
-  ensureContainer?(name: string): FrameNode;
+  createAnnotationBadge?(operation: CreateAnnotationBadgeOperation): SceneNode;
+  createAnnotationCard?(operation: CreateAnnotationCardOperation): SceneNode;
+  createFlowConnector?(operation: CreateFlowConnectorOperation): SceneNode;
   updateFlowConnector?(operation: UpdateFlowConnectorOperation): void;
 }
 
 export interface ApplyFigmaFileOperationBatchInput {
   batch: FigmaFileOperationBatch;
+  currentPage?: PageNode;
   existingNodes: Map<string, BaseNode>;
   namespace: string;
   writer?: FigmaFileOperationWriter;
 }
 
 export interface AppliedFigmaFileOperationBatch {
-  containers: Map<string, FrameNode>;
   createdNodes: Map<string, SceneNode>;
   movedNodes: SceneNode[];
 }
@@ -54,24 +50,16 @@ export interface AppliedFigmaFileOperationBatch {
 export function applyFigmaFileOperationBatch(
   input: ApplyFigmaFileOperationBatchInput,
 ): AppliedFigmaFileOperationBatch {
-  const containers = new Map<string, FrameNode>();
   const createdNodes = new Map<string, SceneNode>();
+  const currentPage = input.currentPage;
   const movedNodes: SceneNode[] = [];
   const writer = input.writer ?? {};
 
   input.batch.operations.forEach((operation) => {
-    if (operation.type === "ensure-container") {
-      if (writer.ensureContainer === undefined) {
-        throw new Error("Figma File Operation writer cannot ensure containers.");
-      }
-      containers.set(operation.ref, writer.ensureContainer(operation.name));
-      return;
-    }
-
     if (operation.type === "set-shared-plugin-data") {
       const node = resolveOperationTarget(operation.target, {
-        containers,
         createdNodes,
+        currentPage,
         existingNodes: input.existingNodes,
       });
       writeSharedPluginData(node, operation, input.namespace);
@@ -85,8 +73,8 @@ export function applyFigmaFileOperationBatch(
 
     if (operation.type === "update-validation-index") {
       updateValidationIndex(operation, input.namespace, {
-        containers,
         createdNodes,
+        currentPage,
         existingNodes: input.existingNodes,
       });
       return;
@@ -101,8 +89,7 @@ export function applyFigmaFileOperationBatch(
       if (writer.createAnnotationCard === undefined) {
         throw new Error("Figma File Operation writer cannot create Annotation Cards.");
       }
-      const container = resolveContainer(operation.containerRef, containers);
-      createdNodes.set(operation.ref, writer.createAnnotationCard(container, operation));
+      createdNodes.set(operation.ref, writer.createAnnotationCard(operation));
       return;
     }
 
@@ -110,8 +97,7 @@ export function applyFigmaFileOperationBatch(
       if (writer.createAnnotationBadge === undefined) {
         throw new Error("Figma File Operation writer cannot create Annotation Badges.");
       }
-      const container = resolveContainer(operation.containerRef, containers);
-      createdNodes.set(operation.ref, writer.createAnnotationBadge(container, operation));
+      createdNodes.set(operation.ref, writer.createAnnotationBadge(operation));
       return;
     }
 
@@ -119,8 +105,7 @@ export function applyFigmaFileOperationBatch(
       if (writer.createFlowConnector === undefined) {
         throw new Error("Figma File Operation writer cannot create Flow Connectors.");
       }
-      const container = resolveContainer(operation.containerRef, containers);
-      createdNodes.set(operation.ref, writer.createFlowConnector(container, operation));
+      createdNodes.set(operation.ref, writer.createFlowConnector(operation));
       return;
     }
 
@@ -137,7 +122,6 @@ export function applyFigmaFileOperationBatch(
   });
 
   return {
-    containers,
     createdNodes,
     movedNodes,
   };
@@ -177,24 +161,12 @@ function resolveValidationIndexUpdate(
   return update;
 }
 
-export function resolveContainer(ref: string, containers: Map<string, FrameNode>): FrameNode {
-  const container = containers.get(ref);
-  if (container === undefined) {
-    throw new Error(`Figma File Operation Batch referenced missing container ${ref}.`);
-  }
-  return container;
-}
-
 export function resolveOperationTarget(
   target: FigmaFileOperationTarget,
   refs: OperationNodeRefs,
 ): BaseNode {
-  if (target.kind === "container") {
-    const container = refs.containers.get(target.ref);
-    if (container === undefined) {
-      throw new Error(`Figma File Operation Batch referenced missing container ${target.ref}.`);
-    }
-    return container;
+  if (target.kind === "current-page") {
+    return refs.currentPage ?? figma.currentPage;
   }
 
   if (target.kind === "created-node") {

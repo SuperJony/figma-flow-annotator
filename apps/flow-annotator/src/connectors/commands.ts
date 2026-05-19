@@ -49,7 +49,6 @@ export interface ConnectRuntime extends FlowConnectorCurrentPageRuntime {
     fills: SolidPaint,
     width: number,
   ): TextNode;
-  ensureContainer(name: string): FrameNode;
   ensureLayerOrder(): void;
   findContextFrameId(node: SceneNode): string;
   getVisibleBounds(node: SceneNode): Rect;

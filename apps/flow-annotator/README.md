@@ -136,8 +136,8 @@ Annotation proof:
 1. Select one or more normal Figma Design nodes.
 2. Enter a non-empty **Annotation Body**.
 3. Click **Create Annotation**.
-4. Inspect the page for `FFA Annotations`, one `FFA Annotation Card #<number>`,
-   and one `FFA Annotation Badge #<number>` per selected **Subject Node**.
+4. Inspect the page for one page-level `FFA Annotation Card #<number>` and one
+   page-level `FFA Annotation Badge #<number>` per selected **Subject Node**.
    Multi-node annotations share the same **Annotation Number** and card.
 5. Inspect shared plugin data in namespace `figma_flow_annotator`:
    - the card root has `kind = annotation-card` and `annotation`;
@@ -149,7 +149,7 @@ Connector proof:
 1. Select exactly two normal Figma Design nodes.
 2. Optionally enter a **Flow Action**.
 3. Click **Create Flow Connector**.
-4. Inspect the page for `FFA Connectors` and one readable SVG/vector connector visual
+4. Inspect the page for one page-level readable SVG/vector connector visual
    named `FFA Connector <startName> -> <endName>`.
 5. Inspect shared plugin data in namespace `figma_flow_annotator`:
    - the connector root has `kind = flow-connector` and `connector`;

@@ -7,7 +7,6 @@ import {
   createPage,
   flushPluginMessage,
   importCodeModule,
-  namespace,
   setConnectorRecord,
   setValidationIndex,
 } from "../support/plugin-test-helpers.mjs";
@@ -32,16 +31,11 @@ function test(name, fn) {
 
 test("validation operations post busy state and Figma notifications", async () => {
   const page = createPage();
-  const annotationsContainer = createNode(page, "FFA Annotations", 500);
-  const connectorsContainer = createNode(page, "FFA Connectors", 800);
   const messages = [];
   const notifications = [];
 
-  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
-  setValidationIndex(annotationsContainer, {});
-  setValidationIndex(connectorsContainer, {});
-  page.children = [annotationsContainer, connectorsContainer];
+  setValidationIndex(page, {});
+  page.children = [];
   globalThis.figma = createFigmaStub(page, messages, [], notifications);
 
   await importCodeModule();
@@ -69,8 +63,8 @@ test("failed validation operations notify and return the panel to idle", async (
   const notifications = [];
 
   globalThis.figma = createFigmaStub(page, messages, [], notifications);
-  globalThis.figma.createFrame = () => {
-    throw new Error("Unable to create validation containers.");
+  page.setSharedPluginData = () => {
+    throw new Error("Unable to write validation data.");
   };
 
   await importCodeModule();
@@ -94,22 +88,20 @@ test("failed validation operations notify and return the panel to idle", async (
   assert.equal(statusMessage.tone, "error");
   assert.equal(
     statusMessage.message,
-    "Repair Validation State failed: Unable to create validation containers.",
+    "Repair Validation State failed: Unable to write validation data.",
   );
   assert.deepEqual(notifications, [
     "Repair Validation State started.",
-    "Repair Validation State failed: Unable to create validation containers.",
+    "Repair Validation State failed: Unable to write validation data.",
   ]);
 });
 
 test("cleanup repair-required results notify failure without changing the panel status wording", async () => {
   const page = createPage();
-  const connectorsContainer = createNode(page, "FFA Connectors", 800);
   const messages = [];
   const notifications = [];
 
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
-  page.children = [connectorsContainer];
+  page.children = [];
   globalThis.figma = createFigmaStub(page, messages, [], notifications);
 
   await importCodeModule();
@@ -144,15 +136,12 @@ test("cleanup repair-required results notify failure without changing the panel 
 test("repair validation state reports remaining validation errors after rebuilding validation data", async () => {
   const page = createPage();
   const liveEndpoint = createNode(page, "live-endpoint", 120);
-  const connectorsContainer = createNode(page, "FFA Connectors", 800);
-  const orphanConnector = createNode(connectorsContainer, "connector-orphan-root", 840);
+  const orphanConnector = createNode(page, "connector-orphan-root", 840);
   const messages = [];
   const notifications = [];
 
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   setConnectorRecord(orphanConnector, "connector-orphan", "deleted-start", liveEndpoint.id, "open");
-  connectorsContainer.children = [orphanConnector];
-  page.children = [liveEndpoint, connectorsContainer];
+  page.children = [liveEndpoint, orphanConnector];
   globalThis.figma = createFigmaStub(page, messages, [], notifications);
 
   await importCodeModule();

@@ -42,8 +42,6 @@ function test(name, fn) {
 test("validates without scanning unrelated frame descendants", async () => {
   const page = createPage();
   const unrelatedFrame = createNode(page, "unrelated-large-frame", 0);
-  const annotationsContainer = createNode(page, "FFA Annotations", 800);
-  const connectorsContainer = createNode(page, "FFA Connectors", 900);
   const messages = [];
 
   Object.defineProperty(unrelatedFrame, "children", {
@@ -52,9 +50,7 @@ test("validates without scanning unrelated frame descendants", async () => {
     },
   });
 
-  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
-  page.children = [unrelatedFrame, annotationsContainer, connectorsContainer];
+  page.children = [unrelatedFrame];
   forbidPageFindAllWithCriteria(
     page,
     "Validate Bindings must not call page-wide findAllWithCriteria.",
@@ -80,8 +76,7 @@ test("runs pure validation from a collected plain snapshot without Figma scene a
   const page = createPage();
   const contextFrame = createNode(page, "context-frame", 0);
   const subject = createNode(contextFrame, "subject-a", 20);
-  const annotationsContainer = createNode(page, "FFA Annotations", 500);
-  const card = createNode(annotationsContainer, "annotation-card", 540);
+  const card = createNode(page, "annotation-card", 540);
   const messages = [];
   const previousFigmaDescriptor = Object.getOwnPropertyDescriptor(globalThis, "figma");
   let currentPageReads = 0;
@@ -98,7 +93,6 @@ test("runs pure validation from a collected plain snapshot without Figma scene a
       annotationIds: ["annotation-1"],
     }),
   );
-  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
   setCardRecord(card, 1, contextFrame.id);
   card.setSharedPluginData(
     namespace,
@@ -115,8 +109,7 @@ test("runs pure validation from a collected plain snapshot without Figma scene a
     }),
   );
   contextFrame.children = [subject];
-  annotationsContainer.children = [card];
-  page.children = [contextFrame, annotationsContainer];
+  page.children = [contextFrame, card];
 
   const figmaStub = createFigmaStub(page, messages);
   Object.defineProperty(figmaStub, "currentPage", {
@@ -188,13 +181,11 @@ test("validates and cleans explicitly referenced Stale Reverse Indexes without p
   const page = createPage();
   const contextFrame = createNode(page, "context-frame", 0);
   const formerEndpoint = createNode(contextFrame, "former-endpoint", 20);
-  const annotationsContainer = createNode(page, "FFA Annotations", 500);
-  const card = createNode(annotationsContainer, "annotation-card", 540);
-  const badge = createNode(annotationsContainer, "annotation-badge", 580);
+  const card = createNode(page, "annotation-card", 540);
+  const badge = createNode(page, "annotation-badge", 580);
   const messages = [];
 
   moveNode(card, { x: 0, y: 140, width: 280, height: 100 });
-  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
   setCardRecord(card, 1, contextFrame.id);
   card.setSharedPluginData(
     namespace,
@@ -211,7 +202,7 @@ test("validates and cleans explicitly referenced Stale Reverse Indexes without p
     }),
   );
   setBadgeRecord(badge, 1, formerEndpoint.id, contextFrame.id);
-  setValidationIndex(annotationsContainer, {
+  setValidationIndex(page, {
     annotationBadgeNodeIds: [badge.id],
     annotationCardNodeIds: [card.id],
     connectorObstacleCandidateNodeIds: [card.id],
@@ -221,8 +212,7 @@ test("validates and cleans explicitly referenced Stale Reverse Indexes without p
   });
   setConnectorRefs(formerEndpoint, ["deleted-connector"]);
   contextFrame.children = [formerEndpoint];
-  annotationsContainer.children = [card, badge];
-  page.children = [contextFrame, annotationsContainer];
+  page.children = [contextFrame, card, badge];
   forbidPageFindAllWithCriteria(
     page,
     "Validate Bindings must not discover reverse refs with findAllWithCriteria.",
@@ -270,15 +260,15 @@ test("requires validation state repair for missing, invalid, stale, or insuffici
     {
       expected: "Validation data is unreadable in 1 project area(s).",
       name: "invalid",
-      prepareIndex: (connectorsContainer) => {
-        connectorsContainer.setSharedPluginData(namespace, "validationIndex", "{bad json");
+      prepareIndex: (indexTarget) => {
+        indexTarget.setSharedPluginData(namespace, "validationIndex", "{bad json");
       },
     },
     {
       expected: "Validation data references 1 deleted object(s).",
       name: "stale",
-      prepareIndex: (connectorsContainer, start, end, connector) => {
-        setValidationIndex(connectorsContainer, {
+      prepareIndex: (indexTarget, start, end, connector) => {
+        setValidationIndex(indexTarget, {
           connectorRootNodeIds: [connector.id, "deleted-index-node"],
           flowEndpointNodeIds: [start.id, end.id],
         });
@@ -287,8 +277,8 @@ test("requires validation state repair for missing, invalid, stale, or insuffici
     {
       expected: "Validation data is missing 1 known project object(s).",
       name: "insufficient",
-      prepareIndex: (connectorsContainer, start, _end, connector) => {
-        setValidationIndex(connectorsContainer, {
+      prepareIndex: (indexTarget, start, _end, connector) => {
+        setValidationIndex(indexTarget, {
           connectorRootNodeIds: [connector.id],
           flowEndpointNodeIds: [start.id],
         });
@@ -300,16 +290,13 @@ test("requires validation state repair for missing, invalid, stale, or insuffici
     const page = createPage();
     const start = createNode(page, `${testCase.name}-start`, 0);
     const end = createNode(page, `${testCase.name}-end`, 160);
-    const connectorsContainer = createNode(page, "FFA Connectors", 800);
-    const connector = createNode(connectorsContainer, `${testCase.name}-connector-root`, 840);
+    const connector = createNode(page, `${testCase.name}-connector-root`, 840);
     const messages = [];
 
     setConnectorRefs(start, ["live-connector", "deleted-connector"]);
-    connectorsContainer.setSharedPluginData(namespace, "kind", "container");
     setConnectorRecord(connector, "live-connector", start.id, end.id, "open");
-    testCase.prepareIndex(connectorsContainer, start, end, connector);
-    connectorsContainer.children = [connector];
-    page.children = [start, end, connectorsContainer];
+    testCase.prepareIndex(page, start, end, connector);
+    page.children = [start, end, connector];
     forbidPageFindAllWithCriteria(
       page,
       "Clean Stale Indexes must not use page-wide discovery for repair-required data.",
@@ -337,20 +324,17 @@ test("Repair Validation State rebuilds validation data and cleans unknown stale 
   const start = createNode(page, "start-endpoint", 0);
   const end = createNode(page, "end-endpoint", 160);
   const unknownFormerEndpoint = createNode(page, "unknown-former-endpoint", 320);
-  const connectorsContainer = createNode(page, "FFA Connectors", 800);
-  const connector = createNode(connectorsContainer, "connector-root", 840);
+  const connector = createNode(page, "connector-root", 840);
   const messages = [];
 
   setConnectorRefs(start, ["live-connector", "deleted-connector"]);
   setConnectorRefs(unknownFormerEndpoint, ["deleted-connector"]);
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   setConnectorRecord(connector, "live-connector", start.id, end.id, "open");
-  setValidationIndex(connectorsContainer, {
+  setValidationIndex(page, {
     connectorRootNodeIds: [connector.id],
     flowEndpointNodeIds: [start.id, end.id],
   });
-  connectorsContainer.children = [connector];
-  page.children = [start, end, unknownFormerEndpoint, connectorsContainer];
+  page.children = [start, end, unknownFormerEndpoint, connector];
   globalThis.figma = createFigmaStub(page, messages);
 
   await importCodeModule();
@@ -374,11 +358,8 @@ test("Repair Validation State rebuilds validation data and cleans unknown stale 
     "Repair Validation State refreshed project validation data, cleaned 1 Flow Endpoint(s), and removed 1 stale connector reference(s). Validation found 0 issue(s).",
   );
   assert.equal(repairStatus.validationRepairRequired, false);
-  assert.deepEqual(readValidationIndex(connectorsContainer).flowEndpointNodeIds, [
-    start.id,
-    end.id,
-  ]);
-  assert.deepEqual(readValidationIndex(connectorsContainer).connectorRootNodeIds, [connector.id]);
+  assert.deepEqual(readValidationIndex(page).flowEndpointNodeIds, [start.id, end.id]);
+  assert.deepEqual(readValidationIndex(page).connectorRootNodeIds, [connector.id]);
 });
 
 test("Repair Validation State keeps rebuilt validation data under the Figma plugin-data limit", async () => {
@@ -389,17 +370,14 @@ test("Repair Validation State keeps rebuilt validation data under the Figma plug
   const start = createNode(page, "start-endpoint", 0);
   const end = createNode(page, "end-endpoint", 160);
   const unknownFormerEndpoint = createNode(page, "unknown-former-endpoint", 320);
-  const connectorsContainer = createNode(page, "FFA Connectors", 800);
-  const connector = createNode(connectorsContainer, "connector-root", 840);
+  const connector = createNode(page, "connector-root", 840);
   const messages = [];
 
   setConnectorRefs(start, ["live-connector", "deleted-connector"]);
   setConnectorRefs(unknownFormerEndpoint, ["deleted-connector"]);
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
-  limitSharedPluginDataEntrySize(connectorsContainer, 100_000);
+  limitSharedPluginDataEntrySize(page, 100_000);
   setConnectorRecord(connector, "live-connector", start.id, end.id, "open");
-  connectorsContainer.children = [connector];
-  page.children = [...unrelatedFrames, start, end, unknownFormerEndpoint, connectorsContainer];
+  page.children = [...unrelatedFrames, start, end, unknownFormerEndpoint, connector];
   globalThis.figma = createFigmaStub(page, messages);
 
   await importCodeModule();
@@ -408,8 +386,8 @@ test("Repair Validation State keeps rebuilt validation data under the Figma plug
   await flushPluginMessage(messages);
 
   const repairStatus = messages.find((message) => message.type === "status");
-  const connectorIndexRaw = connectorsContainer.getSharedPluginData(namespace, "validationIndex");
-  const connectorIndex = readValidationIndex(connectorsContainer);
+  const connectorIndexRaw = page.getSharedPluginData(namespace, "validationIndex");
+  const connectorIndex = readValidationIndex(page);
 
   assert.equal(repairStatus.tone, "success");
   assert.ok(
@@ -430,8 +408,7 @@ test("validates connector routes without scanning unrelated group descendants", 
   const contextFrame = createNode(page, "context-frame", 0);
   const start = createNode(contextFrame, "start-endpoint", 0);
   const end = createNode(contextFrame, "end-endpoint", 220);
-  const connectorsContainer = createNode(page, "FFA Connectors", 500);
-  const connector = createNode(connectorsContainer, "connector-root", 520);
+  const connector = createNode(page, "connector-root", 520);
   const unrelatedGroup = createNode(page, "unrelated-large-group", 900);
   const messages = [];
 
@@ -441,15 +418,13 @@ test("validates connector routes without scanning unrelated group descendants", 
       throw new Error("Validate Bindings must not scan unrelated group descendants.");
     },
   });
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   setConnectorRecord(connector, "connector-valid", start.id, end.id, "open", [
     { x: 100, y: 50 },
     { x: 220, y: 50 },
   ]);
 
   contextFrame.children = [start, end];
-  connectorsContainer.children = [connector];
-  page.children = [contextFrame, connectorsContainer, unrelatedGroup];
+  page.children = [contextFrame, connector, unrelatedGroup];
   globalThis.figma = createFigmaStub(page, messages);
 
   await importCodeModule();
@@ -489,9 +464,8 @@ test("validates multiple connector routes without repeated obstacle discovery", 
   const endA = createNode(contextFrame, "end-a", 260);
   const startB = createNode(contextFrame, "start-b", 0);
   const endB = createNode(contextFrame, "end-b", 260);
-  const connectorsContainer = createNode(page, "FFA Connectors", 500);
-  const connectorA = createNode(connectorsContainer, "connector-root-a", 520);
-  const connectorB = createNode(connectorsContainer, "connector-root-b", 560);
+  const connectorA = createNode(page, "connector-root-a", 520);
+  const connectorB = createNode(page, "connector-root-b", 560);
   const unrelatedFrame = createNode(page, "unrelated-large-frame", 900);
   const messages = [];
   let fullPageObstacleDiscoveryCalls = 0;
@@ -505,13 +479,11 @@ test("validates multiple connector routes without repeated obstacle discovery", 
       throw new Error("Route validation must not scan unrelated frame descendants.");
     },
   });
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   setConnectorRecord(connectorA, "connector-a", startA.id, endA.id, "A");
   setConnectorRecord(connectorB, "connector-b", startB.id, endB.id, "B");
 
   contextFrame.children = [startA, endA, startB, endB];
-  connectorsContainer.children = [connectorA, connectorB];
-  page.children = [contextFrame, connectorsContainer, unrelatedFrame];
+  page.children = [contextFrame, connectorA, connectorB, unrelatedFrame];
   page.findAllWithCriteria = () => {
     fullPageObstacleDiscoveryCalls += 1;
     return [];

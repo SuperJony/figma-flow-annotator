@@ -6,7 +6,7 @@ import type {
   FakePaint,
   FixtureRect,
 } from "./fixture-types";
-import { ANNOTATIONS_CONTAINER_NAME, NAMESPACE } from "./fixture-types";
+import { NAMESPACE } from "./fixture-types";
 
 const SCENE_PADDING = 36;
 
@@ -108,12 +108,9 @@ export function renderAnnotationScene(
 }
 
 export function getGeneratedAnnotationNodes(pageNode: FakePageNode): FakeNode[] {
-  const container = pageNode.children.find(
-    (node) =>
-      node.name === ANNOTATIONS_CONTAINER_NAME &&
-      node.getSharedPluginData(NAMESPACE, "kind") === "container",
+  return pageNode.children.filter((node) =>
+    ["annotation-card", "annotation-badge"].includes(node.getSharedPluginData(NAMESPACE, "kind")),
   );
-  return container?.children ?? [];
 }
 
 export function annotationKind(node: FakeNode): string {

@@ -28,22 +28,18 @@ test("routes around indexed Context Frames and Annotation Cards without page fra
   const annotationCard = createNode(page, "annotation-card", 360);
   const annotationBadge = createNode(page, "annotation-badge", 480);
   const end = createNode(page, "end", 620);
-  const connectorsContainer = createNode(page, "connector-container", 0);
   const connectorGroups = [];
   const runtime = createRuntime(page, connectorGroups);
 
   annotationCard.setSharedPluginData("figma_flow_annotator", "kind", "annotation-card");
   annotationBadge.setSharedPluginData("figma_flow_annotator", "kind", "annotation-badge");
-  connectorsContainer.name = "FFA Connectors";
-  connectorsContainer.children = connectorGroups;
-  connectorsContainer.setSharedPluginData("figma_flow_annotator", "kind", "container");
-  setValidationIndex(connectorsContainer, {
+  setValidationIndex(page, {
     annotationBadgeNodeIds: [annotationBadge.id],
     annotationCardNodeIds: [annotationCard.id],
     connectorObstacleCandidateNodeIds: [middleFrame.id, annotationCard.id, annotationBadge.id],
     contextFrameIds: [middleFrame.id],
   });
-  page.children = [start, middleFrame, annotationCard, annotationBadge, end, connectorsContainer];
+  page.children = [start, middleFrame, annotationCard, annotationBadge, end];
   const requestedNodeIds = [];
   globalThis.figma = createFigmaStub(page, connectorGroups);
   globalThis.figma.getNodeByIdAsync = async (nodeId) => {
@@ -82,18 +78,15 @@ test("does not treat indexed Annotation Badges as Create Flow Connector obstacle
   const start = createNode(page, "start", 0);
   const annotationBadge = createNode(page, "annotation-badge", 180);
   const end = createNode(page, "end", 400);
-  const annotationsContainer = createNode(page, "annotation-container", 0);
   const connectorGroups = [];
   const runtime = createRuntime(page, connectorGroups);
 
   annotationBadge.setSharedPluginData("figma_flow_annotator", "kind", "annotation-badge");
-  annotationsContainer.name = "FFA Annotations";
-  annotationsContainer.setSharedPluginData("figma_flow_annotator", "kind", "container");
-  setValidationIndex(annotationsContainer, {
+  setValidationIndex(page, {
     annotationBadgeNodeIds: [annotationBadge.id],
     connectorObstacleCandidateNodeIds: [annotationBadge.id],
   });
-  page.children = [start, annotationBadge, end, annotationsContainer];
+  page.children = [start, annotationBadge, end];
   globalThis.figma = createFigmaStub(page, connectorGroups);
   page.findAllWithCriteria = () => {
     throw new Error("Create Flow Connector must not use page-level frame discovery.");
@@ -127,7 +120,6 @@ test("fails connector creation atomically when no legal route exists", async () 
     createNode(page, "bottom-wall", -60),
   ];
   const end = createNode(page, "end", 320);
-  const annotationsContainer = createNode(page, "annotation-container", 0);
   const connectorGroups = [];
   const runtime = createRuntime(page, connectorGroups);
 
@@ -143,13 +135,11 @@ test("fails connector creation atomically when no legal route exists", async () 
     walls[index].width = rect.width;
     walls[index].height = rect.height;
   });
-  annotationsContainer.name = "FFA Annotations";
-  annotationsContainer.setSharedPluginData("figma_flow_annotator", "kind", "container");
-  setValidationIndex(annotationsContainer, {
+  setValidationIndex(page, {
     connectorObstacleCandidateNodeIds: walls.map((wall) => wall.id),
     contextFrameIds: walls.map((wall) => wall.id),
   });
-  page.children = [start, ...walls, end, annotationsContainer];
+  page.children = [start, ...walls, end];
   globalThis.figma = createFigmaStub(page, connectorGroups);
   page.findAllWithCriteria = () => {
     throw new Error("Create Flow Connector must not use page-level frame discovery.");
@@ -167,7 +157,9 @@ test("fails connector creation atomically when no legal route exists", async () 
   );
   assert.equal(connectorGroups.length, 0);
   assert.equal(
-    page.children.some((node) => node.name === "FFA Connectors"),
+    page.children.some(
+      (node) => node.getSharedPluginData("figma_flow_annotator", "kind") === "flow-connector",
+    ),
     false,
   );
   assert.deepEqual(readConnectorRefs(start), []);
@@ -219,7 +211,7 @@ test("upserts an existing directed Flow Connector and keeps reverse direction se
   assert.deepEqual(readConnectorRefs(end), ["connector-1", "connector-2"]);
 });
 
-test("reports Connect preview and existing directed connector status from project connector container only", async () => {
+test("reports Connect preview and existing directed connector status from page Flow Connector roots", async () => {
   const connect = await importConnectModule();
   const page = { type: "PAGE", id: "page", children: [], selection: [] };
   const start = createNode(page, "start", 0);
@@ -359,16 +351,14 @@ test("refreshes current-page Flow Connectors and gives selected connector roots 
   const secondPageRoute = readConnector(connectorGroups[1]).routeCache.points;
   const annotationCard = createNode(page, "annotation-card", 980);
   const unrelatedFrame = createNode(page, "unrelated-frame", -1000);
-  const connectorsContainer = page.children.find((node) => node.name === "FFA Connectors");
-  assert.ok(connectorsContainer, "expected Flow Connector container after creation");
   annotationCard.setSharedPluginData("figma_flow_annotator", "kind", "annotation-card");
-  setValidationIndex(connectorsContainer, {
+  setValidationIndex(page, {
     annotationBadgeNodeIds: ["annotation-badge"],
     annotationCardNodeIds: [annotationCard.id],
     connectorObstacleCandidateNodeIds: [annotationCard.id, "annotation-badge"],
   });
   Object.defineProperty(unrelatedFrame, "children", { get: () => assert.fail("descendant scan") });
-  page.children = [start, end, alternateEnd, annotationCard, unrelatedFrame, connectorsContainer];
+  page.children = [start, end, alternateEnd, annotationCard, unrelatedFrame, ...connectorGroups];
   const requestedNodeIds = [];
   const nodesById = new Map(page.children.map((node) => [node.id, node]));
   globalThis.figma.getNodeByIdAsync = async (nodeId) => {
@@ -428,13 +418,11 @@ test("preserves an existing Flow Connector route and record when refresh routing
   ].forEach((rect, index) => {
     moveNode(walls[index], rect);
   });
-  const connectorsContainer = page.children.find((node) => node.name === "FFA Connectors");
-  assert.ok(connectorsContainer, "expected Flow Connector container after creation");
-  setValidationIndex(connectorsContainer, {
+  setValidationIndex(page, {
     connectorObstacleCandidateNodeIds: walls.map((wall) => wall.id),
     contextFrameIds: walls.map((wall) => wall.id),
   });
-  page.children = [start, ...walls, end, connectorsContainer];
+  page.children = [start, ...walls, end, ...connectorGroups];
   page.selection = [connectorGroups[0]];
   page.findAllWithCriteria = () => {
     throw new Error("Refresh Flow Connector must not use page-level frame discovery.");
@@ -509,9 +497,7 @@ test("preserves failed connector visuals during mixed page refresh", async () =>
   ].forEach((rect, index) => {
     moveNode(walls[index], rect);
   });
-  const connectorsContainer = page.children.find((node) => node.name === "FFA Connectors");
-  assert.ok(connectorsContainer, "expected Flow Connector container after creation");
-  setValidationIndex(connectorsContainer, {
+  setValidationIndex(page, {
     connectorObstacleCandidateNodeIds: walls.map((wall) => wall.id),
     contextFrameIds: walls.map((wall) => wall.id),
   });
@@ -521,7 +507,7 @@ test("preserves failed connector visuals during mixed page refresh", async () =>
     failingEnd,
     successfulStart,
     successfulEnd,
-    connectorsContainer,
+    ...connectorGroups,
   ];
   page.selection = [];
   page.findAllWithCriteria = () => {

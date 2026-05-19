@@ -17,13 +17,11 @@ test("adds Subject Nodes when a selected Annotation Card descendant is selected"
   const page = createPage();
   const subjectA = createNode(page, "subject-a", 0);
   const subjectB = createNode(page, "subject-b", 180);
-  const annotationsContainer = createNode(page, "FFA Annotations", 800);
-  const existingCard = createNode(annotationsContainer, "FFA Annotation Card #4", 820);
+  const existingCard = createNode(page, "FFA Annotation Card #4", 820);
   const cardBodyText = createNode(existingCard, "annotation-card-body", 840);
-  const existingBadge = createNode(annotationsContainer, "FFA Annotation Badge #4", 850);
+  const existingBadge = createNode(page, "FFA Annotation Badge #4", 850);
   const messages = [];
 
-  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
   setCardRecord(existingCard, 4, page.id);
   setBadgeRecord(existingBadge, 4, subjectA.id, page.id);
   subjectA.setSharedPluginData(
@@ -35,9 +33,8 @@ test("adds Subject Nodes when a selected Annotation Card descendant is selected"
     }),
   );
 
-  annotationsContainer.children = [existingCard, existingBadge];
   existingCard.children = [cardBodyText];
-  page.children = [subjectA, subjectB, annotationsContainer];
+  page.children = [subjectA, subjectB, existingCard, existingBadge];
   page.selection = [cardBodyText, subjectB];
   globalThis.figma = createFigmaStub(page, messages);
 
@@ -51,7 +48,7 @@ test("adds Subject Nodes when a selected Annotation Card descendant is selected"
   await flushPluginMessage(messages);
 
   const updatedRecord = JSON.parse(existingCard.getSharedPluginData(namespace, "annotation"));
-  const badges = annotationsContainer.children.filter(
+  const badges = page.children.filter(
     (child) => child.getSharedPluginData(namespace, "kind") === "annotation-badge",
   );
   const subjectBBadge = badges.find((badge) => {

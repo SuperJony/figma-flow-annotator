@@ -1,6 +1,5 @@
 import {
   type AddAnnotationSubjectsOperationBatch,
-  ANNOTATIONS_CONTAINER_NAME,
   type AnnotationRecord,
   type ArrangeAnnotationBadgesOperationBatch,
   type ArrangeAnnotationCardsOperationBatch,
@@ -16,7 +15,6 @@ import {
   bringBadgesToFront,
   createId,
   ensureLayerOrder,
-  findContainer,
   getVisibleBounds,
   hasGeneratedAncestor,
   localRect,
@@ -106,12 +104,7 @@ export function addSubjectNodesToAnnotation(): AddSubjectsResult {
 
 export function arrangeBadgesForSelectedSubjects(): ArrangeResult {
   const subjects = figma.currentPage.selection.filter((node) => !hasGeneratedAncestor(node));
-  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
-  if (annotationsContainer === null) {
-    throw new Error("No Annotation Badges found to arrange.");
-  }
-
-  const badgeRecords = getAnnotationBadgeRecords(annotationsContainer);
+  const badgeRecords = getAnnotationBadgeRecords(figma.currentPage);
   const batch = buildArrangeAnnotationBadgesOperationBatch({
     subjects: subjects
       .map((subject) => ({
@@ -130,7 +123,7 @@ export function arrangeBadgesForSelectedSubjects(): ArrangeResult {
     badgeRecords.map((badge) => [badge.node.id, badge.node]),
   );
   const applied = applyAnnotationOperationBatch(batch, existingNodes);
-  bringBadgesToFront(annotationsContainer);
+  bringBadgesToFront();
   return {
     movedCount: batch.movedBadgeNodeIds.length,
     nodes: applied.nodes,
@@ -138,12 +131,7 @@ export function arrangeBadgesForSelectedSubjects(): ArrangeResult {
 }
 
 export async function arrangeAnnotationCards(): Promise<ArrangeResult> {
-  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
-  if (annotationsContainer === null) {
-    throw new Error("No Annotation Cards found to arrange.");
-  }
-
-  const cardRecords = getAnnotationCardRecords(annotationsContainer);
+  const cardRecords = getAnnotationCardRecords(figma.currentPage);
   if (cardRecords.length === 0) {
     throw new Error("No Annotation Cards found to arrange.");
   }
@@ -186,9 +174,8 @@ function applyAnnotationOperationBatch(
     writer: createAnnotationVisualWriter(),
   });
 
-  const container = applied.containers.get("annotations");
-  if (container !== undefined) {
-    bringBadgesToFront(container);
+  if ("createdNodeRefs" in batch && batch.createdNodeRefs.length > 0) {
+    bringBadgesToFront();
   }
   return {
     nodes:

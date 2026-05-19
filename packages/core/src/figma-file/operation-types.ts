@@ -16,15 +16,9 @@ import type {
 } from "../validation/validation-index.ts";
 
 export type FigmaFileOperationTarget =
+  | { kind: "current-page" }
   | { kind: "existing-node"; nodeId: string }
-  | { kind: "created-node"; ref: string }
-  | { kind: "container"; ref: string };
-
-export interface EnsureContainerOperation {
-  type: "ensure-container";
-  ref: string;
-  name: string;
-}
+  | { kind: "created-node"; ref: string };
 
 export interface SetSharedPluginDataOperation {
   type: "set-shared-plugin-data";
@@ -55,7 +49,6 @@ export interface UpdateValidationIndexOperation {
 export interface CreateAnnotationCardOperation {
   type: "create-annotation-card";
   ref: string;
-  containerRef: string;
   name: string;
   annotationNumber: number;
   body: string;
@@ -67,7 +60,6 @@ export interface CreateAnnotationCardOperation {
 export interface CreateAnnotationBadgeOperation {
   type: "create-annotation-badge";
   ref: string;
-  containerRef: string;
   name: string;
   annotationNumber: number;
   subjectNodeId: string;
@@ -78,7 +70,6 @@ export interface CreateAnnotationBadgeOperation {
 export interface CreateFlowConnectorOperation {
   type: "create-flow-connector";
   ref: string;
-  containerRef: string;
   name: string;
   routePoints: Point[];
   flowAction: string | null;
@@ -101,7 +92,6 @@ export interface MoveNodeOperation {
 }
 
 export type FigmaFileOperation =
-  | EnsureContainerOperation
   | SetSharedPluginDataOperation
   | AppendSharedReferenceOperation
   | UpdateValidationIndexOperation

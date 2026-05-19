@@ -1,8 +1,4 @@
-import {
-  ANNOTATIONS_CONTAINER_NAME,
-  SHARED_PLUGIN_DATA,
-  type ValidationComputationSnapshot,
-} from "@figma-flow-annotator/core";
+import { SHARED_PLUGIN_DATA, type ValidationComputationSnapshot } from "@figma-flow-annotator/core";
 import {
   getAnnotationValidationBadges,
   getAnnotationValidationCards,
@@ -13,17 +9,14 @@ import {
   toFlowConnectorReferenceValidationInput,
 } from "../connectors/current-page-snapshot";
 import { collectValidationFlowConnectorRouteFacts } from "../connectors/route-facts";
-import { findContainer, readReferenceIds } from "../figma/runtime";
+import { readReferenceIds } from "../figma/runtime";
 
 export async function collectCurrentPageValidationSnapshot(
   runtime: FlowConnectorCurrentPageRuntime,
 ): Promise<ValidationComputationSnapshot> {
   const currentPage = figma.currentPage;
-  const annotationsContainer = findContainer(ANNOTATIONS_CONTAINER_NAME);
-  const cards =
-    annotationsContainer === null ? [] : getAnnotationValidationCards(annotationsContainer);
-  const badges =
-    annotationsContainer === null ? [] : getAnnotationValidationBadges(annotationsContainer);
+  const cards = getAnnotationValidationCards(currentPage);
+  const badges = getAnnotationValidationBadges(currentPage);
   const connectorSnapshot = await collectBoundedFlowConnectorValidationSnapshot(
     runtime,
     collectAnnotationReferenceNodeIds(cards, badges),

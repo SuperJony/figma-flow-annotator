@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  buildFlowConnectorVisualModel,
-  CONNECTORS_CONTAINER_NAME,
-} from "@figma-flow-annotator/core";
+import { buildFlowConnectorVisualModel } from "@figma-flow-annotator/core";
 import {
   CONNECTOR_ROUTE_NODE_NAME,
   createFigmaStub,
@@ -30,10 +27,9 @@ test("regenerates connector visuals without emptying the Flow Connector root", a
   selectConnectorEndpoints(connect, runtime, page, start, end);
 
   const created = await connect.createFlowConnector("click", runtime);
-  const connectorsContainer = page.children.find((node) => node.name === CONNECTORS_CONTAINER_NAME);
 
   assert.equal(created.removed, false);
-  assert.equal(connectorsContainer.children.includes(created), true);
+  assert.equal(page.children.includes(created), true);
   const connector = readConnector(created);
   assert.equal(connector.flowAction, "click");
   assert.deepEqual(
@@ -71,19 +67,17 @@ test("regenerates connector visuals without emptying the Flow Connector root", a
 test("figma stub removes emptied connector groups without splitting the child array", async () => {
   const page = { type: "PAGE", id: "page", children: [], selection: [] };
   const connectorGroups = [];
-  const runtime = createRuntime(page, connectorGroups);
   const figma = createFigmaStub(page, connectorGroups, { removeEmptyGroups: true });
-  const connectorsContainer = runtime.ensureContainer(CONNECTORS_CONTAINER_NAME);
   const visualNode = createNode(page, "visual-node", 0);
 
-  const group = figma.group([visualNode], connectorsContainer);
+  const group = figma.group([visualNode], page);
 
-  assert.equal(connectorsContainer.children, connectorGroups);
+  assert.equal(page.children.includes(group), true);
   assert.equal(connectorGroups.includes(group), true);
 
   visualNode.remove();
 
   assert.equal(group.removed, true);
-  assert.equal(connectorsContainer.children, connectorGroups);
+  assert.equal(page.children.includes(group), false);
   assert.equal(connectorGroups.includes(group), false);
 });

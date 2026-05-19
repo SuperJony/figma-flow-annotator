@@ -220,7 +220,6 @@ export function formatCleanStaleIndexesPanelStatus(result: {
 interface RepairValidationStatePanelStatusInput {
   cleanedEndpointCount: number;
   removedConnectorRefCount: number;
-  repairedContainerCount: number;
   validationReport?: ValidationReport;
 }
 

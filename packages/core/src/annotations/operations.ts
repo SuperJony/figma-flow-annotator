@@ -12,7 +12,6 @@ import type { Point, RectLike } from "../shared/geometry.ts";
 import { unionRects } from "../shared/geometry.ts";
 import type { AnnotationRecord } from "../shared/plugin-data.ts";
 import {
-  ANNOTATIONS_CONTAINER_NAME,
   createAnnotationRecord,
   createBadgeRefRecord,
   createContextRecord,
@@ -107,17 +106,6 @@ export function buildCreateAnnotationOperationBatch(
   const subjectSummary = summarizeSubjectNames(input.subjects.map((subject) => subject.name));
   const operations: FigmaFileOperation[] = [
     {
-      type: "ensure-container",
-      ref: "annotations",
-      name: ANNOTATIONS_CONTAINER_NAME,
-    },
-    {
-      type: "set-shared-plugin-data",
-      target: { kind: "container", ref: "annotations" },
-      key: SHARED_PLUGIN_DATA.keys.kind,
-      value: VISUAL_NODE_KINDS.container,
-    },
-    {
       type: "set-shared-plugin-data",
       target: { kind: "existing-node", nodeId: input.contextFrameId },
       key: SHARED_PLUGIN_DATA.keys.context,
@@ -126,7 +114,6 @@ export function buildCreateAnnotationOperationBatch(
     {
       type: "create-annotation-card",
       ref: cardRef,
-      containerRef: "annotations",
       name: formatAnnotationCardName(input.annotationNumber),
       annotationNumber: input.annotationNumber,
       body,
@@ -164,7 +151,6 @@ export function buildCreateAnnotationOperationBatch(
       {
         type: "create-annotation-badge",
         ref: nodeRef,
-        containerRef: "annotations",
         name: formatAnnotationBadgeName(input.annotationNumber),
         annotationNumber: input.annotationNumber,
         subjectNodeId: subject.id,
@@ -245,19 +231,7 @@ export function buildAddAnnotationSubjectsOperationBatch(
   const subjectsNeedingBadges = addedSubjects.filter(
     (subject) => !existingBadgeSubjectIds.has(subject.id),
   );
-  const operations: FigmaFileOperation[] = [
-    {
-      type: "ensure-container",
-      ref: "annotations",
-      name: ANNOTATIONS_CONTAINER_NAME,
-    },
-    {
-      type: "set-shared-plugin-data",
-      target: { kind: "container", ref: "annotations" },
-      key: SHARED_PLUGIN_DATA.keys.kind,
-      value: VISUAL_NODE_KINDS.container,
-    },
-  ];
+  const operations: FigmaFileOperation[] = [];
 
   if (addedSubjectIds.length > 0) {
     operations.push({
@@ -280,7 +254,6 @@ export function buildAddAnnotationSubjectsOperationBatch(
       {
         type: "create-annotation-badge",
         ref: nodeRef,
-        containerRef: "annotations",
         name: formatAnnotationBadgeName(input.annotation.annotationNumber),
         annotationNumber: input.annotation.annotationNumber,
         subjectNodeId: subject.id,
@@ -350,19 +323,7 @@ export function buildArrangeAnnotationBadgesOperationBatch(
     throw new Error("Select one or more Subject Nodes with Annotation Badges.");
   }
 
-  const operations: FigmaFileOperation[] = [
-    {
-      type: "ensure-container",
-      ref: "annotations",
-      name: ANNOTATIONS_CONTAINER_NAME,
-    },
-    {
-      type: "set-shared-plugin-data",
-      target: { kind: "container", ref: "annotations" },
-      key: SHARED_PLUGIN_DATA.keys.kind,
-      value: VISUAL_NODE_KINDS.container,
-    },
-  ];
+  const operations: FigmaFileOperation[] = [];
   input.subjects.forEach((subject) => {
     const sortedBadges = [...subject.badges].sort(compareAnnotationNumbersThenIds);
     sortedBadges.forEach((badge, index) => {
@@ -381,7 +342,7 @@ export function buildArrangeAnnotationBadgesOperationBatch(
   );
   operations.push({
     type: "update-validation-index",
-    target: { kind: "container", ref: "annotations" },
+    target: { kind: "current-page" },
     upsert: {
       nodeIds: {
         subjectNodeIds: input.subjects.map((subject) => subject.id),
@@ -424,21 +385,10 @@ export function buildArrangeAnnotationCardsOperationBatch(
     return operation;
   });
   const operations: FigmaFileOperation[] = [
-    {
-      type: "ensure-container",
-      ref: "annotations",
-      name: ANNOTATIONS_CONTAINER_NAME,
-    },
-    {
-      type: "set-shared-plugin-data",
-      target: { kind: "container", ref: "annotations" },
-      key: SHARED_PLUGIN_DATA.keys.kind,
-      value: VISUAL_NODE_KINDS.container,
-    },
     ...moveOperations,
     {
       type: "update-validation-index",
-      target: { kind: "container", ref: "annotations" },
+      target: { kind: "current-page" },
       upsert: {
         nodeTargets: {
           annotationCardNodeIds: moveOperations.map((operation) => ({
@@ -470,7 +420,7 @@ function buildUpdateAnnotationValidationIndexOperation(input: {
 }): UpdateValidationIndexOperation {
   return {
     type: "update-validation-index",
-    target: { kind: "container", ref: "annotations" },
+    target: { kind: "current-page" },
     upsert: {
       nodeIds: {
         contextFrameIds: [input.contextFrameId],

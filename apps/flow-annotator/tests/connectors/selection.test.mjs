@@ -301,8 +301,7 @@ test("reads connector snapshot facts from the provided namespace", async () => {
   const generatedAncestor = createNamespacedNode(page, "generated-ancestor", "FRAME");
   const generatedEndpoint = createNamespacedNode(generatedAncestor, "generated-endpoint", "FRAME");
   const endpoint = createNamespacedNode(page, "endpoint", "FRAME");
-  const connectorsContainer = createNamespacedNode(page, "FFA Connectors", "FRAME");
-  const connectorRoot = createNamespacedNode(connectorsContainer, "connector-root", "GROUP");
+  const connectorRoot = createNamespacedNode(page, "connector-root", "GROUP");
 
   page.selection = [];
   generatedAncestor.setSharedPluginData(namespace, "kind", "annotation-card");
@@ -321,7 +320,6 @@ test("reads connector snapshot facts from the provided namespace", async () => {
     "connectorRefs",
     JSON.stringify({ schemaVersion: 1, connectorIds: ["connector-endpoint"] }),
   );
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   connectorRoot.setSharedPluginData(namespace, "kind", "flow-connector");
   connectorRoot.setSharedPluginData(
     namespace,
@@ -344,8 +342,7 @@ test("reads connector snapshot facts from the provided namespace", async () => {
     }),
   );
   generatedAncestor.children = [generatedEndpoint];
-  connectorsContainer.children = [connectorRoot];
-  page.children = [generatedAncestor, endpoint, connectorsContainer];
+  page.children = [generatedAncestor, endpoint, connectorRoot];
   globalThis.figma = createFigmaStub(page, []);
 
   const snapshot = await collectDeepAuditFlowConnectorCurrentPageSnapshot({ namespace });

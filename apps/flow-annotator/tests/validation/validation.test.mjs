@@ -44,11 +44,10 @@ test("validates Annotation bindings and locates validation issue nodes without s
   contextFrame.absoluteBoundingBox = { x: 0, y: 0, width: 320, height: 180 };
   const subjectA = createNode(contextFrame, "subject-a", 20);
   const subjectB = createNode(contextFrame, "subject-b", 160);
-  const annotationsContainer = createNode(page, "FFA Annotations", 800);
-  const cardMissingBody = createNode(annotationsContainer, "card-missing-body", 900);
-  const cardMissingBadge = createNode(annotationsContainer, "card-missing-badge", 940);
-  const duplicateBadgeA = createNode(annotationsContainer, "badge-duplicate-a", 260);
-  const duplicateBadgeB = createNode(annotationsContainer, "badge-duplicate-b", 300);
+  const cardMissingBody = createNode(page, "card-missing-body", 900);
+  const cardMissingBadge = createNode(page, "card-missing-badge", 940);
+  const duplicateBadgeA = createNode(page, "badge-duplicate-a", 260);
+  const duplicateBadgeB = createNode(page, "badge-duplicate-b", 300);
   const messages = [];
   const scrollEvents = [];
 
@@ -70,7 +69,6 @@ test("validates Annotation bindings and locates validation issue nodes without s
       annotationIds: ["annotation-2", "annotation-missing-card"],
     }),
   );
-  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
   setCardRecord(cardMissingBody, 1, contextFrame.id);
   cardMissingBody.setSharedPluginData(
     namespace,
@@ -104,14 +102,14 @@ test("validates Annotation bindings and locates validation issue nodes without s
   setBadgeRecord(duplicateBadgeA, 1, subjectA.id, contextFrame.id);
   setBadgeRecord(duplicateBadgeB, 1, subjectA.id, contextFrame.id);
 
-  annotationsContainer.children = [
+  contextFrame.children = [subjectA, subjectB];
+  page.children = [
+    contextFrame,
     cardMissingBody,
     cardMissingBadge,
     duplicateBadgeA,
     duplicateBadgeB,
   ];
-  contextFrame.children = [subjectA, subjectB];
-  page.children = [contextFrame, annotationsContainer];
   forbidPageFindAllWithCriteria(
     page,
     "Validate Bindings must not call page-wide findAllWithCriteria for Annotation records.",
@@ -168,11 +166,10 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   const end = createNode(page, "end-endpoint", 160);
   const invalidEndpoint = createNode(page, "annotation-card-endpoint", 320);
   const formerEndpoint = createNode(page, "former-endpoint", 480);
-  const connectorsContainer = createNode(page, "FFA Connectors", 800);
-  const orphanConnector = createNode(connectorsContainer, "connector-orphan-root", 840);
-  const invalidConnector = createNode(connectorsContainer, "connector-invalid-root", 880);
-  const duplicateConnectorA = createNode(connectorsContainer, "connector-duplicate-root-a", 920);
-  const duplicateConnectorB = createNode(connectorsContainer, "connector-duplicate-root-b", 960);
+  const orphanConnector = createNode(page, "connector-orphan-root", 840);
+  const invalidConnector = createNode(page, "connector-invalid-root", 880);
+  const duplicateConnectorA = createNode(page, "connector-duplicate-root-a", 920);
+  const duplicateConnectorB = createNode(page, "connector-duplicate-root-b", 960);
   const messages = [];
   const scrollEvents = [];
 
@@ -181,12 +178,11 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
   setConnectorRefs(end, ["connector-duplicate-a", "connector-duplicate-b"]);
   setConnectorRefs(invalidEndpoint, ["connector-invalid"]);
   setConnectorRefs(formerEndpoint, ["connector-deleted-root", "connector-invalid"]);
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   setConnectorRecord(orphanConnector, "connector-orphan", "deleted-start", end.id, "open");
   setConnectorRecord(invalidConnector, "connector-invalid", invalidEndpoint.id, end.id, "open");
   setConnectorRecord(duplicateConnectorA, "connector-duplicate-a", start.id, end.id, null);
   setConnectorRecord(duplicateConnectorB, "connector-duplicate-b", start.id, end.id, "open");
-  setValidationIndex(connectorsContainer, {
+  setValidationIndex(page, {
     connectorRootNodeIds: [
       orphanConnector.id,
       invalidConnector.id,
@@ -196,13 +192,16 @@ test("validates Flow Connector references, locates issues, and cleans stale inde
     flowEndpointNodeIds: [start.id, end.id, invalidEndpoint.id],
   });
 
-  connectorsContainer.children = [
+  page.children = [
+    start,
+    end,
+    invalidEndpoint,
+    formerEndpoint,
     orphanConnector,
     invalidConnector,
     duplicateConnectorA,
     duplicateConnectorB,
   ];
-  page.children = [start, end, invalidEndpoint, formerEndpoint, connectorsContainer];
   globalThis.figma = createFigmaStub(page, messages, scrollEvents);
 
   await importCodeModule();
@@ -280,9 +279,8 @@ test("validates route, label, and trunk connector issues without shared report d
   const page = createPage();
   const startCrossing = createNode(page, "start-crossing", 0);
   const endCrossing = createNode(page, "end-crossing", 420);
-  const annotationsContainer = createNode(page, "FFA Annotations", 760);
-  const crossingObstacle = createNode(annotationsContainer, "middle-obstacle", 190);
-  const crossingBadge = createNode(annotationsContainer, "middle-badge", 250);
+  const crossingObstacle = createNode(page, "middle-obstacle", 190);
+  const crossingBadge = createNode(page, "middle-badge", 250);
   const startFailure = createNode(page, "start-failure", 0);
   const endFailure = createNode(page, "end-failure", 320);
   const walls = [
@@ -298,13 +296,12 @@ test("validates route, label, and trunk connector issues without shared report d
   const trunkStartA = createNode(page, "trunk-start-a", 0);
   const trunkStartB = createNode(page, "trunk-start-b", 0);
   const trunkEnd = createNode(page, "trunk-end", 420);
-  const connectorsContainer = createNode(page, "FFA Connectors", 900);
-  const crossingConnector = createNode(connectorsContainer, "connector-crossing-root", 900);
-  const failureConnector = createNode(connectorsContainer, "connector-failure-root", 940);
-  const labelConnectorA = createNode(connectorsContainer, "connector-label-root-a", 980);
-  const labelConnectorB = createNode(connectorsContainer, "connector-label-root-b", 1020);
-  const trunkConnectorA = createNode(connectorsContainer, "connector-trunk-root-a", 1060);
-  const trunkConnectorB = createNode(connectorsContainer, "connector-trunk-root-b", 1100);
+  const crossingConnector = createNode(page, "connector-crossing-root", 900);
+  const failureConnector = createNode(page, "connector-failure-root", 940);
+  const labelConnectorA = createNode(page, "connector-label-root-a", 980);
+  const labelConnectorB = createNode(page, "connector-label-root-b", 1020);
+  const trunkConnectorA = createNode(page, "connector-trunk-root-a", 1060);
+  const trunkConnectorB = createNode(page, "connector-trunk-root-b", 1100);
   const messages = [];
   const scrollEvents = [];
 
@@ -320,7 +317,6 @@ test("validates route, label, and trunk connector issues without shared report d
     { x: -60, y: 400, width: 190, height: 50 },
   ].forEach((rect, index) => {
     moveNode(walls[index], rect);
-    walls[index].parent = annotationsContainer;
     walls[index].setSharedPluginData(namespace, "kind", "annotation-card");
     walls[index].setSharedPluginData(
       namespace,
@@ -344,10 +340,7 @@ test("validates route, label, and trunk connector issues without shared report d
   moveNode(trunkStartA, { x: 0, y: 1000, width: 100, height: 100 });
   moveNode(trunkStartB, { x: 0, y: 1140, width: 100, height: 100 });
   moveNode(trunkEnd, { x: 420, y: 1060, width: 100, height: 100 });
-  moveNode(connectorsContainer, { x: 900, y: 0, width: 1, height: 1 });
 
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
-  annotationsContainer.setSharedPluginData(namespace, "kind", "container");
   setCardRecord(crossingObstacle, 1, page.id);
   crossingObstacle.setSharedPluginData(
     namespace,
@@ -397,15 +390,6 @@ test("validates route, label, and trunk connector issues without shared report d
   addFlowActionLabel(labelConnectorA, { x: 120, y: 720, width: 90, height: 28 });
   addFlowActionLabel(labelConnectorB, { x: 170, y: 730, width: 90, height: 28 });
 
-  connectorsContainer.children = [
-    crossingConnector,
-    failureConnector,
-    labelConnectorA,
-    labelConnectorB,
-    trunkConnectorA,
-    trunkConnectorB,
-  ];
-  annotationsContainer.children = [crossingObstacle, crossingBadge, ...walls];
   forbidPageFindAllWithCriteria(
     page,
     "Validate Bindings must not call page-wide findAllWithCriteria for route obstacles.",
@@ -413,7 +397,9 @@ test("validates route, label, and trunk connector issues without shared report d
   page.children = [
     startCrossing,
     endCrossing,
-    annotationsContainer,
+    crossingObstacle,
+    crossingBadge,
+    ...walls,
     startFailure,
     endFailure,
     labelStartA,
@@ -423,7 +409,12 @@ test("validates route, label, and trunk connector issues without shared report d
     trunkStartA,
     trunkStartB,
     trunkEnd,
-    connectorsContainer,
+    crossingConnector,
+    failureConnector,
+    labelConnectorA,
+    labelConnectorB,
+    trunkConnectorA,
+    trunkConnectorB,
   ];
   globalThis.figma = createFigmaStub(page, messages, scrollEvents);
 
@@ -507,25 +498,21 @@ test("ignores hidden Flow Action labels during overlap validation", async () => 
   const endA = createNode(page, "hidden-label-end-a", 220);
   const startB = createNode(page, "hidden-label-start-b", 0);
   const endB = createNode(page, "hidden-label-end-b", 220);
-  const connectorsContainer = createNode(page, "FFA Connectors", 500);
-  const connectorA = createNode(connectorsContainer, "connector-hidden-label-root-a", 520);
-  const connectorB = createNode(connectorsContainer, "connector-hidden-label-root-b", 560);
+  const connectorA = createNode(page, "connector-hidden-label-root-a", 520);
+  const connectorB = createNode(page, "connector-hidden-label-root-b", 560);
   const messages = [];
 
   moveNode(startA, { x: 0, y: 0, width: 100, height: 100 });
   moveNode(endA, { x: 220, y: 0, width: 100, height: 100 });
   moveNode(startB, { x: 0, y: 180, width: 100, height: 100 });
   moveNode(endB, { x: 220, y: 180, width: 100, height: 100 });
-  moveNode(connectorsContainer, { x: 500, y: 0, width: 1, height: 1 });
 
-  connectorsContainer.setSharedPluginData(namespace, "kind", "container");
   setConnectorRecord(connectorA, "connector-hidden-label-a", startA.id, endA.id, "A");
   setConnectorRecord(connectorB, "connector-hidden-label-b", startB.id, endB.id, "B");
   addFlowActionLabel(connectorA, { x: 120, y: 40, width: 90, height: 28 }, false);
   addFlowActionLabel(connectorB, { x: 140, y: 48, width: 90, height: 28 }, false);
 
-  connectorsContainer.children = [connectorA, connectorB];
-  page.children = [startA, endA, startB, endB, connectorsContainer];
+  page.children = [startA, endA, startB, endB, connectorA, connectorB];
   globalThis.figma = createFigmaStub(page, messages);
 
   await importCodeModule();

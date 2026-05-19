@@ -1,6 +1,5 @@
 import {
   type BuildCleanStaleIndexesOperationBatchInput,
-  CONNECTORS_CONTAINER_NAME,
   decodeConnectorReferenceIds,
   decodeFlowConnectorRecord,
   type FlowConnectorAuthoringEndpointInput,
@@ -38,23 +37,19 @@ export interface FlowConnectorValidationSnapshot extends FlowConnectorCurrentPag
 export function collectFlowConnectorCurrentPageSnapshot(
   runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
 ): FlowConnectorCurrentPageSnapshot {
-  const container = findFlowConnectorsContainer(runtime);
   return {
-    connectorRecords:
-      container === null
-        ? []
-        : container.children.flatMap((child) => {
-            if (
-              child.type !== "GROUP" ||
-              child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !==
-                VISUAL_NODE_KINDS.flowConnector
-            ) {
-              return [];
-            }
+    connectorRecords: figma.currentPage.children.flatMap((child) => {
+      if (
+        child.type !== "GROUP" ||
+        child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !==
+          VISUAL_NODE_KINDS.flowConnector
+      ) {
+        return [];
+      }
 
-            const record = readFlowConnectorRecord(child, runtime);
-            return record === null ? [] : [{ node: child, record }];
-          }),
+      const record = readFlowConnectorRecord(child, runtime);
+      return record === null ? [] : [{ node: child, record }];
+    }),
     namespace: runtime.namespace,
   };
 }
@@ -180,22 +175,6 @@ export function toFlowConnectorAuthoringEndpoint(
     id: node.id,
     name: node.name,
   };
-}
-
-function findFlowConnectorsContainer(
-  runtime: Pick<FlowConnectorCurrentPageRuntime, "namespace">,
-): FrameNode | null {
-  for (const child of figma.currentPage.children) {
-    if (
-      child.type === "FRAME" &&
-      child.name === CONNECTORS_CONTAINER_NAME &&
-      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) ===
-        VISUAL_NODE_KINDS.container
-    ) {
-      return child;
-    }
-  }
-  return null;
 }
 
 function addNodeIds(target: Set<string>, nodeIds: Iterable<string>): void {

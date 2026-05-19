@@ -60,20 +60,14 @@ test("builds repair validation state batches from Annotation and Flow Connector 
   });
 
   assert.equal(batch.kind, "repair-validation-state");
-  assert.deepEqual(batch.repairedContainerRefs, ["annotations-container", "connectors-container"]);
+  assert.equal(batch.repairedIndexTargetCount, 1);
   assert.deepEqual(
     batch.operations.map((operation) => operation.type),
-    [
-      "ensure-container",
-      "set-shared-plugin-data",
-      "set-shared-plugin-data",
-      "ensure-container",
-      "set-shared-plugin-data",
-      "set-shared-plugin-data",
-    ],
+    ["set-shared-plugin-data"],
   );
-  assert.deepEqual(batch.operations[2].value.subjectNodeIds, ["subject-1"]);
-  assert.deepEqual(batch.operations[5].value.flowEndpointNodeIds, [
+  assert.deepEqual(batch.operations[0].target, { kind: "current-page" });
+  assert.deepEqual(batch.operations[0].value.subjectNodeIds, ["subject-1"]);
+  assert.deepEqual(batch.operations[0].value.flowEndpointNodeIds, [
     "start-1",
     "end-1",
     "former-endpoint",

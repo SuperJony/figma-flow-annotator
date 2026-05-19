@@ -11,6 +11,10 @@ import {
 } from "@figma-flow-annotator/core";
 import { NAMESPACE } from "../figma/runtime";
 
+interface AnnotationVisualRootParent {
+  children: readonly SceneNode[];
+}
+
 export interface AnnotationCardSelection {
   annotationCards: FrameNode[];
   otherSelectedNodes: {
@@ -101,9 +105,9 @@ export function readBadgeRefRecord(node: BaseNode): BadgeRefRecord | null {
 }
 
 export function getAnnotationBadgeRecords(
-  container: FrameNode,
+  parent: AnnotationVisualRootParent,
 ): { node: FrameNode; record: BadgeRefRecord }[] {
-  return container.children.flatMap((child) => {
+  return parent.children.flatMap((child) => {
     if (
       child.type !== "FRAME" ||
       child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) !==
@@ -117,9 +121,11 @@ export function getAnnotationBadgeRecords(
   });
 }
 
-export function getBadgeSubjectNodeIdsByAnnotationId(container: FrameNode): Map<string, string[]> {
+export function getBadgeSubjectNodeIdsByAnnotationId(
+  parent: AnnotationVisualRootParent,
+): Map<string, string[]> {
   const byAnnotationId = new Map<string, string[]>();
-  getAnnotationBadgeRecords(container).forEach(({ record }) => {
+  getAnnotationBadgeRecords(parent).forEach(({ record }) => {
     const subjectNodeIds = byAnnotationId.get(record.annotationId) ?? [];
     subjectNodeIds.push(record.subjectNodeId);
     byAnnotationId.set(record.annotationId, subjectNodeIds);
@@ -127,14 +133,17 @@ export function getBadgeSubjectNodeIdsByAnnotationId(container: FrameNode): Map<
   return byAnnotationId;
 }
 
-export function getBadgeSubjectNodeIds(container: FrameNode, annotationId: string): string[] {
-  return getBadgeSubjectNodeIdsByAnnotationId(container).get(annotationId) ?? [];
+export function getBadgeSubjectNodeIds(
+  parent: AnnotationVisualRootParent,
+  annotationId: string,
+): string[] {
+  return getBadgeSubjectNodeIdsByAnnotationId(parent).get(annotationId) ?? [];
 }
 
 export function getAnnotationCardRecords(
-  container: FrameNode,
+  parent: AnnotationVisualRootParent,
 ): { node: FrameNode; record: AnnotationRecord }[] {
-  return container.children.flatMap((child) => {
+  return parent.children.flatMap((child) => {
     if (!isAnnotationCardNode(child)) {
       return [];
     }
@@ -143,9 +152,9 @@ export function getAnnotationCardRecords(
 }
 
 export function getAnnotationValidationCards(
-  container: FrameNode,
+  parent: AnnotationVisualRootParent,
 ): AnnotationValidationCardInput[] {
-  return container.children.flatMap((child) => {
+  return parent.children.flatMap((child) => {
     if (!isAnnotationCardNode(child) || child.absoluteBoundingBox === null) {
       return [];
     }
@@ -163,9 +172,9 @@ export function getAnnotationValidationCards(
 }
 
 export function getAnnotationValidationBadges(
-  container: FrameNode,
+  parent: AnnotationVisualRootParent,
 ): AnnotationValidationBadgeInput[] {
-  return container.children.flatMap((child) => {
+  return parent.children.flatMap((child) => {
     if (
       child.type !== "FRAME" ||
       child.absoluteBoundingBox === null ||

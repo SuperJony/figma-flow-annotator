@@ -1,10 +1,9 @@
 import {
-  ANNOTATIONS_CONTAINER_NAME,
-  CONNECTORS_CONTAINER_NAME,
   decodeAnnotationReferenceIds,
   decodeConnectorReferenceIds,
   SHARED_PLUGIN_DATA,
   VISUAL_NODE_KINDS,
+  type VisualNodeKind,
 } from "@figma-flow-annotator/core";
 
 export const NAMESPACE = SHARED_PLUGIN_DATA.namespace;
@@ -38,63 +37,26 @@ export function createText(
   return text;
 }
 
-export function ensureContainer(name: string): FrameNode {
-  const existing = findContainer(name);
-  if (existing !== null) {
-    return existing;
-  }
-
-  const container = figma.createFrame();
-  container.name = name;
-  container.fills = [];
-  container.strokes = [];
-  container.clipsContent = false;
-  container.resize(1, 1);
-  container.x = 0;
-  container.y = 0;
-  ensureLayerOrder();
-  return container;
-}
-
-export function findContainer(name: string): FrameNode | null {
-  for (const child of figma.currentPage.children) {
-    if (
-      child.type === "FRAME" &&
-      child.name === name &&
-      child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) ===
-        VISUAL_NODE_KINDS.container
-    ) {
-      return child;
-    }
-  }
-  return null;
+export function getCurrentPageGeneratedChildren(kind: VisualNodeKind): SceneNode[] {
+  return figma.currentPage.children.filter(
+    (child) => child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) === kind,
+  );
 }
 
 export function ensureLayerOrder(): void {
-  const annotations = findContainer(ANNOTATIONS_CONTAINER_NAME);
-  const connectors = findContainer(CONNECTORS_CONTAINER_NAME);
+  const connectors = getCurrentPageGeneratedChildren(VISUAL_NODE_KINDS.flowConnector);
+  const cards = getCurrentPageGeneratedChildren(VISUAL_NODE_KINDS.annotationCard);
+  const badges = getCurrentPageGeneratedChildren(VISUAL_NODE_KINDS.annotationBadge);
 
-  if (annotations !== null) {
-    figma.currentPage.appendChild(annotations);
-  }
-
-  if (annotations !== null && connectors !== null) {
-    const annotationIndex = figma.currentPage.children.indexOf(annotations);
-    const connectorIndex = figma.currentPage.children.indexOf(connectors);
-    if (connectorIndex > annotationIndex) {
-      figma.currentPage.insertChild(annotationIndex, connectors);
-    }
-  }
+  [...connectors, ...cards, ...badges].forEach((node) => {
+    figma.currentPage.appendChild(node);
+  });
 }
 
-export function bringBadgesToFront(container: FrameNode): void {
-  const badges = container.children.filter(
-    (child) =>
-      child.getSharedPluginData(NAMESPACE, SHARED_PLUGIN_DATA.keys.kind) ===
-      VISUAL_NODE_KINDS.annotationBadge,
-  );
+export function bringBadgesToFront(): void {
+  const badges = getCurrentPageGeneratedChildren(VISUAL_NODE_KINDS.annotationBadge);
   badges.forEach((badge) => {
-    container.appendChild(badge);
+    figma.currentPage.appendChild(badge);
   });
 }
 

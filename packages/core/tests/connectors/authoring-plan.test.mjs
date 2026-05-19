@@ -43,13 +43,7 @@ test("plans Flow Connector create authoring by routing and detecting existing di
   assert.equal(plan.batch.record.flowAction, "choose");
   assert.deepEqual(
     plan.batch.operations.map((operation) => operation.type),
-    [
-      "ensure-container",
-      "set-shared-plugin-data",
-      "update-flow-connector",
-      "set-shared-plugin-data",
-      "update-validation-index",
-    ],
+    ["update-flow-connector", "set-shared-plugin-data", "update-validation-index"],
   );
   const indexOperation = plan.batch.operations.at(-1);
   assert.equal(indexOperation.type, "update-validation-index");

@@ -4,19 +4,18 @@ import type {
   FigmaFileOperationBatch,
   SetSharedPluginDataOperation,
 } from "../figma-file/operation-types.ts";
-import {
-  ANNOTATIONS_CONTAINER_NAME,
-  CONNECTORS_CONTAINER_NAME,
-  SHARED_PLUGIN_DATA,
-  VISUAL_NODE_KINDS,
-} from "../shared/plugin-data.ts";
+import { SHARED_PLUGIN_DATA } from "../shared/plugin-data.ts";
 import type {
   AnnotationValidationBadgeInput,
   AnnotationValidationCardInput,
   FlowConnectorValidationConnectorInput,
   FlowConnectorValidationEndpointInput,
 } from "./types.ts";
-import { createValidationIndexRecord, type ValidationIndexRecord } from "./validation-index.ts";
+import {
+  createValidationIndexRecord,
+  mergeValidationIndexRecord,
+  type ValidationIndexRecord,
+} from "./validation-index.ts";
 
 export interface BuildAnnotationValidationIndexInput {
   badges: Pick<AnnotationValidationBadgeInput, "nodeId" | "record">[];
@@ -37,40 +36,21 @@ export interface BuildRepairValidationStateOperationBatchInput {
 
 export interface RepairValidationStateOperationBatch extends FigmaFileOperationBatch {
   kind: "repair-validation-state";
-  repairedContainerRefs: string[];
+  repairedIndexTargetCount: number;
 }
 
 export function buildRepairValidationStateOperationBatch(
   input: BuildRepairValidationStateOperationBatchInput,
 ): RepairValidationStateOperationBatch {
-  const repairedContainerRefs = ["annotations-container", "connectors-container"];
+  const index = mergeValidationIndexRecord(
+    buildAnnotationValidationIndex(input.annotations),
+    buildFlowConnectorValidationIndex(input.flowConnectors),
+  );
   return {
     schemaVersion: 1,
     kind: "repair-validation-state",
-    repairedContainerRefs,
-    operations: [
-      {
-        type: "ensure-container",
-        ref: "annotations-container",
-        name: ANNOTATIONS_CONTAINER_NAME,
-      },
-      setContainerKindOperation("annotations-container"),
-      setValidationIndexOperation(
-        "annotations-container",
-        buildAnnotationValidationIndex(input.annotations),
-      ),
-      {
-        type: "ensure-container",
-        ref: "connectors-container",
-        name: CONNECTORS_CONTAINER_NAME,
-      },
-      setContainerKindOperation("connectors-container"),
-      setValidationIndexOperation(
-        "connectors-container",
-        buildFlowConnectorValidationIndex(input.flowConnectors),
-      ),
-      ...input.cleanBatch.operations,
-    ],
+    repairedIndexTargetCount: 1,
+    operations: [setValidationIndexOperation(index), ...input.cleanBatch.operations],
   };
 }
 
@@ -126,22 +106,10 @@ export function buildFlowConnectorValidationIndex(
   });
 }
 
-function setContainerKindOperation(containerRef: string): SetSharedPluginDataOperation {
+function setValidationIndexOperation(record: ValidationIndexRecord): SetSharedPluginDataOperation {
   return {
     type: "set-shared-plugin-data",
-    target: { kind: "container", ref: containerRef },
-    key: SHARED_PLUGIN_DATA.keys.kind,
-    value: VISUAL_NODE_KINDS.container,
-  };
-}
-
-function setValidationIndexOperation(
-  containerRef: string,
-  record: ValidationIndexRecord,
-): SetSharedPluginDataOperation {
-  return {
-    type: "set-shared-plugin-data",
-    target: { kind: "container", ref: containerRef },
+    target: { kind: "current-page" },
     key: SHARED_PLUGIN_DATA.keys.validationIndex,
     value: record,
   };

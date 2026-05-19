@@ -9,20 +9,22 @@ import {
   VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
 import type { FigmaFileOperationWriter } from "../figma/file-operations";
-import { createText, ensureContainer, localRect, NAMESPACE, solidPaint } from "../figma/runtime";
+import {
+  createText,
+  getCurrentPageGeneratedChildren,
+  localRect,
+  NAMESPACE,
+  solidPaint,
+} from "../figma/runtime";
 
 export function createAnnotationVisualWriter(): FigmaFileOperationWriter {
   return {
     createAnnotationBadge,
     createAnnotationCard,
-    ensureContainer,
   };
 }
 
-function createAnnotationCard(
-  container: FrameNode,
-  operation: CreateAnnotationCardOperation,
-): FrameNode {
+function createAnnotationCard(operation: CreateAnnotationCardOperation): FrameNode {
   const card = figma.createFrame();
   const visual = operation.visual;
   card.name = operation.name;
@@ -32,7 +34,7 @@ function createAnnotationCard(
   card.cornerRadius = visual.frame.cornerRadius;
   card.clipsContent = false;
   card.resize(visual.frame.width, visual.frame.initialHeight);
-  container.appendChild(card);
+  figma.currentPage.appendChild(card);
 
   const title = createText(
     visual.title.name,
@@ -74,7 +76,7 @@ function createAnnotationCard(
   const position = getAnnotationCardBasePosition({
     basePosition: operation.basePosition,
     cardRect: localRect(card),
-    existingCardRects: getExistingAnnotationCardRects(container, card),
+    existingCardRects: getExistingAnnotationCardRects(card),
   });
   card.x = position.x;
   card.y = position.y;
@@ -82,10 +84,7 @@ function createAnnotationCard(
   return card;
 }
 
-function createAnnotationBadge(
-  container: FrameNode,
-  operation: CreateAnnotationBadgeOperation,
-): FrameNode {
+function createAnnotationBadge(operation: CreateAnnotationBadgeOperation): FrameNode {
   const badge = figma.createFrame();
   const visual = operation.visual;
   badge.name = operation.name;
@@ -95,7 +94,7 @@ function createAnnotationBadge(
   badge.cornerRadius = visual.frame.cornerRadius;
   badge.clipsContent = false;
   badge.resize(visual.frame.size, visual.frame.size);
-  container.appendChild(badge);
+  figma.currentPage.appendChild(badge);
   badge.x = operation.position.x;
   badge.y = operation.position.y;
 
@@ -123,8 +122,8 @@ function solidPaintFromRgb(color: RgbColor): SolidPaint {
   return solidPaint(color.r, color.g, color.b);
 }
 
-function getExistingAnnotationCardRects(container: FrameNode, card: FrameNode): Rect[] {
-  return container.children
+function getExistingAnnotationCardRects(card: FrameNode): Rect[] {
+  return getCurrentPageGeneratedChildren(VISUAL_NODE_KINDS.annotationCard)
     .filter(
       (child): child is FrameNode =>
         child !== card &&

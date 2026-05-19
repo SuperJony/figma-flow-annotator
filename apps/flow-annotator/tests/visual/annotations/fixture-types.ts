@@ -98,4 +98,3 @@ export interface FakePageNode extends FakeNode {
 }
 
 export const NAMESPACE = "figma_flow_annotator";
-export const ANNOTATIONS_CONTAINER_NAME = "FFA Annotations";

@@ -71,9 +71,7 @@ Existing package/test setup:
 
 - #4 is the correct next implementation step because #5-#13 all assume shared core, Figma File Operation Batches, schemas, keys, and record builders exist.
 - Starting with UI, validation, routing, or connector trunk work before #4 would continue spreading business rules through the plugin app and cause rework.
-- The existing #2 baseline already creates native Figma visual nodes:
-  - `FFA Annotations`
-  - `FFA Connectors`
+- The existing #2 baseline creates native Figma visual roots directly under the current page:
   - `FFA Annotation Card #<number>`
   - `FFA Annotation Badge #<number>`
   - `FFA Connector <startName> -> <endName>`

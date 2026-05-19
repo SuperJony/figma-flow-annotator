@@ -180,7 +180,6 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
     core.formatRepairValidationStatePanelStatus({
       cleanedEndpointCount: 2,
       removedConnectorRefCount: 2,
-      repairedContainerCount: 2,
     }),
     "Repair Validation State refreshed project validation data, cleaned 2 Flow Endpoint(s), and removed 2 stale connector reference(s).",
   );
@@ -188,7 +187,6 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
     core.formatRepairValidationStatePanelStatus({
       cleanedEndpointCount: 0,
       removedConnectorRefCount: 0,
-      repairedContainerCount: 2,
       validationReport: {
         schemaVersion: 1,
         summary: { all: 3, errors: 1, warnings: 2, info: 0 },
@@ -201,7 +199,6 @@ test("formats panel statuses for connector refresh and stale-index cleanup", asy
     core.buildRepairValidationStatePanelStatusMessage({
       cleanedEndpointCount: 0,
       removedConnectorRefCount: 0,
-      repairedContainerCount: 2,
       validationReport: {
         schemaVersion: 1,
         summary: { all: 1, errors: 1, warnings: 0, info: 0 },

@@ -33,7 +33,6 @@ import {
 import {
   createId,
   createText,
-  ensureContainer,
   ensureFont,
   ensureLayerOrder,
   findContextFrameId,
@@ -57,7 +56,6 @@ const connectRuntime: ConnectRuntime = {
   namespace: NAMESPACE,
   createId,
   createText,
-  ensureContainer,
   ensureLayerOrder,
   findContextFrameId,
   getVisibleBounds,

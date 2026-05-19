@@ -1,13 +1,10 @@
 import {
-  ANNOTATIONS_CONTAINER_NAME,
-  CONNECTORS_CONTAINER_NAME,
   createEmptyValidationIndexRecord,
   decodeValidationIndexRecord,
   mergeValidationIndexRecord,
   SHARED_PLUGIN_DATA,
   type ValidationIndexReadiness,
   type ValidationIndexRecord,
-  VISUAL_NODE_KINDS,
 } from "@figma-flow-annotator/core";
 
 interface ValidationIndexRuntime {
@@ -30,12 +27,7 @@ export function readMergedValidationIndexReadiness(
 ):
   | ({ kind: "valid"; index: ValidationIndexRecord } & ValidationIndexReadiness)
   | Exclude<ValidationIndexReadiness, { kind: "valid" }> {
-  const containers = findValidationIndexContainers(runtime);
-  if (containers.length === 0) {
-    return { kind: "missing" };
-  }
-
-  const { invalidSourceNodeIds, records } = readValidationIndexRecords(runtime, containers);
+  const { invalidSourceNodeIds, records } = readValidationIndexRecords(runtime);
   if (invalidSourceNodeIds.length > 0) {
     return { kind: "invalid", sourceNodeIds: invalidSourceNodeIds };
   }
@@ -49,43 +41,26 @@ export function readMergedValidationIndexReadiness(
   };
 }
 
-export function findValidationIndexContainers(runtime: ValidationIndexRuntime): FrameNode[] {
-  return figma.currentPage.children.flatMap((child) => {
-    if (
-      child.type !== "FRAME" ||
-      (child.name !== ANNOTATIONS_CONTAINER_NAME && child.name !== CONNECTORS_CONTAINER_NAME) ||
-      child.getSharedPluginData(runtime.namespace, SHARED_PLUGIN_DATA.keys.kind) !==
-        VISUAL_NODE_KINDS.container
-    ) {
-      return [];
-    }
-    return [child];
-  });
-}
-
 function readValidationIndexRecords(
   runtime: ValidationIndexRuntime,
-  containers = findValidationIndexContainers(runtime),
 ): ValidationIndexRecordReadResult {
   const invalidSourceNodeIds: string[] = [];
   const records: ValidationIndexRecord[] = [];
 
-  containers.forEach((container) => {
-    const raw = container.getSharedPluginData(
-      runtime.namespace,
-      SHARED_PLUGIN_DATA.keys.validationIndex,
-    );
-    if (raw.length === 0) {
-      return;
-    }
+  const raw = figma.currentPage.getSharedPluginData(
+    runtime.namespace,
+    SHARED_PLUGIN_DATA.keys.validationIndex,
+  );
+  if (raw.length === 0) {
+    return { invalidSourceNodeIds, records };
+  }
 
-    const record = decodeValidationIndexRecord(raw);
-    if (record === null) {
-      invalidSourceNodeIds.push(container.id);
-      return;
-    }
-    records.push(record);
-  });
+  const record = decodeValidationIndexRecord(raw);
+  if (record === null) {
+    invalidSourceNodeIds.push(figma.currentPage.id);
+    return { invalidSourceNodeIds, records };
+  }
+  records.push(record);
 
   return { invalidSourceNodeIds, records };
 }

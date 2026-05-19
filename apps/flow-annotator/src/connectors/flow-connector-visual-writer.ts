@@ -17,7 +17,6 @@ interface FlowConnectorVisualWriterRuntime {
     fills: SolidPaint,
     width: number,
   ): TextNode;
-  ensureContainer(name: string): FrameNode;
 }
 
 export function createFlowConnectorVisualWriter(
@@ -25,9 +24,7 @@ export function createFlowConnectorVisualWriter(
   existingNodes: Map<string, BaseNode>,
 ): FigmaFileOperationWriter {
   return {
-    createFlowConnector: (container, operation) =>
-      createFlowConnectorRoot(container, operation, runtime),
-    ensureContainer: runtime.ensureContainer,
+    createFlowConnector: (operation) => createFlowConnectorRoot(operation, runtime),
     updateFlowConnector: (operation) =>
       updateFlowConnectorRoot(
         resolveFlowConnectorVisualRoot(operation.targetNodeId, existingNodes),
@@ -64,12 +61,11 @@ export function resolveFlowConnectorVisualRoot(
 }
 
 function createFlowConnectorRoot(
-  container: FrameNode,
   operation: CreateFlowConnectorOperation,
   runtime: FlowConnectorVisualWriterRuntime,
 ): GroupNode {
   const visualNodes = createConnectorVisualNodes(operation.visual, runtime);
-  const connectorRoot = figma.group(visualNodes, container);
+  const connectorRoot = figma.group(visualNodes, figma.currentPage);
   connectorRoot.name = operation.name;
   return connectorRoot;
 }
