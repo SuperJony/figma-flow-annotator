@@ -5,27 +5,39 @@
   "description": "Figma Flow Annotator plugin",
   "main": "code.js",
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/plugin/code.ts --bundle --target=es2017 --outfile=code.js && pnpm run check:figma-syntax",
+    "build": "pnpm run build:ui && tsc --noEmit && tsc -p tsconfig.panel.json --noEmit && esbuild src/plugin/code.ts --bundle --target=es2017 --outfile=code.js && pnpm run check:figma-syntax",
+    "build:ui": "node scripts/build-ui.mjs",
     "check:figma-syntax": "node --check code.js",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "test": "node --test tests/annotations/*.test.mjs tests/connectors/*.test.mjs tests/figma/*.test.mjs tests/validation/*.test.mjs",
-    "test:visual": "playwright test -c playwright.config.ts",
+    "test:visual": "pnpm run build:ui && playwright test -c playwright.config.ts",
     "test:visual:annotate": "playwright test -c playwright.config.ts annotations/visual.spec.ts",
     "test:visual:connect": "playwright test -c playwright.config.ts connectors/visual.spec.ts",
-    "test:visual:panel": "playwright test -c playwright.config.ts panel/ui.spec.ts",
+    "test:visual:panel": "pnpm run build:ui && playwright test -c playwright.config.ts panel/ui.spec.ts",
+    "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
     "verify": "pnpm run test && pnpm run test:visual && pnpm run lint && pnpm run build",
     "watch": "esbuild src/plugin/code.ts --bundle --target=es2017 --outfile=code.js --watch"
   },
   "author": "",
   "license": "",
   "dependencies": {
-    "@figma-flow-annotator/core": "workspace:*"
+    "@base-ui/react": "^1.5.0",
+    "@figma-flow-annotator/core": "workspace:*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@figma/plugin-typings": "*",
     "@playwright/test": "^1.59.1",
+    "@tailwindcss/cli": "^4.3.0",
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
     "esbuild": "^0.28.0",
+    "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3"
   }
 }

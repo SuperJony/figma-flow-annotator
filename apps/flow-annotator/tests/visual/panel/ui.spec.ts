@@ -3,11 +3,87 @@ import { expect, test } from "@playwright/test";
 import { loadPanelFixture, panelFixtureDefinitions } from "./fixtures";
 
 test.describe("Plugin panel browser visuals", () => {
+  test("panel typography stays readable without root scaling", async ({ page }) => {
+    const fixtureNames = [
+      "initial-empty-selection",
+      "two-pending-connector-endpoints",
+      "validate-route-label-trunk-report",
+    ];
+
+    for (const fixtureName of fixtureNames) {
+      const definition = panelFixtureDefinitions.find(
+        (fixtureDefinition) => fixtureDefinition.name === fixtureName,
+      );
+
+      if (definition === undefined) {
+        throw new Error(`${fixtureName} fixture is missing.`);
+      }
+
+      await loadPanelFixture(page, definition);
+
+      const typographyAudit = await page.evaluate(() => {
+        const isVisible = (element: HTMLElement) => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden"
+          );
+        };
+        const hasReadableTextSurface = (element: HTMLElement) =>
+          element.matches("button,input,textarea,h1,h2") ||
+          element.textContent?.trim().length !== 0;
+        const textElements = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            ".shell :is(h1,h2,button,input,textarea,span,div)",
+          ),
+        )
+          .filter((element) => isVisible(element) && hasReadableTextSurface(element))
+          .map((element) => {
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            const label =
+              element.id ||
+              element.getAttribute("data-tab") ||
+              element.getAttribute("aria-label") ||
+              element.textContent?.trim().slice(0, 40) ||
+              element.tagName.toLowerCase();
+
+            return {
+              fontSize: Number.parseFloat(style.fontSize),
+              height: Number(rect.height.toFixed(2)),
+              label,
+              selector: element.tagName.toLowerCase(),
+            };
+          });
+        const shell = document.querySelector<HTMLElement>(".shell");
+        const shellStyle = shell ? getComputedStyle(shell) : null;
+
+        return {
+          rootFontSize: getComputedStyle(document.documentElement).fontSize,
+          shellTransform: shellStyle?.transform ?? "",
+          shellZoom: shellStyle?.zoom ?? "",
+          textElements,
+        };
+      });
+
+      expect(typographyAudit.rootFontSize).toBe("16px");
+      expect(typographyAudit.shellTransform).toBe("none");
+      expect(typographyAudit.shellZoom).toBe("1");
+      expect(typographyAudit.textElements.filter((element) => element.fontSize < 10)).toEqual([]);
+    }
+  });
+
   for (const definition of panelFixtureDefinitions) {
     test(`${definition.name} renders from the real panel source`, async ({ page }) => {
       await loadPanelFixture(page, definition);
 
-      await expect(page.locator("h1")).toHaveText("Flow Annotator");
+      await expect(page.locator("header")).toHaveCount(0);
+      await expect(page.locator("h1")).toHaveCount(0);
+      await expect(page.locator("#close")).toHaveCount(0);
+      await expect(page.locator(".shell")).toHaveCSS("background-color", "rgb(255, 255, 255)");
       await expect(page.locator(".tab")).toHaveText(["Annotate", "Connect", "Validate"]);
       await expect(page.locator("section")).toHaveCount(3);
 
@@ -235,4 +311,52 @@ test.describe("Plugin panel browser visuals", () => {
       await expect(page.locator("#status")).toHaveText(command.status);
     });
   }
+
+  test("validation operations are synchronously gated before React state flushes", async ({
+    page,
+  }) => {
+    const definition = panelFixtureDefinitions.find(
+      (fixtureDefinition) => fixtureDefinition.name === "validate-connector-report",
+    );
+
+    if (definition === undefined) {
+      throw new Error("validate-connector-report fixture is missing.");
+    }
+
+    await loadPanelFixture(page, definition);
+
+    const postedMessages: unknown[] = [];
+    await page.exposeFunction("captureValidationGatePostMessage", (message: unknown) => {
+      postedMessages.push(message);
+    });
+    await page.evaluate(() => {
+      const windowWithCapture = window as unknown as {
+        captureValidationGatePostMessage: (message: unknown) => void;
+      };
+      const originalPostMessage = window.parent.postMessage.bind(window.parent);
+      window.parent.postMessage = ((
+        message: unknown,
+        targetOrigin: string,
+        transfer?: Transferable[],
+      ) => {
+        windowWithCapture.captureValidationGatePostMessage(message);
+        originalPostMessage(message, targetOrigin, transfer ?? []);
+      }) as typeof window.parent.postMessage;
+    });
+
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>("#runValidation")?.click();
+      document.querySelector<HTMLButtonElement>("#cleanStaleIndexes")?.click();
+    });
+
+    expect(postedMessages).toEqual([
+      {
+        pluginMessage: {
+          type: "validate-bindings",
+        },
+      },
+    ]);
+    await expect(page.locator("#panelValidate")).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator("#cleanStaleIndexes")).toBeDisabled();
+  });
 });

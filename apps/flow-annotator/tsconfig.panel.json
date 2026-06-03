@@ -5,10 +5,10 @@
     "moduleResolution": "bundler",
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "lib": ["es2020"],
+    "jsx": "react-jsx",
+    "lib": ["dom", "dom.iterable", "es2020"],
     "strict": true,
-    "typeRoots": ["./node_modules/@figma"]
+    "types": ["react", "react-dom"]
   },
-  "exclude": ["src/panel/**"],
-  "include": ["src/**/*.ts"]
+  "include": ["src/panel/**/*.ts", "src/panel/**/*.tsx"]
 }
