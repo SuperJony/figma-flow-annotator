@@ -13,6 +13,12 @@ Issues and PRDs for this repo live as GitHub issues in `SuperJony/figma-flow-ann
 
 `gh` can infer the repo from `git remote -v` when run inside this clone, but pass `--repo SuperJony/figma-flow-annotator` when running from another directory.
 
+## Pull requests as a triage surface
+
+**PRs as a request surface: no.** `/triage` should not include external PRs in the issue triage queue.
+
+If this is later changed to `yes`, external PRs should run through the same labels and states as issues, using the `gh pr` equivalents.
+
 ## When a skill says "publish to the issue tracker"
 
 Create a GitHub issue.

@@ -14,11 +14,19 @@
 - A failed command against a hand-written path proves only that exact path is wrong. Search by number, topic, or `rg` before drawing a broader conclusion.
 - For GitHub issues and PRDs, use `gh issue view <number> --repo SuperJony/figma-flow-annotator --comments` and inspect labels/body/comments before acting on a handoff summary.
 
-## Project Surfaces
+## Agent skills
 
-- Issues and PRDs live in GitHub Issues for `SuperJony/figma-flow-annotator`. See `docs/agents/issue-tracker.md`.
-- Use the default Matt Pocock skills triage labels. See `docs/agents/triage-labels.md`.
-- Domain docs use a single-context layout: `CONTEXT.md` plus relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+### Issue tracker
+
+Issues and PRDs live in GitHub Issues for `SuperJony/figma-flow-annotator`; external PRs are not a triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default Matt Pocock skills triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use the single-context layout: root `CONTEXT.md` plus ADRs under `docs/adr/`. See `docs/agents/domain.md`.
 
 ## Code-Change Verification
 
