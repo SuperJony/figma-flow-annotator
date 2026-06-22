@@ -64,9 +64,21 @@ _Avoid_: Anchor, endpoint coordinate
 The boundary point where a **Flow Connector** enters or exits a **Flow Endpoint**.
 _Avoid_: Center point, anchor coordinate
 
+**Connection Side**:
+The preferred side of a **Flow Endpoint** used to derive a **Connection Point**, such as top, right, bottom, left, or auto.
+_Avoid_: Endpoint selection, anchor side
+
 **Flow Connector**:
 A standardized visual connector that represents a directed relationship from one Figma node to another.
 _Avoid_: Arrow, line, wire
+
+**Connector Style**:
+The visual styling applied to a **Flow Connector** route and its endpoint markers.
+_Avoid_: Line style, arrow style
+
+**Endpoint Marker**:
+The visual shape drawn at the start or end of a **Flow Connector** route.
+_Avoid_: Connection Point, endpoint node
 
 **Connector Route**:
 The visual path of a **Flow Connector** between its **Connection Points**.
@@ -145,7 +157,9 @@ _Avoid_: Document Change Plan, plan
 - A **Flow Connector** belongs to exactly one **Owner Context Frame**.
 - A cross-frame **Flow Connector** belongs to the start endpoint's **Context Frame**.
 - Creating a **Flow Connector** requires exactly two **Flow Endpoints**.
+- A **Flow Connector** may record one start **Connection Side** and one end **Connection Side**.
 - A **Flow Connector** enters and exits **Flow Endpoints** through **Connection Points**.
+- A **Connection Point** may be derived from a **Connection Side**.
 - A **Flow Connector** uses an **Orthogonal Route**.
 - An **Orthogonal Route** may render bends with **Rounded Corners**.
 - Only one **Flow Connector** may exist for the same ordered start and end **Flow Endpoints**.
@@ -153,6 +167,10 @@ _Avoid_: Document Change Plan, plan
 - Multiple **Flow Connectors** entering the same **Flow Endpoint** from the same direction share a **Connector Trunk** near that endpoint.
 - **Flow Connectors** with different end **Flow Endpoints** or opposite directions do not share a **Connector Trunk**.
 - A **Flow Connector** may have one **Flow Action**.
+- A **Connector Style** is not part of a **Flow Connector**'s directed start/end identity.
+- A **Connector Style** may include start and end **Endpoint Markers**.
+- A **Connector Style** may be applied when creating or refreshing **Flow Connectors**.
+- A **Connector Style** does not change whether a **Flow Connector** uses an **Orthogonal Route**.
 - **Context Frames** and **Annotation Cards** are **Connector Obstacles**.
 - **Annotation Badges** are not **Connector Obstacles**, but should appear above **Flow Connectors**.
 - An **Annotation** remains valid when only its optional **Annotation Badge** is deleted.
