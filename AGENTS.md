@@ -1,39 +1,23 @@
 # Figma Flow Annotator Agent Guide
 
-## Start Here
+## Orientation
 
-- Ground repo work in live evidence: current git state, actual files, GitHub issues, package scripts, and runtime/test output.
+- pnpm monorepo: `apps/flow-annotator` (the Figma plugin) and `packages/core`.
 - Read `CONTEXT.md` for domain vocabulary before naming concepts in issues, tests, docs, or code.
 - Read relevant ADRs under `docs/adr/` before changing behavior. If a change conflicts with an ADR, surface the conflict before implementing.
-- Use the linked skill docs for details, but keep this file as the execution gate for this repo.
+- Issues and PRDs live in GitHub Issues for `SuperJony/figma-flow-annotator`. Conventions: `docs/agents/issue-tracker.md` (gh usage, PRs are not a triage surface), `docs/agents/triage-labels.md` (label set), `docs/agents/domain.md` (how to consume domain docs).
 
-## Reference Resolution
+## Build & Test
 
-- Resolve ADR, handoff, and issue references from live sources before claiming they exist, are missing, or say something specific.
-- Do not reconstruct filenames from memory, prose, or likely slug wording. For ADR numbers, first search the repo, for example `git ls-files 'docs/adr/0047*'` or `find docs/adr -maxdepth 1 -name '0047*' -print`.
-- A failed command against a hand-written path proves only that exact path is wrong. Search by number, topic, or `rg` before drawing a broader conclusion.
-- For GitHub issues and PRDs, use `gh issue view <number> --repo SuperJony/figma-flow-annotator --comments` and inspect labels/body/comments before acting on a handoff summary.
-
-## Agent skills
-
-### Issue tracker
-
-Issues and PRDs live in GitHub Issues for `SuperJony/figma-flow-annotator`; external PRs are not a triage surface. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the default Matt Pocock skills triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Use the single-context layout: root `CONTEXT.md` plus ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+- Full gate: `pnpm verify` (core tests + flow-annotator verify + biome).
+- Unit tests: `pnpm --filter @figma-flow-annotator/flow-annotator test`.
+- Visual regression: `pnpm --filter @figma-flow-annotator/flow-annotator test:visual` for all visual domains, or the focused `test:visual:annotate` / `test:visual:connect` / `test:visual:panel` scripts documented in `apps/flow-annotator/README.md`.
 
 ## Code-Change Verification
 
-- For any code modification, automatically invoke the Codex `@verification` subagent for an independent audit before reporting completion.
+- For any code modification, get an independent verification audit before reporting completion — e.g. Claude Code's `/verify` skill or a peer review from another agent CLI.
 - Address actionable verification findings before final delivery, or report unresolved risk explicitly.
-- For changes that may affect **Annotation Card** or **Annotation Badge** rendering, **Flow Connector** route/SVG/label rendering, plugin panel markup/styles/scripts, Playwright visual fixtures, or visual snapshots, include the browser visual regression surface.
-- Use `pnpm --filter @figma-flow-annotator/flow-annotator test:visual` for all visual domains, or the focused `test:visual:annotate`, `test:visual:connect`, and `test:visual:panel` scripts documented in `apps/flow-annotator/README.md` while developing.
+- For changes that may affect **Annotation Card** or **Annotation Badge** rendering, **Flow Connector** route/SVG/label rendering, plugin panel markup/styles/scripts, Playwright visual fixtures, or visual snapshots, include the visual regression surface (scripts above).
 - Use `pnpm verify` before completion when visual changes are mixed with logic changes or when the affected surface is uncertain.
 
 ## Visual Baselines
