@@ -10,6 +10,7 @@
     "check:figma-syntax": "node --check code.js",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
+    "prototype:connect-autoflow": "node prototype/autoflow-connect/server.mjs",
     "test": "node --test tests/annotations/*.test.mjs tests/connectors/*.test.mjs tests/figma/*.test.mjs tests/validation/*.test.mjs",
     "test:visual": "pnpm run build:ui && playwright test -c playwright.config.ts",
     "test:visual:annotate": "playwright test -c playwright.config.ts annotations/visual.spec.ts",
